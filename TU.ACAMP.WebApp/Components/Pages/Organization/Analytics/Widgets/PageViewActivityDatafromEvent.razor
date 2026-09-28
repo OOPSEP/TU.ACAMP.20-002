@@ -1,0 +1,388 @@
+@using System.Globalization
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+
+<RadzenStack Gap="1rem">
+    @if (YearGroups == null || !YearGroups.Any())
+    {
+        <div class="p-4 text-center text-muted border rounded bg-light">
+            <RadzenIcon Icon="info" Style="font-size: 32px;" Class="mb-2" />
+            <div>No activity emission data available for the selected organization context.</div>
+        </div>
+    }
+    else
+    {
+        <!-- Year Tabs -->
+        <RadzenTabs RenderMode="TabRenderMode.Client" SelectedIndex="@_selectedYearIndex" SelectedIndexChanged="@OnYearTabChanged">
+            <Tabs>
+                @foreach (var yearGroup in YearGroups)
+                {
+                    // [2026-09-13: Antigravity] Format Year Tab Title with Year and Start-End month abbreviation (e.g. 2025 Jan-Dec, 2025 Oct-Sep)
+                    string startMonthName = new DateTime(2000, StartMonth >= 1 && StartMonth <= 12 ? StartMonth : 1, 1).ToString("MMM", CultureInfo.InvariantCulture);
+                    int endMonth = (((StartMonth >= 1 && StartMonth <= 12 ? StartMonth : 1) + 10) % 12) + 1;
+                    string endMonthName = new DateTime(2000, endMonth, 1).ToString("MMM", CultureInfo.InvariantCulture);
+                    string yearTitle = yearGroup.Year == 0 ? "All Years" : $"{yearGroup.Year} ({startMonthName}-{endMonthName})";
+                    <RadzenTabsItem Text="@yearTitle">
+                        <!-- Nested Scope Tabs (All Scopes, Scope 1, Scope 2, Scope 3, Separate Report) -->
+                        <RadzenTabs RenderMode="TabRenderMode.Client" Class="mt-2">
+                            <Tabs>
+                                @foreach (var scopeGroup in yearGroup.Scopes)
+                                {
+                                    string scopeTitle = $"{scopeGroup.ScopeName} ({((double)scopeGroup.TotalKgCO2e / 1000.0):N2} tCO₂e)";
+                                    <RadzenTabsItem Text="@scopeTitle">
+                                        <div class="py-2">
+                                            @{
+                                                var displayGroups = GetFilteredItems(scopeGroup.ActivityGroups);
+                                            }
+
+                                            @if (!displayGroups.Any())
+                                            {
+                                                <div class="p-4 text-center text-muted border rounded bg-light">
+                                                    <RadzenIcon Icon="search_off" Style="font-size: 28px;" Class="mb-2" />
+                                                    <div>No activity groups found matching the current search / materiality criteria.</div>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <RadzenAccordion Multiple="true" Class="shadow-sm border rounded">
+                                                    <Items>
+                                                        @foreach (var item in displayGroups)
+                                                        {
+                                                            string itemKey = GetItemKey(yearGroup.Year, scopeGroup.ScopeNo, item.ActivityGroupId);
+                                                            bool isSelected = _expandedKeys.Contains(itemKey);
+                                                            double tCO2e = (double)item.KgCO2e / 1000.0;
+                                                            double scopePct = (double)item.SharePercent;
+                                                            double overallPct = (double)item.OverallSharePercent;
+                                                            string barColor = GetColorGradient(overallPct);
+                                                            string scopeBadgeClass = item.ScopeNo switch
+                                                            {
+                                                                eTgoScopeNo.Scope1 => "bg-danger text-white",
+                                                                eTgoScopeNo.Scope2 => "bg-warning text-dark",
+                                                                eTgoScopeNo.Scope3 => "bg-info text-white",
+                                                                _ => "bg-secondary text-white"
+                                                            };
+                                                            string scopeLabel = item.ScopeNo switch
+                                                            {
+                                                                eTgoScopeNo.Scope1 => "Scope 1",
+                                                                eTgoScopeNo.Scope2 => "Scope 2",
+                                                                eTgoScopeNo.Scope3 => "Scope 3",
+                                                                _ => "Separate"
+                                                            };
+
+                                                            <RadzenAccordionItem Text="@($"{item.Code} - {item.Title}")" Icon="analytics"
+                                                                                 Selected="@isSelected"
+                                                                                 SelectedChanged="@(val => OnAccordionItemSelectChanged(itemKey, val))">
+                                                                <Template>
+                                                                    <div class="d-flex align-items-center justify-content-between w-100 pe-3 flex-wrap gap-2">
+                                                                        <!-- Left Info: Code, Scope Badge, Title, Hotspot Badge -->
+                                                                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                                                                            <span class="badge @scopeBadgeClass px-2 py-1" style="font-size: 0.75rem;">
+                                                                                @scopeLabel
+                                                                            </span>
+
+                                                                            @if (!string.IsNullOrEmpty(item.Code))
+                                                                            {
+                                                                                <span class="badge bg-light text-dark border fw-bold px-2 py-1" style="font-size: 0.78rem;">
+                                                                                    @item.Code
+                                                                                </span>
+                                                                            }
+
+                                                                            <span class="fw-bold text-dark me-2" style="font-size: 0.95rem;">
+                                                                                @item.Title
+                                                                            </span>
+
+                                                                            @if ((double)item.OverallSharePercent >= ThresholdPercent)
+                                                                            {
+                                                                                <span class="badge bg-danger text-white px-2 py-1" title="@($"Exceeds Materiality Threshold (≥ {ThresholdPercent:0.0}% Overall Footprint)")" style="font-size: 0.7rem;">
+                                                                                    🔥 HOTSPOT (&ge; @ThresholdPercent.ToString("0.0")%)
+                                                                                </span>
+                                                                            }
+                                                                        </div>
+
+                                                                        <!-- Right Info: tCO2e bar, Scope Share %, Overall Share % -->
+                                                                        <div class="d-flex align-items-center gap-3 ms-auto flex-wrap">
+                                                                            <!-- tCO2e Bar -->
+                                                                            <div style="min-width: 130px; position: relative; height: 22px; background-color: #f1f5f9; border-radius: 6px; overflow: hidden; border: 1px solid #cbd5e1;">
+                                                                                <div style="height: 100%; width: @(Math.Min(100.0, overallPct).ToString("F1", CultureInfo.InvariantCulture))%; background-color: @barColor; transition: width 0.3s ease;">
+                                                                                </div>
+                                                                                <span style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 700; color: #0f172a; text-shadow: 0 0 2px #ffffff;">
+                                                                                    @tCO2e.ToString("N2") tCO₂e
+                                                                                </span>
+                                                                            </div>
+
+                                                                            <!-- Scope Share Badge -->
+                                                                            <span class="badge bg-primary-subtle text-primary border px-2 py-1" style="font-size: 0.78rem;" title="Share within Scope">
+                                                                                Scope: @scopePct.ToString("F1")%
+                                                                            </span>
+
+                                                                            <!-- Overall Share Badge -->
+                                                                            <span class="badge bg-success-subtle text-success-emphasis border px-2 py-1" style="font-size: 0.78rem;" title="Share of Total Organization Footprint">
+                                                                                Overall: @overallPct.ToString("F1")%
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+                                                                </Template>
+
+                                                                <ChildContent>
+                                                                    <div class="p-3 bg-light border-top rounded-bottom">
+                                                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                            <h6 class="fw-bold text-secondary mb-0">
+                                                                                <RadzenIcon Icon="topic" Class="me-1" />
+                                                                                Detailed Activity Topics & Master Emission Sources (@item.Topics.Count topics)
+                                                                            </h6>
+                                                                            <span class="small text-muted">
+                                                                                Subtotal: <strong class="text-danger">@((item.KgCO2e / 1000m).ToString("N2"))</strong> tCO₂e (@item.KgCO2e.ToString("N2") kgCO₂e)
+                                                                            </span>
+                                                                        </div>
+
+                                                                        @if (item.Topics == null || !item.Topics.Any())
+                                                                        {
+                                                                            <div class="text-muted small italic p-2 bg-white rounded border text-center">
+                                                                                No specific topics recorded under this activity group.
+                                                                            </div>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            <RadzenDataGrid Data="@item.Topics" TItem="TopicItemEmissionsDto" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Density="Density.Compact" Class="bg-white border rounded" Style="@GridStyles.Default">
+                                                                                <Columns>
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="#" Width="45px" TextAlign="TextAlign.Center">
+                                                                                        <Template Context="t">
+                                                                                            @(item.Topics.IndexOf(t) + 1)
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="Topic Title" Property="TopicTitle" MinWidth="200px">
+                                                                                        <Template Context="t">
+                                                                                            <span class="fw-semibold text-dark">@t.TopicTitle</span>
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="Master Emission Source" Property="SourceName" MinWidth="220px">
+                                                                                        <Template Context="t">
+                                                                                            <span class="text-secondary small">@t.SourceName</span>
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="Recorded Qty" Width="130px" TextAlign="TextAlign.Right">
+                                                                                        <Template Context="t">
+                                                                                            <span class="fw-bold text-dark">@t.Quantity.ToString("N2")</span>
+                                                                                            <span class="text-muted small ms-1">@t.UnitName</span>
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="EF (kgCO₂e/unit)" Width="140px" TextAlign="TextAlign.Right">
+                                                                                        <Template Context="t">
+                                                                                            <span class="small text-secondary">@t.EF.ToString("G6")</span>
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="Emissions (kgCO₂e)" Width="150px" TextAlign="TextAlign.Right">
+                                                                                        <Template Context="t">
+                                                                                            <span class="fw-bold text-danger">@t.KgCO2e.ToString("N2")</span>
+                                                                                            <span class="text-muted small ms-1">kg</span>
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+
+                                                                                    <RadzenDataGridColumn TItem="TopicItemEmissionsDto" Title="Emissions (tCO₂e)" Width="140px" TextAlign="TextAlign.Right">
+                                                                                        <Template Context="t">
+                                                                                            <span class="fw-bold text-danger">@((t.KgCO2e / 1000m).ToString("N2"))</span>
+                                                                                            <span class="text-muted small ms-1">t</span>
+                                                                                        </Template>
+                                                                                    </RadzenDataGridColumn>
+                                                                                </Columns>
+                                                                            </RadzenDataGrid>
+                                                                        }
+                                                                    </div>
+                                                                </ChildContent>
+                                                            </RadzenAccordionItem>
+                                                        }
+                                                    </Items>
+                                                </RadzenAccordion>
+                                            }
+                                        </div>
+                                    </RadzenTabsItem>
+                                }
+                            </Tabs>
+                        </RadzenTabs>
+                    </RadzenTabsItem>
+                }
+            </Tabs>
+        </RadzenTabs>
+    }
+</RadzenStack>
+
+@code {
+    [Parameter] public List<YearEmissionsGroupDto>? YearGroups { get; set; }
+    // [2026-09-13: Antigravity] StartMonth for fiscal cycle display in Year Tabs (1 = Jan, 10 = Oct, etc.)
+    [Parameter] public int StartMonth { get; set; } = 1;
+    [Parameter] public bool IsMateriality { get; set; } = false;
+    [Parameter] public double ThresholdPercent { get; set; } = 5.0;
+    [Parameter] public string SearchText { get; set; } = string.Empty;
+    [Parameter] public string SortBy { get; set; } = "code_asc";
+    [Parameter] public bool IsAllExpanded { get; set; } = false;
+    [Parameter] public int? SelectedYear { get; set; }
+    [Parameter] public EventCallback<int?> SelectedYearChanged { get; set; }
+
+    private int _selectedYearIndex = 0;
+    private HashSet<string> _expandedKeys = new();
+    private bool _lastIsAllExpanded = false;
+
+    protected override void OnParametersSet()
+    {
+        if (SelectedYear.HasValue && YearGroups != null)
+        {
+            var idx = YearGroups.FindIndex(yg => yg.Year == SelectedYear.Value);
+            if (idx >= 0)
+            {
+                _selectedYearIndex = idx;
+            }
+        }
+
+        if (IsAllExpanded != _lastIsAllExpanded)
+        {
+            _lastIsAllExpanded = IsAllExpanded;
+            if (IsAllExpanded)
+            {
+                ExpandAll();
+            }
+            else
+            {
+                _expandedKeys.Clear();
+            }
+        }
+    }
+
+    private void ExpandAll()
+    {
+        _expandedKeys.Clear();
+        if (YearGroups != null)
+        {
+            foreach (var yg in YearGroups)
+            {
+                foreach (var sg in yg.Scopes)
+                {
+                    foreach (var ag in sg.ActivityGroups)
+                    {
+                        _expandedKeys.Add(GetItemKey(yg.Year, sg.ScopeNo, ag.ActivityGroupId));
+                    }
+                }
+            }
+        }
+    }
+
+    private string GetItemKey(int year, eTgoScopeNo scopeNo, int agId) => $"{year}_{(int)scopeNo}_{agId}";
+
+    private void OnAccordionItemSelectChanged(string key, bool isSelected)
+    {
+        if (isSelected)
+        {
+            _expandedKeys.Add(key);
+        }
+        else
+        {
+            _expandedKeys.Remove(key);
+        }
+    }
+
+    private async Task OnYearTabChanged(int index)
+    {
+        _selectedYearIndex = index;
+        if (YearGroups != null && index >= 0 && index < YearGroups.Count)
+        {
+            var yr = YearGroups[index].Year;
+            await SelectedYearChanged.InvokeAsync(yr > 0 ? yr : null);
+        }
+    }
+
+    private List<ActivityGroupEmissionsDto> GetFilteredItems(List<ActivityGroupEmissionsDto> items)
+    {
+        if (items == null) return new();
+
+        var query = items.AsEnumerable();
+
+        if (IsMateriality)
+        {
+            query = query.Where(i => (double)i.OverallSharePercent >= ThresholdPercent);
+        }
+
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            var q = SearchText.Trim().ToLowerInvariant();
+            query = query.Where(i => (i.Title ?? string.Empty).ToLowerInvariant().Contains(q) ||
+                                     (i.Code ?? string.Empty).ToLowerInvariant().Contains(q) ||
+                                     i.Topics.Any(t => t.TopicTitle.ToLowerInvariant().Contains(q) || t.SourceName.ToLowerInvariant().Contains(q)));
+        }
+
+        return SortBy switch
+        {
+            "emissions_desc" => query.OrderByDescending(i => i.KgCO2e).ThenBy(i => i.Code).ToList(),
+            "emissions_asc" => query.OrderBy(i => i.KgCO2e).ThenBy(i => i.Code).ToList(),
+            "name_asc" => query.OrderBy(i => i.Title).ThenBy(i => i.Code).ToList(),
+            _ => query.OrderBy(i => i.Code).ThenBy(i => i.Title).ToList() // "code_asc"
+        };
+    }
+
+    private string GetColorGradient(double percentage)
+    {
+        percentage = Math.Max(0, Math.Min(100, percentage));
+
+        int r, g, b;
+        if (percentage < 50)
+        {
+            double factor = percentage / 50.0;
+            r = (int)(34 + (234 - 34) * factor);
+            g = (int)(197 + (179 - 197) * factor);
+            b = (int)(94 + (8 - 94) * factor);
+        }
+        else
+        {
+            double factor = (percentage - 50.0) / 50.0;
+            r = (int)(234 + (239 - 234) * factor);
+            g = (int)(179 + (68 - 179) * factor);
+            b = (int)(8 + (68 - 8) * factor);
+        }
+
+        return $"rgb({r}, {g}, {b})";
+    }
+}
+
+@code {
+    public class YearEmissionsGroupDto
+    {
+        public int Year { get; set; }
+        public List<ScopeEmissionsGroupDto> Scopes { get; set; } = new();
+    }
+
+    public class ScopeEmissionsGroupDto
+    {
+        public eTgoScopeNo ScopeNo { get; set; } // 0 = All Scopes, 1 = Scope 1, 2 = Scope 2, 3 = Scope 3, 4 = Separate Report
+        public string ScopeName { get; set; } = string.Empty;
+        public decimal TotalKgCO2e { get; set; }
+        public List<ActivityGroupEmissionsDto> ActivityGroups { get; set; } = new();
+    }
+
+    public class ActivityGroupEmissionsDto
+    {
+        public int ActivityGroupId { get; set; }
+        public eTgoScopeNo ScopeNo { get; set; }
+        public string ScopeName { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public decimal KgCO2e { get; set; }
+        public decimal SharePercent { get; set; }
+        public decimal OverallSharePercent { get; set; }
+        public List<TopicItemEmissionsDto> Topics { get; set; } = new();
+    }
+
+    public class TopicItemEmissionsDto
+    {
+        public int TopicId { get; set; }
+        public string TopicTitle { get; set; } = string.Empty;
+        public string SourceName { get; set; } = string.Empty;
+        public string UnitName { get; set; } = string.Empty;
+        public decimal Quantity { get; set; }
+        public decimal EF { get; set; }
+        public decimal KgCO2e { get; set; }
+    }
+}

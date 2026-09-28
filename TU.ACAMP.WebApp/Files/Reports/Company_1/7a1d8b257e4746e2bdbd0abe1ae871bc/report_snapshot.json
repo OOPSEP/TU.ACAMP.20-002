@@ -1,0 +1,215 @@
+﻿{
+  "ReportKey": "7a1d8b257e4746e2bdbd0abe1ae871bc",
+  "Title": "GHG Emissions Report Year 2026",
+  "Level": 2,
+  "TargetId": 1,
+  "OrganizationTitle": "COM-001 \u2014 \u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E01\u0E23\u0E35\u0E19\u0E40\u0E17\u0E04 \u0E41\u0E21\u0E19\u0E39\u0E41\u0E1F\u0E04\u0E40\u0E08\u0E2D\u0E23\u0E34\u0E48\u0E07 (\u0E1B\u0E23\u0E30\u0E40\u0E17\u0E28\u0E44\u0E17\u0E22) \u0E08\u0E33\u0E01\u0E31\u0E14",
+  "OrganizationCode": "COM-001",
+  "GhgTeamName": "Company GHG Team",
+  "CertifierOrgTitle": "COM-001 \u2014 \u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E01\u0E23\u0E35\u0E19\u0E40\u0E17\u0E04 \u0E41\u0E21\u0E19\u0E39\u0E41\u0E1F\u0E04\u0E40\u0E08\u0E2D\u0E23\u0E34\u0E48\u0E07 (\u0E1B\u0E23\u0E30\u0E40\u0E17\u0E28\u0E44\u0E17\u0E22) \u0E08\u0E33\u0E01\u0E31\u0E14",
+  "Scope3CheckedCategories": [],
+  "InScopeChildIds": [
+    5,
+    4
+  ],
+  "InScopeChildTitles": [
+    "FAC-003 \u2014 \u0E28\u0E39\u0E19\u0E22\u0E4C\u0E01\u0E23\u0E30\u0E08\u0E32\u0E22\u0E2A\u0E34\u0E19\u0E04\u0E49\u0E32\u0E01\u0E23\u0E35\u0E19\u0E42\u0E25\u0E08\u0E34\u0E2A\u0E15\u0E34\u0E01\u0E2A\u0E4C \u0E2D\u0E22\u0E38\u0E18\u0E22\u0E32",
+    "FAC-002 \u2014 \u0E42\u0E23\u0E07\u0E07\u0E32\u0E19\u0E41\u0E1B\u0E23\u0E23\u0E39\u0E1B\u0E27\u0E31\u0E15\u0E16\u0E38\u0E14\u0E34\u0E1A\u0E2A\u0E30\u0E2D\u0E32\u0E14 \u0E23\u0E30\u0E22\u0E2D\u0E07"
+  ],
+  "BaseYear": 0,
+  "CalculateYear": 2026,
+  "PeriodDescription": "1 \u0E21.\u0E04. 2026 - 31 \u0E18.\u0E04. 2026",
+  "CreatedAt": "2026-09-16T11:23:43.1029673+07:00",
+  "CreatedBy": "Corporate GHG Team",
+  "Status": "Verified / Locked",
+  "Sha256Checksum": "C990B0CC7CCC5CAA4C5C37C82CD7FE59E5D6DEBE207F70D18AB38B415155765E",
+  "CalculateYearReport": {
+    "OrganizationTitle": "\u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E01\u0E23\u0E35\u0E19\u0E40\u0E17\u0E04 \u0E41\u0E21\u0E19\u0E39\u0E41\u0E1F\u0E04\u0E40\u0E08\u0E2D\u0E23\u0E34\u0E48\u0E07 (\u0E1B\u0E23\u0E30\u0E40\u0E17\u0E28\u0E44\u0E17\u0E22) \u0E08\u0E33\u0E01\u0E31\u0E14",
+    "OrganizationCode": "COM-001",
+    "Level": 2,
+    "LevelDisplay": "Company",
+    "Year": 2026,
+    "ConsolidationApproach": "Operational Control",
+    "MaterialityThreshold": 5.0,
+    "GwpVersion": 5,
+    "GwpVersionDisplay": "IPCC AR5 (100-year GWP - TGO Standard)",
+    "TotalScope1_tCO2e": 0,
+    "TotalScope2_tCO2e": 0,
+    "TotalScope3_tCO2e": 0,
+    "TotalGrossEmissions_tCO2e": 0,
+    "TotalSeparate_tCO2e": 0,
+    "Scopes": [
+      {
+        "ScopeNo": 1,
+        "ScopeName": "Scope 1 (Direct GHG Emissions)",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "ScopeNo": 2,
+        "ScopeName": "Scope 2 (Indirect Energy GHG Emissions)",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "ScopeNo": 3,
+        "ScopeName": "Scope 3 (Other Indirect Value Chain GHG Emissions)",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "ScopeNo": 4,
+        "ScopeName": "Separate Report (Biogenic \u0026 Carbon Offsets)",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      }
+    ],
+    "IsoCategories": [
+      {
+        "CategoryNo": 1,
+        "CategoryName": "Category 1: Direct GHG emissions and removals",
+        "StandardRef": "ISO 14064-1:2018",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "CategoryNo": 2,
+        "CategoryName": "Category 2: Indirect GHG emissions from imported energy",
+        "StandardRef": "ISO 14064-1:2018",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "CategoryNo": 3,
+        "CategoryName": "Category 3: Indirect GHG emissions from transportation",
+        "StandardRef": "ISO 14064-1:2018",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "CategoryNo": 4,
+        "CategoryName": "Category 4: Indirect GHG emissions from products used by organization",
+        "StandardRef": "ISO 14064-1:2018",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "CategoryNo": 5,
+        "CategoryName": "Category 5: Indirect GHG emissions associated with the use of products from organization",
+        "StandardRef": "ISO 14064-1:2018",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      },
+      {
+        "CategoryNo": 6,
+        "CategoryName": "Category 6: Indirect GHG emissions from other sources",
+        "StandardRef": "ISO 14064-1:2018",
+        "TotalKgCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0,
+        "ActivityGroups": []
+      }
+    ],
+    "GasInventory": [
+      {
+        "GasName": "Carbon Dioxide",
+        "ChemicalFormula": "CO2",
+        "GwpFactor": 1,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      },
+      {
+        "GasName": "Methane",
+        "ChemicalFormula": "CH4",
+        "GwpFactor": 28,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      },
+      {
+        "GasName": "Nitrous Oxide",
+        "ChemicalFormula": "N2O",
+        "GwpFactor": 265,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      },
+      {
+        "GasName": "Sulfur Hexafluoride",
+        "ChemicalFormula": "SF6",
+        "GwpFactor": 23500,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      },
+      {
+        "GasName": "Nitrogen Trifluoride",
+        "ChemicalFormula": "NF3",
+        "GwpFactor": 16100,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      },
+      {
+        "GasName": "Hydrofluorocarbons",
+        "ChemicalFormula": "HFCs",
+        "GwpFactor": 1300,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      },
+      {
+        "GasName": "Perfluorocarbons",
+        "ChemicalFormula": "PFCs",
+        "GwpFactor": 6630,
+        "Scope1_tCO2e": 0,
+        "Scope2_tCO2e": 0,
+        "Scope3_tCO2e": 0,
+        "Total_tCO2e": 0,
+        "SharePercent": 0
+      }
+    ],
+    "AuditLines": [],
+    "ExpiryAcknowledgmentReason": "",
+    "PreFlightWarnings": [],
+    "ExportVerified": true,
+    "ExportVerificationMessages": []
+  },
+  "BaseYearReport": null,
+  "HasExcelSnapshot": true,
+  "HasWordSnapshot": false,
+  "ExcelSha256Checksum": "6924CC684EDEB86445720ACDF902386213ABF4A5CE2C5A2CCA0BBE0D4DE7504C",
+  "GwpVersion": "IPCC AR5 (2014)",
+  "Comparison": null
+}

@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": ".NET: Debug E2E Test (Playwright)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "dotnet: build",
+      "program": "${workspaceFolder}/TU.ACAMP.Tests.E2E/bin/Debug/net10.0/TU.ACAMP.Tests.E2E.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/TU.ACAMP.Tests.E2E",
+      "stopAtEntry": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": ".NET: Debug WebApp",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "dotnet: build",
+      "program": "${workspaceFolder}/TU.ACAMP.WebApp/bin/Debug/net10.0/TU.ACAMP.WebApp.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/TU.ACAMP.WebApp",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "🚀 Run WebApp & Debug E2E Test",
+      "configurations": [
+        ".NET: Debug WebApp",
+        ".NET: Debug E2E Test (Playwright)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+@using TU.ACAMP.Domain.Models.Organization
+
+<div class="p-4">
+    <RadzenStack Gap="1.25rem">
+        <!-- Row 1: Facility Code & Facility / Site Title -->
+        <RadzenRow Class="g-3">
+            <RadzenColumn Size="12" SizeMD="2">
+                <RadzenFormField Text="Facility Code *" Style="width: 100%;">
+                    <RadzenTextBox Name="Code" @bind-Value="@Model.Code"
+                                   @oninput="@(args => OnCodeInput(args.Value?.ToString()))"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-family: monospace; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                    <RadzenRequiredValidator Component="Code" Text="Facility code is required." />
+                </RadzenFormField>
+            </RadzenColumn>
+
+            <RadzenColumn Size="12" SizeMD="10">
+                <RadzenFormField Text="Facility / Site Title *" Style="width: 100%;">
+                    <RadzenTextBox Name="Title" @bind-Value="@Model.Title"
+                                   @oninput="@(args => OnTitleInput(args.Value?.ToString()))"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                    <RadzenRequiredValidator Component="Title" Text="Facility title is required." />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <!-- Row 2: Remark / Description -->
+        <RadzenRow>
+            <RadzenColumn Size="12">
+                <RadzenFormField Text="Remark / Description & Physical Location" Style="width: 100%;">
+                    <RadzenTextArea Rows="3" Name="Remark" @bind-Value="@Model.Remark"
+                                    @oninput="@(args => OnRemarkInput(args.Value?.ToString()))"
+                                    Change="@HandleModelChanged"
+                                    Placeholder="Optional site address, physical location, operational boundary details..."
+                                    Style="width: 100%;"
+                                    Disabled="@IsReadOnly" />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <!-- Row 3: Active Status -->
+        <RadzenRow>
+            <RadzenColumn Size="12" Class="d-flex align-items-center gap-2">
+                <RadzenSwitch @bind-Value="@Model.IsActive"
+                              Change="@HandleModelChanged"
+                              Disabled="@IsReadOnly" />
+                <RadzenLabel Text="Active Facility (Operational site for greenhouse gas emissions accounting)" Style="font-weight: 500;" />
+            </RadzenColumn>
+        </RadzenRow>
+    </RadzenStack>
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public TbFacility Model { get; set; } = new();
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    #endregion
+
+    #region class methods
+    private async Task OnCodeInput(string? val)
+    {
+        Model.Code = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnTitleInput(string? val)
+    {
+        Model.Title = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnRemarkInput(string? val)
+    {
+        Model.Remark = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task HandleModelChanged()
+    {
+        #region hide [2026-08-18]
+        await OnChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+}

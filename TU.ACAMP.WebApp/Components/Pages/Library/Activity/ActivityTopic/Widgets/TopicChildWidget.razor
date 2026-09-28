@@ -1,0 +1,348 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Emissions
+
+@inject ActivityGroupService ActivityGroupService
+@inject EmissionGroupService EmissionGroupService
+@inject EmissionSourceService EmissionSourceService
+@inject EmissionUnitService EmissionUnitService
+
+<RadzenCard Class="shadow-sm border rounded-3 p-3 mb-3" Style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color);">
+    <!-- Row 1: Emission Share & Target Context & Delete Button -->
+    <RadzenRow Class="mb-3 align-items-center g-3">
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="Emission Share (%) *" Style="width: 100%;">
+                <RadzenNumeric TValue="float" Min="0" Max="100" @bind-Value="@Model.EmissionSharePercent"
+                               Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+            </RadzenFormField>
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="7">
+            <RadzenFormField Text="Operational Scope / Site" Style="width: 100%;">
+                <RadzenTextBox Value="@TargetDisplayName" Disabled="true" Style="width: 100%; font-weight: 600;" />
+            </RadzenFormField>
+        </RadzenColumn>
+
+        @if (!IsReadOnly)
+        {
+            <RadzenColumn Size="12" SizeMD="1" Class="d-flex justify-content-end align-self-center pt-2">
+                <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                              Variant="Variant.Flat" Click="@OnDelete" Style="border-radius: 6px;" />
+            </RadzenColumn>
+        }
+    </RadzenRow>
+
+    <!-- Row 2: Scope & Activity Group -->
+    <RadzenRow Class="mb-3 g-3">
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="TGO Scope" Style="width: 100%;">
+                <RadzenDropDown TValue="eTgoScopeNo"
+                                Data="@_scopes"
+                                TextProperty="Text"
+                                ValueProperty="Value"
+                                Value="@ScopeNo"
+                                Style="width: 100%;"
+                                Disabled="true" />
+            </RadzenFormField>
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="8">
+            <RadzenFormField Text="Activity Group *" Style="width: 100%;">
+                <RadzenDropDown TValue="int"
+                                Data="@_filteredActivityGroups"
+                                TextProperty="Title"
+                                ValueProperty="Id"
+                                @bind-Value="@Model.ActivityGroupId"
+                                Change="@OnActivityGroupChanged"
+                                Style="width: 100%;"
+                                Disabled="@IsReadOnly"
+                                AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                    <Template Context="item">
+                        @{
+                            var g = (TbActivityGroup)item;
+                        }
+                        <span><b>@g.Code</b> - @g.Title</span>
+                    </Template>
+                </RadzenDropDown>
+            </RadzenFormField>
+        </RadzenColumn>
+    </RadzenRow>
+
+    <!-- Row 3: Emission Group & Emission Source -->
+    <RadzenRow Class="g-3 mb-3">
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenFormField Text="Emission Group" Style="width: 100%;">
+                <RadzenDropDown TValue="int"
+                                Data="@_filteredEmissionGroups"
+                                TextProperty="Title"
+                                ValueProperty="Id"
+                                @bind-Value="@_selectedEmissionGroupId"
+                                Change="@OnEmissionGroupChanged"
+                                Style="width: 100%;"
+                                Disabled="@IsReadOnly"
+                                AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                    <Template Context="item">
+                        @{
+                            var eg = (TbEmissionGroup)item;
+                        }
+                        <span><b>@eg.Code</b> - @eg.Title</span>
+                    </Template>
+                </RadzenDropDown>
+            </RadzenFormField>
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="8">
+            <RadzenFormField Text="Emission Source *" Style="width: 100%;">
+                <RadzenDropDown TValue="int"
+                                Data="@_filteredEmissionSources"
+                                TextProperty="Title"
+                                ValueProperty="Id"
+                                @bind-Value="@Model.SourceId"
+                                Change="@OnSourceChanged"
+                                Style="width: 100%;"
+                                Disabled="@IsReadOnly"
+                                AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                    <Template Context="item">
+                        @{
+                            var src = (TbEmissionSource)item;
+                        }
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span>@src.Title</span>
+                            <span class="badge bg-light text-dark border ms-2">
+                                EF: <b>@src.EF.ToString("N4")</b> @(src.Unit?.Title ?? "")
+                            </span>
+                        </div>
+                    </Template>
+                </RadzenDropDown>
+            </RadzenFormField>
+        </RadzenColumn>
+    </RadzenRow>
+
+    <!-- Row 4: [GHG-13] Activity Unit & Unit Conversion Ratio -->
+    <RadzenRow Class="g-3">
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="Activity Unit *" Style="width: 100%;">
+                <RadzenDropDown TValue="int?"
+                                Data="@_allUnits"
+                                TextProperty="Title"
+                                ValueProperty="Id"
+                                @bind-Value="@Model.ActivityUnitId"
+                                Change="@OnActivityUnitChanged"
+                                Placeholder="@(Model.Source?.Unit?.Title ?? "Select Activity Unit...")"
+                                Style="width: 100%;"
+                                Disabled="@IsReadOnly"
+                                AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" />
+            </RadzenFormField>
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenFormField Text="Unit Conversion Ratio" Style="width: 100%;">
+                <RadzenNumeric TValue="decimal?" @bind-Value="@Model.UnitConversionRatio"
+                               Step="0.0001m" Format="N4"
+                               Change="@NotifyChange"
+                               Style="width: 100%; font-weight: bold;"
+                               Disabled="@IsReadOnly" />
+            </RadzenFormField>
+        </RadzenColumn>
+    </RadzenRow>
+
+    @if (IsUnitMismatchWarning)
+    {
+        <div class="alert alert-warning py-1 px-3 mt-2 mb-0 d-flex align-items-center gap-2" style="font-size: 0.8rem; border-radius: 6px;">
+            <RadzenIcon Icon="warning" Style="font-size: 1rem;" />
+            <span><strong>Warning:</strong> Activity unit differs from EF unit, but Unit Conversion Ratio is still 1.0000 (please specify the conversion ratio).</span>
+        </div>
+    }
+</RadzenCard>
+
+@code {
+    #region class field
+    private List<TbActivityGroup> _allActivityGroups = new();
+    private List<TbActivityGroup> _filteredActivityGroups = new();
+    private List<TbEmissionGroup> _allEmissionGroups = new();
+    private List<TbEmissionGroup> _filteredEmissionGroups = new();
+    private List<TbEmissionSource> _allEmissionSources = new();
+    private List<TbEmissionSource> _filteredEmissionSources = new();
+    private List<TbEmissionUnit> _allUnits = new();
+
+    private int _selectedEmissionGroupId;
+
+    private bool IsUnitMismatchWarning =>
+        Model.ActivityUnitId.HasValue &&
+        Model.Source != null &&
+        Model.Source.UnitId > 0 &&
+        Model.ActivityUnitId.Value != Model.Source.UnitId &&
+        (Model.UnitConversionRatio == null || Model.UnitConversionRatio == 1m);
+
+    private List<DropdownItem<eTgoScopeNo>> _scopes = new()
+    {
+        new DropdownItem<eTgoScopeNo> { Text = "Scope 1 (Direct GHG)", Value = eTgoScopeNo.Scope1 },
+        new DropdownItem<eTgoScopeNo> { Text = "Scope 2 (Indirect Energy)", Value = eTgoScopeNo.Scope2 },
+        new DropdownItem<eTgoScopeNo> { Text = "Scope 3 (Other Indirect)", Value = eTgoScopeNo.Scope3 },
+        new DropdownItem<eTgoScopeNo> { Text = "Separate Report (Biogenic CO₂)", Value = eTgoScopeNo.SeparateReport }
+    };
+    #endregion
+
+    #region class properties
+    [Parameter, EditorRequired] public TbActivityTopicChild Model { get; set; } = new();
+    [Parameter] public string TargetDisplayName { get; set; } = string.Empty;
+    [Parameter] public eTgoScopeNo ScopeNo { get; set; } = eTgoScopeNo.Scope1;
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-18]
+        _allActivityGroups = await ActivityGroupService.GetAllAsync();
+        _allEmissionGroups = await EmissionGroupService.GetAllAsync();
+        _allEmissionSources = await EmissionSourceService.GetAllAsync();
+        var units = await EmissionUnitService.GetAllAsync();
+        if (units != null) _allUnits = units.OrderBy(u => u.Title).ToList();
+
+        FilterGroupsByScope();
+
+        if (Model.SourceId > 0 && Model.Source == null)
+        {
+            Model.Source = _allEmissionSources.FirstOrDefault(s => s.Id == Model.SourceId);
+        }
+
+        if (Model.Source != null)
+        {
+            _selectedEmissionGroupId = Model.Source.GroupId;
+            if (!Model.ActivityUnitId.HasValue && Model.Source.UnitId > 0)
+            {
+                Model.ActivityUnitId = Model.Source.UnitId;
+            }
+        }
+        else if (Model.ActivityGroupId > 0)
+        {
+            var ag = _allActivityGroups.FirstOrDefault(g => g.Id == Model.ActivityGroupId);
+            if (ag != null)
+            {
+                ScopeNo = ag.TgoScopeNo;
+            }
+        }
+
+        FilterSources();
+        #endregion
+    }
+
+    private void FilterGroupsByScope()
+    {
+        _filteredActivityGroups = _allActivityGroups
+            .Where(g => g.TgoScopeNo == ScopeNo)
+            .OrderBy(g => g.Code)
+            .ToList();
+
+        _filteredEmissionGroups = _allEmissionGroups
+            .Where(eg => eg.TgoScopeNo == ScopeNo)
+            .OrderBy(eg => eg.Code)
+            .ToList();
+    }
+
+    private void FilterSources()
+    {
+        if (_selectedEmissionGroupId > 0)
+        {
+            _filteredEmissionSources = _allEmissionSources
+                .Where(s => s.GroupId == _selectedEmissionGroupId)
+                .OrderBy(s => s.Title)
+                .ToList();
+        }
+        else
+        {
+            var egIds = _filteredEmissionGroups.Select(eg => eg.Id).ToHashSet();
+            _filteredEmissionSources = _allEmissionSources
+                .Where(s => egIds.Contains(s.GroupId))
+                .OrderBy(s => s.Title)
+                .ToList();
+        }
+    }
+
+    private async Task OnActivityGroupChanged(object? value)
+    {
+        #region hide [2026-08-18]
+        if (value is int agId && agId > 0)
+        {
+            var ag = _allActivityGroups.FirstOrDefault(g => g.Id == agId);
+            if (ag != null)
+            {
+                ScopeNo = ag.TgoScopeNo;
+                FilterGroupsByScope();
+            }
+        }
+        await NotifyChange();
+        #endregion
+    }
+
+    private async Task OnEmissionGroupChanged(object? value)
+    {
+        #region hide [2026-08-18]
+        FilterSources();
+        if (_filteredEmissionSources.Any() && !_filteredEmissionSources.Any(s => s.Id == Model.SourceId))
+        {
+            Model.SourceId = _filteredEmissionSources.First().Id;
+            Model.Source = _filteredEmissionSources.First();
+            if (!Model.ActivityUnitId.HasValue && Model.Source.UnitId > 0)
+            {
+                Model.ActivityUnitId = Model.Source.UnitId;
+            }
+        }
+        await NotifyChange();
+        #endregion
+    }
+
+    private async Task OnSourceChanged(object? value)
+    {
+        #region hide [2026-08-18]
+        if (value is int srcId && srcId > 0)
+        {
+            Model.Source = _allEmissionSources.FirstOrDefault(s => s.Id == srcId);
+            if (Model.Source != null)
+            {
+                if (_selectedEmissionGroupId == 0)
+                {
+                    _selectedEmissionGroupId = Model.Source.GroupId;
+                }
+                if (!Model.ActivityUnitId.HasValue && Model.Source.UnitId > 0)
+                {
+                    Model.ActivityUnitId = Model.Source.UnitId;
+                }
+            }
+        }
+        await NotifyChange();
+        #endregion
+    }
+
+    private async Task OnActivityUnitChanged(object? value)
+    {
+        if (value is int unitId && unitId > 0)
+        {
+            Model.ActivityUnitId = unitId;
+            Model.ActivityUnit = _allUnits.FirstOrDefault(u => u.Id == unitId);
+        }
+        await NotifyChange();
+    }
+
+    private async Task NotifyChange()
+    {
+        #region hide [2026-08-18]
+        await OnChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+
+    public class DropdownItem<T>
+    {
+        public string Text { get; set; } = string.Empty;
+        public T Value { get; set; } = default!;
+    }
+}

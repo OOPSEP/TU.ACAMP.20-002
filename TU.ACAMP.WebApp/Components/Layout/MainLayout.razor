@@ -1,0 +1,197 @@
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Identity
+@inherits LayoutComponentBase
+@inject AuthenticationStateProvider _authStateProvider
+@inject NavigationManager _navigationManager
+@inject IJSRuntime JSRuntime
+@inject IWebHostEnvironment _env
+
+@* [2026-09-26][Claude] ตัด <RadzenComponents /> ออก เพราะ Routes.razor มีอยู่แล้ว — 2 ตัวทำให้ Dialog/Notification เปิดซ้อน 2 ชั้น *@
+<form action="/Account/Logout" method="post" id="logout-form-main" style="display:none;">
+    <AntiforgeryToken />
+    <input type="hidden" name="ReturnUrl" value="Account/Login" />
+</form>
+
+<RadzenLayout Style="grid-template-rows: auto 1fr auto; min-height: 100vh;">
+    <!-- TOP HEADER WITH INTEGRATED HORIZONTAL MENU -->
+    <RadzenHeader Style="background-color: var(--rz-header-background-color); border-bottom: 1px solid var(--rz-border-color); padding: 0.5rem 1.5rem; z-index: 1001;">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Style="width: 100%;">
+
+            <!-- BRAND & TOP NAVIGATION MENU -->
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1.5rem">
+                <!-- BRAND LOGO [2026-09-14][Gemini] CARBON ONE Brand Identity Lockup -->
+                <NavLink href="" style="text-decoration: none;">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="6px">
+                        <RadzenIcon Icon="bar_chart" Style="color: #10b981; font-size: 1.5rem;" />
+                        <span style="font-weight: 800; font-size: 1.25rem; letter-spacing: 0.5px; line-height: 1; user-select: none;">
+                            <span style="color: #0f172a;">Carbon </span><span style="color: #10b981;">Intelligence </span><span style="color: #0f172a;">Platform</span>
+                        </span>
+                        <RadzenBadge Visible="false" Text="v2.0" BadgeStyle="BadgeStyle.Success" Style="border-radius: 6px; font-size: 0.7rem;" />
+                        <RadzenBadge Text="CIP" Variant="Variant.Outlined" BadgeStyle="BadgeStyle.Warning" Style="border-radius: 6px; font-size: 0.7rem; color: #000;" />
+                    </RadzenStack>
+                </NavLink>
+
+                <!-- HORIZONTAL TOP MENU (ENGLISH ONLY - SEA REGIONAL STANDARD) -->
+                <RadzenMenu Style="background: transparent; border: none;">
+                    <RadzenMenuItem Text="Home" Icon="home" Path="/" />
+                    <!-- [2026-09-26][Claude] Dashboard แยกเป็น 2 เมนูย่อย: Executive (เดิม) + Net-Zero Pathway (หน้าใหม่) -->
+                    <RadzenMenuItem Text="Dashboard" Icon="dashboard">
+                        <RadzenMenuItem Text="Executive Dashboard" Icon="insights" Path="/dashboard" />
+                        <RadzenMenuItem Text="Net-Zero Pathway" Icon="trending_down" Path="/dashboard/net-zero" />
+                    </RadzenMenuItem>
+                    <RadzenMenuItem Text="Organization" Icon="business">
+                        <RadzenMenuItem Text="Corporate" Icon="corporate_fare" Path="/organization/corporate" />
+                        <RadzenMenuItem Text="Company" Icon="domain" Path="/organization/company" />
+                        <RadzenMenuItem Text="Facility" Icon="factory" Path="/organization/facility" />
+                    </RadzenMenuItem>
+                    <RadzenMenuItem Text="Reports" Icon="summarize">
+                        <!-- [2026-09-25][Gemini] ตั้งค่าเส้นทางเมนูหลักให้ชี้ไปที่ Digital Verification Workbench (V2) -->
+                        <RadzenMenuItem Text="CFO & ISO 14064 Audit Report" Icon="verified" Path="/reports/cfo-reports2" />
+                        <RadzenMenuItem Text="Activity Data Analytics" Icon="analytics" Path="/organization/activity-analytics" />
+                    </RadzenMenuItem>
+                    <RadzenMenuItem Text="Library" Icon="library_books">
+                        <RadzenMenuItem Text="Topics" Icon="category" Path="/library/activity-topics" />
+                        <RadzenMenuItem Text="Activities" Icon="list_alt" Path="/library/activity-groups" />
+                        <RadzenMenuItem Text="Emissions" Icon="co2" Path="/library/emission-groups" />
+                        <RadzenMenuItem Text="Sources" Icon="factory" Path="/emissions/sources" />
+                        <RadzenMenuItem Text="Units" Icon="straighten" Path="/emissions/units" />
+                        @if (_isAdmin)
+                        {
+                            <RadzenMenuItem Text="Emission Mappings" Icon="swap_horiz" Path="/library/emission-mappings" />
+                        }
+                    </RadzenMenuItem>
+                   
+                    <RadzenMenuItem Text="Settings" Icon="settings">
+                        <RadzenMenuItem Text="Manage Account" Icon="manage_accounts">
+                            <RadzenMenuItem Text="Profile" Icon="person" Path="/Account/Manage" />
+                            <RadzenMenuItem Text="Change Password" Icon="lock_reset" Path="/Account/Manage/ChangePassword" />
+                            <RadzenMenuItem Text="Subscriptions" Icon="card_membership" Path="/subscriptions" />
+                            @if (_isAdmin)
+                            {
+                                <RadzenMenuItem Text="Admin" Icon="admin_panel_settings">
+                                    <RadzenMenuItem Text="Roles" Icon="person_outline" Path="/admin/roles"/>
+                                    <RadzenMenuItem Text="Confirm Emails" Icon="email" Path="/admin/confirm-emails" />
+                                    <RadzenMenuItem Text="Activate Subscriptions" Icon="check_circle" Path="/admin/activate-subscriptions" />
+                                    <RadzenMenuItem Text="Expire Subscriptions" Icon="event_busy" Path="/admin/expire-subscriptions" />
+                                    <RadzenMenuItem Text="Mail to Users" Icon="forward_to_inbox" Path="/admin/mail-to-users" />
+                                </RadzenMenuItem>
+                            }
+                        </RadzenMenuItem>
+                    </RadzenMenuItem>
+                </RadzenMenu>
+            </RadzenStack>
+
+            <!-- RIGHT HEADER ACTIONS / USER PROFILE -->
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1rem">
+                <RadzenProfileMenu Click="@OnProfileMenuClick" Style="background: transparent; border: none; box-shadow: none; padding: 0;">
+                    <Template>
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                            <RadzenStack Gap="0" Class="rz-display-none rz-display-sm-flex" Style="text-align: right; line-height: 1;">
+                                <RadzenText Text="@_userDisplayName" TextStyle="TextStyle.Subtitle2" Style="font-size: 0.85rem; font-weight: 700; margin: 0;" />
+                                <RadzenText Text="@(_isAuthenticated ? _userRole : "Guest")" TextStyle="TextStyle.Caption" Class="rz-color-base-500" Style="font-size: 0.7rem; margin: 0;" />
+                            </RadzenStack>
+                            <RadzenIcon Icon="account_circle" Style="@($"font-size: 2rem; color: {(_isAuthenticated ? "#10b981" : "#94a3b8")};")" />
+                        </RadzenStack>
+                    </Template>
+                    <ChildContent>
+                        @if (_isAuthenticated)
+                        {
+                            <RadzenProfileMenuItem Text="My Profile" Icon="person" Path="/Account/Manage" />
+                            <RadzenProfileMenuItem Text="Change Password" Icon="lock_reset" Path="/Account/Manage/ChangePassword" />
+                            <RadzenProfileMenuItem Text="Logout" Icon="logout" />
+                        }
+                        else
+                        {
+                            <RadzenProfileMenuItem Text="Login" Icon="login" Path="/Account/Login" />
+                            <RadzenProfileMenuItem Text="Register" Icon="person_add" Path="/Account/Register" />
+                        }
+                    </ChildContent>
+                </RadzenProfileMenu>
+            </RadzenStack>
+
+        </RadzenStack>
+    </RadzenHeader>
+
+    <!-- MAIN BODY CONTENT -->
+    <RadzenBody Style="background-color: var(--rz-body-background-color); padding: 0;">
+        <RadzenContent Container="main" Style="padding: 0;">
+            @Body
+        </RadzenContent>
+    </RadzenBody>
+
+    <!-- FOOTER -->
+    <RadzenFooter Style="background-color: var(--rz-footer-background-color); border-top: 1px solid var(--rz-border-color); padding: 0.75rem 1.5rem;">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+            <RadzenText Text="© 2026 ACAMP 2.0 - Automatic Carbon Account Management Platform" Style="font-size: 0.8rem; color: #64748b; margin: 0;" />
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1.25rem">
+                @if (_env.IsDevelopment())
+                {
+                    <!-- [2026-09-28][Gemini] แสดงตำแหน่งหน้าต่าง (Pos) และขนาด Viewport (Size) แบบเรียลไทม์บน Bottom Bar เฉพาะโหมด Development เท่านั้น -->
+                    <span id="app-window-metrics" style="display: inline-flex; align-items: center; gap: 0.35rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.72rem; color: #475569; background: #f8fafc; padding: 2px 8px; border-radius: 6px; border: 1px solid #cbd5e1;" title="Window Screen Position and Viewport Dimensions (Dev Only)">
+                        <RadzenIcon Icon="aspect_ratio" Style="font-size: 0.85rem; color: #10b981;" />
+                        <span id="app-window-metrics-text">Pos: (0, 0) | Size: 0 &times; 0 px</span>
+                    </span>
+                }
+                <RadzenText Text="ISO 14064 & TGO Standard Compliant" Style="font-size: 0.75rem; color: #64748b; margin: 0;" />
+            </RadzenStack>
+        </RadzenStack>
+    </RadzenFooter>
+</RadzenLayout>
+
+@code {
+    #region class field
+    private string _userDisplayName = "Guest User";
+    private string _userRole = "Guest";
+    private bool _isAuthenticated = false;
+    private bool _isAdmin = false;
+    #endregion
+
+    #region class method
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-15]
+        try
+        {
+            var authState = await _authStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity != null && user.Identity.IsAuthenticated)
+            {
+                _isAuthenticated = true;
+                _userDisplayName = user.Identity.Name ?? "User";
+                _userRole = user.FindFirst(ClaimTypes.Role)?.Value ?? "Member";
+                _isAdmin = user.IsInRole(SystemRoles.Administrator);
+            }
+        }
+        catch (Exception) { }
+        #endregion
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _env.IsDevelopment())
+        {
+            // [2026-09-28][Gemini] เริ่มต้นการติดตามตำแหน่งและขนาดของหน้าต่างแบบเรียลไทม์ฝั่งเบราว์เซอร์เฉพาะ Development
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("initWindowMetricsTracker");
+            }
+            catch (Exception) { }
+        }
+    }
+
+    private async Task OnProfileMenuClick(RadzenProfileMenuItem item)
+    {
+        if (item.Text == "Logout")
+        {
+            await SubmitLogout();
+        }
+    }
+
+    private async Task SubmitLogout()
+    {
+        #region hide [2026-08-15]
+        await JSRuntime.InvokeVoidAsync("submitForm", "logout-form-main");
+        #endregion
+    }
+    #endregion
+}

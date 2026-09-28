@@ -1,0 +1,86 @@
+@using TU.ACAMP.Domain.Models.Organization
+
+<div class="p-4">
+    <RadzenStack Gap="1.25rem">
+        <!-- Code & Title -->
+        <RadzenRow Class="g-3">
+            <RadzenColumn Size="12" SizeMD="2">
+                <RadzenFormField Text="Corporate Code" Style="width: 100%;">
+                    <RadzenTextBox Name="Code" @bind-Value="@Model.Code"
+                                   @oninput="@(args => OnCodeInput(args.Value?.ToString()))"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-family: monospace; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                    <RadzenRequiredValidator Component="Code" Text="Corporate code is required." />
+                </RadzenFormField>
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeMD="7">
+                <RadzenFormField Text="Corporate Title / Legal Entity Name" Style="width: 100%;">
+                    <RadzenTextBox Name="Title" @bind-Value="@Model.Title"
+                                   @oninput="@(args => OnTitleInput(args.Value?.ToString()))"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                    <RadzenRequiredValidator Component="Title" Text="Corporate title is required." />
+                </RadzenFormField>
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeMD="3">
+                <RadzenFormField Text="Materiality Threshold (%)" Style="width: 100%;">
+                    <RadzenNumeric TValue="decimal" Name="MaterialityThreshold" @bind-Value="@Model.MaterialityThreshold"
+                                   Min="0.1m" Max="100m" Step="0.5m" Format="0.0 '%'"
+                                   Change="@(async (decimal _) => await HandleModelChanged())"
+                                   Style="width: 100%; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <!-- Remark / Description -->
+        <RadzenRow>
+            <RadzenColumn Size="12">
+                <RadzenFormField Text="Remark / Description" Style="width: 100%;">
+                    <RadzenTextArea Rows="3" Name="Remark" @bind-Value="@Model.Remark"
+                                    @oninput="@(args => OnRemarkInput(args.Value?.ToString()))"
+                                    Change="@HandleModelChanged"
+                                    Style="width: 100%;"
+                                    Disabled="@IsReadOnly" />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+    </RadzenStack>
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public TbCorporate Model { get; set; } = new();
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    #endregion
+
+    #region class methods
+    private async Task OnCodeInput(string? val)
+    {
+        Model.Code = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnTitleInput(string? val)
+    {
+        Model.Title = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnRemarkInput(string? val)
+    {
+        Model.Remark = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task HandleModelChanged()
+    {
+        #region hide [2026-08-18]
+        await OnChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+}

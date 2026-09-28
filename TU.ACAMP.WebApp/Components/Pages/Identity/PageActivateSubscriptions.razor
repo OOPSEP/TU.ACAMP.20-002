@@ -1,0 +1,672 @@
+@page "/admin/activate-subscriptions"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Components.Pages.Identity.Widgets
+
+@attribute [Authorize(Roles = SystemRoles.Administrator)]
+@inject SubscriptionService SubscriptionService
+@inject IdentityAdminService IdentityAdminService
+@inject EmailSender EmailSender
+@inject NotificationService NotificationService
+@inject DialogService DialogService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject ILogger<PageActivateSubscriptions> Logger
+
+<PageTitle>Activate Subscriptions - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="row mb-4 align-items-center">
+        <div class="col-12 col-md-7">
+            <RadzenText Text="Activate Subscriptions" TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-1" Style="color: var(--rz-text-title-color);" />
+            <RadzenText Text="Manage and automatically activate new subscriptions (Pro Plan - 3 Months) for users without an active subscription." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+        </div>
+        <div class="col-12 col-md-5 text-md-end mt-3 mt-md-0 d-flex justify-content-md-end gap-2 flex-wrap">
+            <RadzenButton Text="Reload" 
+                          Icon="refresh" 
+                          ButtonStyle="ButtonStyle.Light" 
+                          Size="ButtonSize.Medium" 
+                          Click="@LoadDataAsync" 
+                          IsBusy="@_isLoading" 
+                          Disabled="@_isBatchProcessing"
+                          Style="border-radius: 8px;" 
+                          Title="Reload user and subscription records" />
+            <RadzenButton Text="Activate All" 
+                          Icon="verified" 
+                          ButtonStyle="ButtonStyle.Success" 
+                          Size="ButtonSize.Medium" 
+                          Click="@ActivateAllPendingHandlerAsync" 
+                          IsBusy="@_isBatchProcessing" 
+                          Disabled="@(_isBatchProcessing || _isLoading || _filteredRows.Count(r => !r.HasSubscription) == 0)" 
+                          Style="border-radius: 8px; font-weight: 600;" 
+                          Title="Auto-create subscriptions for all pending users in current filter" />
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4 col-sm-6">
+            <RadzenCard Class="p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="text-muted fw-bold">TOTAL USERS</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4" class="fw-bold mb-0 text-dark">@_allRows.Count</RadzenText>
+                    </div>
+                    <RadzenIcon Icon="people" Style="font-size: 2.2rem;" class="text-primary opacity-75" />
+                </div>
+            </RadzenCard>
+        </div>
+
+        <div class="col-md-4 col-sm-6">
+            <RadzenCard Class="p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="text-muted fw-bold">WITH SUBSCRIPTION</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4" class="fw-bold mb-0 text-success">@_allRows.Count(r => r.HasSubscription)</RadzenText>
+                    </div>
+                    <RadzenIcon Icon="check_circle" Style="font-size: 2.2rem;" class="text-success opacity-75" />
+                </div>
+            </RadzenCard>
+        </div>
+
+        <div class="col-md-4 col-sm-6">
+            <RadzenCard Class="p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="text-muted fw-bold">PENDING ACTIVATION</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4" class="fw-bold mb-0 text-warning">@_allRows.Count(r => !r.HasSubscription)</RadzenText>
+                    </div>
+                    <RadzenIcon Icon="pending_actions" Style="font-size: 2.2rem;" class="text-warning opacity-75" />
+                </div>
+            </RadzenCard>
+        </div>
+    </div>
+
+    <!-- Batch Progress Card (Shown during batch execution) -->
+    @if (_isBatchProcessing)
+    {
+        <RadzenCard Class="mb-4 p-3 shadow-sm border-primary" Style="border-radius: 12px; border-left: 5px solid var(--rz-primary); background: var(--rz-card-background-color);">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center gap-2">
+                    <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.ExtraSmall" />
+                    <span class="fw-bold text-primary">@_batchProgressMessage</span>
+                </div>
+                <span class="fw-bold text-dark">@_batchProgressPercentage.ToString("F0")%</span>
+            </div>
+            <RadzenProgressBar Value="@_batchProgressPercentage" ShowValue="false" Mode="ProgressBarMode.Determinate" Style="height: 10px; border-radius: 6px;" />
+        </RadzenCard>
+    }
+
+    <!-- Filters & Search Widget -->
+    <ActivateSubscriptionsFilterWidget @bind-SearchQuery="@_searchQuery"
+                                       @bind-SelectedStatusFilter="@_selectedStatusFilter"
+                                       @bind-RegisterDateFrom="@_registerDateFrom"
+                                       @bind-RegisterDateTo="@_registerDateTo"
+                                       FilteredCount="@_filteredRows.Count"
+                                       TotalCount="@_allRows.Count"
+                                       OnFilterChanged="@OnFilterChangedHandler" />
+
+    <!-- DataGrid Container -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading user and subscription records..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <div class="shadow-sm rounded-3 p-3" style="background-color: var(--rz-card-background-color); border: 1px solid var(--rz-border-color); border-radius: 12px;">
+            @if (!_filteredRows.Any())
+            {
+                <div class="p-5 text-center text-muted">
+                    <RadzenIcon Icon="card_membership" Style="font-size: 48px; opacity: 0.5;" class="mb-2" />
+                    <RadzenText Text="No user records found matching the search criteria." TextStyle="TextStyle.Body1" class="text-muted mb-0" />
+                </div>
+            }
+            else
+            {
+                <RadzenDataGrid @ref="_grid" Data="@_filteredRows" TItem="UserSubscriptionRow"
+                                AllowColumnResize="true"
+                                AllowPaging="true" PageSize="@_pageSize" PageSizeOptions="@_pageSizeOptions"
+                                AllowSorting="true" ColumnWidth="180px" PagerHorizontalAlign="HorizontalAlign.Right" ShowPagingSummary="true"
+                                RowDoubleClick="@OnRowDoubleClick"
+                                Style="@GridStyles.Default">
+                    <Columns>
+                        <RadzenDataGridColumn TItem="UserSubscriptionRow" Title="#" Width="55px" TextAlign="TextAlign.Center" Sortable="false">
+                            <Template Context="row">
+                                @(_filteredRows.IndexOf(row) + 1)
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 1. Email & Username Column -->
+                        <RadzenDataGridColumn TItem="UserSubscriptionRow" Property="Email" Title="User / Email" MinWidth="260px">
+                            <Template Context="row">
+                                <div class="d-flex align-items-center gap-2">
+                                    <RadzenIcon Icon="alternate_email" class="text-primary" Style="font-size: 1.5rem;" />
+                                    <div>
+                                        <div class="fw-bold text-dark text-break">@row.Email</div>
+                                        @if (!string.IsNullOrEmpty(row.UserName) && !string.Equals(row.UserName, row.Email, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span class="text-muted small d-block">Username: @row.UserName</span>
+                                        }
+                                    </div>
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 2. Registration Date Column -->
+                        <RadzenDataGridColumn TItem="UserSubscriptionRow" Title="Registration Date" Width="170px" Sortable="false">
+                            <Template Context="row">
+                                <div class="d-flex align-items-center gap-2">
+                                    <RadzenIcon Icon="calendar_today" class="text-muted" Style="font-size: 1.1rem;" />
+                                    @if (row.RegisterDate.HasValue)
+                                    {
+                                        <span class="text-dark fw-semibold">@AppTimeZone.ToLocal(row.RegisterDate.Value).ToString("dd/MM/yyyy")</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small fst-italic">-</span>
+                                    }
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 3. Subscription Status Column -->
+                        <RadzenDataGridColumn TItem="UserSubscriptionRow" Title="Status" Width="170px" TextAlign="TextAlign.Center">
+                            <Template Context="row">
+                                @if (row.HasSubscription)
+                                {
+                                    @if (row.IsExpired)
+                                    {
+                                        <RadzenBadge Text="Expired" BadgeStyle="BadgeStyle.Danger" IsPill="true" class="px-3 py-2">
+                                            <RadzenIcon Icon="event_busy" class="me-1" Style="font-size: 0.85rem;" />Expired
+                                        </RadzenBadge>
+                                    }
+                                    else if (row.IsActive)
+                                    {
+                                        <RadzenBadge Text="Active" BadgeStyle="BadgeStyle.Success" IsPill="true" class="px-3 py-2">
+                                            <RadzenIcon Icon="check_circle" class="me-1" Style="font-size: 0.85rem;" />Active
+                                        </RadzenBadge>
+                                    }
+                                    else
+                                    {
+                                        <RadzenBadge Text="Inactive" BadgeStyle="BadgeStyle.Secondary" IsPill="true" class="px-3 py-2">
+                                            <RadzenIcon Icon="pause_circle" class="me-1" Style="font-size: 0.85rem;" />Inactive
+                                        </RadzenBadge>
+                                    }
+                                }
+                                else
+                                {
+                                    <RadzenBadge Text="No Subscription" BadgeStyle="BadgeStyle.Warning" IsPill="true" class="px-3 py-2">
+                                        <RadzenIcon Icon="warning" class="me-1" Style="font-size: 0.85rem;" />No Subscription
+                                    </RadzenBadge>
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 4. Subscription Details Column -->
+                        <RadzenDataGridColumn TItem="UserSubscriptionRow" Title="Subscription Details" MinWidth="250px">
+                            <Template Context="row">
+                                @if (row.HasSubscription && row.Subscription != null)
+                                {
+                                    <div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="fw-bold text-dark text-break">@row.SubscriptionTitle</span>
+                                            @if (row.SubscriptionPlan.HasValue)
+                                            {
+                                                <RadzenBadge Text="@row.SubscriptionPlan.Value.ToString()" BadgeStyle="@GetPlanBadgeStyle(row.SubscriptionPlan.Value)" IsPill="true" Style="font-size: 0.75rem;" />
+                                            }
+                                        </div>
+                                        @if (row.SubscriptionExpiryDate.HasValue)
+                                        {
+                                            <span class="text-muted small d-block mt-1">
+                                                <RadzenIcon Icon="event" Style="font-size: 0.85rem;" class="me-1" />Expires: @row.SubscriptionExpiryDate.Value.ToString("dd/MM/yyyy")
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small fst-italic">-</span>
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 5. Action Column -->
+                        <RadzenDataGridColumn TItem="UserSubscriptionRow" Title="Action" Width="180px" TextAlign="TextAlign.Center">
+                            <Template Context="row">
+                                @if (!row.HasSubscription)
+                                {
+                                    <RadzenButton Text="Activate" 
+                                                  Icon="check_circle" 
+                                                  Size="ButtonSize.Small" 
+                                                  ButtonStyle="ButtonStyle.Success" 
+                                                  Variant="Variant.Filled" 
+                                                  Title="Activate Pro Subscription for this user (3 Months)" 
+                                                  IsBusy="@(_processingEmails.Contains(row.Email))"
+                                                  Disabled="@(_isBatchProcessing || string.IsNullOrWhiteSpace(row.Email))"
+                                                  Click="@(() => ActivateSingleUserHandlerAsync(row))" 
+                                                  Style="border-radius: 6px; font-weight: 600;" />
+                                }
+                                else if (row.Subscription != null)
+                                {
+                                    <RadzenButton Text="Edit" 
+                                                  Icon="edit" 
+                                                  Size="ButtonSize.Small" 
+                                                  ButtonStyle="ButtonStyle.Light" 
+                                                  Variant="Variant.Filled" 
+                                                  Title="Edit subscription details" 
+                                                  Click="@(() => NavigateToSubscriptionEdit(row.Subscription.Id))" 
+                                                  Style="border-radius: 6px;" />
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    #region class model
+    public class UserSubscriptionRow
+    {
+        public ApplicationUser User { get; set; } = null!;
+        public string Email { get; set; } = string.Empty;
+        public string? UserName { get; set; }
+        public DateTime? RegisterDate { get; set; }
+        public bool HasSubscription { get; set; }
+        public TbSubscription? Subscription { get; set; }
+        public string? SubscriptionTitle { get; set; }
+        public eSubscriptionPlan? SubscriptionPlan { get; set; }
+        public DateTime? SubscriptionExpiryDate { get; set; }
+        public bool IsActive { get; set; }
+        public bool IsExpired { get; set; }
+    }
+    #endregion
+
+    #region class fields
+    private RadzenDataGrid<UserSubscriptionRow>? _grid;
+    private List<UserSubscriptionRow> _allRows = new();
+    private List<UserSubscriptionRow> _filteredRows = new();
+    private readonly HashSet<string> _processingEmails = new(StringComparer.OrdinalIgnoreCase);
+
+    private string _searchQuery = string.Empty;
+    private string _selectedStatusFilter = "All";
+    private DateTime? _registerDateFrom;
+    private DateTime? _registerDateTo;
+
+    private bool _isLoading = true;
+    private bool _isBatchProcessing = false;
+    private double _batchProgressPercentage = 0;
+    private string _batchProgressMessage = string.Empty;
+
+    private int _pageSize = 10;
+    private IEnumerable<int> _pageSizeOptions = new[] { 10, 25, 50, 100 };
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-16]
+        await LoadDataAsync();
+        #endregion
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-16]
+        _isLoading = true;
+        try
+        {
+            var users = await IdentityAdminService.GetSystemUsersAsync();
+            var allSubscriptions = await SubscriptionService.GetAllAsync(includeUsers: true, includeCorporates: false, includeInactive: true);
+            var registerDatesMap = await IdentityAdminService.GetUserRegisterDatesMapAsync();
+
+            var rows = new List<UserSubscriptionRow>();
+
+            foreach (var user in users)
+            {
+                var cleanEmail = (user.Email ?? string.Empty).Trim();
+                DateTime? regDate = registerDatesMap.TryGetValue(cleanEmail, out var dt) ? dt : null;
+
+                // Match user's subscription: Owned subscription or subscription membership
+                TbSubscription? matchingSub = null;
+                if (!string.IsNullOrWhiteSpace(cleanEmail))
+                {
+                    // 1. Check OwnerEmail match first
+                    matchingSub = allSubscriptions.FirstOrDefault(s =>
+                        s.OwnerEmail != null && s.OwnerEmail.Trim().Equals(cleanEmail, StringComparison.OrdinalIgnoreCase));
+
+                    // 2. If not found by OwnerEmail, check Owner role in Users
+                    matchingSub ??= allSubscriptions.FirstOrDefault(s =>
+                        s.Users.Any(u => u.Email != null && u.Email.Trim().Equals(cleanEmail, StringComparison.OrdinalIgnoreCase) && u.Role == eSubscriptionRole.Owner));
+
+                    // 3. Fallback: Any subscription membership
+                    matchingSub ??= allSubscriptions.FirstOrDefault(s =>
+                        s.Users.Any(u => u.Email != null && u.Email.Trim().Equals(cleanEmail, StringComparison.OrdinalIgnoreCase)));
+                }
+
+                bool hasSub = matchingSub != null;
+
+                rows.Add(new UserSubscriptionRow
+                {
+                    User = user,
+                    Email = cleanEmail,
+                    UserName = user.UserName,
+                    RegisterDate = regDate,
+                    HasSubscription = hasSub,
+                    Subscription = matchingSub,
+                    SubscriptionTitle = matchingSub?.Title,
+                    SubscriptionPlan = matchingSub?.SubscriptionPlan,
+                    SubscriptionExpiryDate = matchingSub?.ExpiryDate,
+                    IsActive = matchingSub?.IsActive ?? false,
+                    IsExpired = matchingSub?.IsExpired ?? false
+                });
+            }
+
+            _allRows = rows.OrderBy(r => r.HasSubscription).ThenBy(r => r.Email).ToList();
+            FilterRows();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load user and subscription data in PageActivateSubscriptions.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load user accounts and subscriptions.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void FilterRows()
+    {
+        #region hide [2026-08-16]
+        var result = _allRows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var q = _searchQuery.Trim();
+            result = result.Where(r =>
+                (!string.IsNullOrEmpty(r.Email) && r.Email.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(r.UserName) && r.UserName.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(r.SubscriptionTitle) && r.SubscriptionTitle.Contains(q, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (_selectedStatusFilter == "WithoutSubscription")
+        {
+            result = result.Where(r => !r.HasSubscription);
+        }
+        else if (_selectedStatusFilter == "WithSubscription")
+        {
+            result = result.Where(r => r.HasSubscription);
+        }
+
+        // Registration date range (inclusive, compared on local calendar day)
+        if (_registerDateFrom.HasValue || _registerDateTo.HasValue)
+        {
+            var fromDate = _registerDateFrom?.Date;
+            var toDate = _registerDateTo?.Date;
+
+            result = result.Where(r =>
+            {
+                if (!r.RegisterDate.HasValue) return false;
+                var localDate = TU.ACAMP.Domain.Tools.AppTimeZone.ToLocal(r.RegisterDate.Value).Date;
+                if (fromDate.HasValue && localDate < fromDate.Value) return false;
+                if (toDate.HasValue && localDate > toDate.Value) return false;
+                return true;
+            });
+        }
+
+        _filteredRows = result.ToList();
+        #endregion
+    }
+
+    private void OnFilterChangedHandler()
+    {
+        #region hide [2026-08-16]
+        FilterRows();
+        StateHasChanged();
+        #endregion
+    }
+
+    private BadgeStyle GetPlanBadgeStyle(eSubscriptionPlan plan)
+    {
+        #region hide [2026-08-16]
+        return plan switch
+        {
+            eSubscriptionPlan.Basic => BadgeStyle.Secondary,
+            eSubscriptionPlan.Pro => BadgeStyle.Primary,
+            eSubscriptionPlan.Premium => BadgeStyle.Warning,
+            eSubscriptionPlan.Enterprise => BadgeStyle.Danger,
+            _ => BadgeStyle.Light
+        };
+        #endregion
+    }
+
+    private string GetCurrentPageStateUrl()
+    {
+        #region hide [2026-08-16]
+        return NavigationManager.Uri;
+        #endregion
+    }
+
+    private void NavigateToSubscriptionEdit(int subscriptionId)
+    {
+        #region hide [2026-08-16]
+        var returnUrl = GetCurrentPageStateUrl();
+        var secureRet = DataProtection.Protect(returnUrl);
+        var secureId = DataProtection.Protect(subscriptionId);
+        NavigationManager.NavigateTo($"/subscriptions/edit?id={Uri.EscapeDataString(secureId)}&ret={Uri.EscapeDataString(secureRet)}");
+        #endregion
+    }
+
+    /// <summary>
+    /// Activates subscription for an individual user row (Creates 3-month Pro subscription and sends email gracefully).
+    /// </summary>
+    private async Task ActivateSingleUserHandlerAsync(UserSubscriptionRow row)
+    {
+        #region hide [2026-08-16]
+        if (string.IsNullOrWhiteSpace(row.Email)) return;
+
+        _processingEmails.Add(row.Email);
+        try
+        {
+            var createdSub = await SubscriptionService.ActivateUserSubscriptionAsync(row.Email, row.UserName, sendEmail: true);
+            
+            row.HasSubscription = true;
+            row.Subscription = createdSub;
+            row.SubscriptionTitle = createdSub.Title;
+            row.SubscriptionPlan = createdSub.SubscriptionPlan;
+            row.SubscriptionExpiryDate = createdSub.ExpiryDate;
+            row.IsActive = createdSub.IsActive;
+            row.IsExpired = createdSub.IsExpired;
+
+            FilterRows();
+            NotificationService.Notify(NotificationSeverity.Success, "Activated Successfully", $"Subscription created for {row.Email} (Plan: Pro, 3 Months).");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to activate subscription for {Email}", row.Email);
+            NotificationService.Notify(NotificationSeverity.Error, "Activation Failed", $"Error activating subscription: {ex.Message}");
+        }
+        finally
+        {
+            _processingEmails.Remove(row.Email);
+        }
+        #endregion
+    }
+
+    /// <summary>
+    /// Activates subscriptions in batch (Opens confirmation dialog with email dispatch options and processes in 2 phases).
+    /// </summary>
+    private async Task ActivateAllPendingHandlerAsync()
+    {
+        #region hide [2026-08-16]
+        var targetRows = _filteredRows
+            .Where(r => !r.HasSubscription && !string.IsNullOrWhiteSpace(r.Email))
+            .ToList();
+
+        if (!targetRows.Any())
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "No Action Needed", "All users in the current filter already have subscriptions.");
+            return;
+        }
+
+        var dialogResult = await DialogService.OpenAsync<ActivateSubscriptionsBatchConfirmDialog>(
+            "Confirm Batch Subscription Activation",
+            new Dictionary<string, object>
+            {
+                { nameof(ActivateSubscriptionsBatchConfirmDialog.TargetCount), targetRows.Count },
+                { nameof(ActivateSubscriptionsBatchConfirmDialog.PlanName), "Pro (3 Months)" }
+            },
+            new DialogOptions
+            {
+                Width = "560px",
+                CloseDialogOnOverlayClick = true,
+                ShowClose = true,
+                Resizable = false,
+                Draggable = true
+            });
+
+        if (dialogResult is not ActivateBatchChoice choice || choice == ActivateBatchChoice.Cancel)
+        {
+            return;
+        }
+
+        bool shouldSendEmail = choice == ActivateBatchChoice.WithEmail;
+
+        _isBatchProcessing = true;
+        _batchProgressPercentage = 0;
+        _batchProgressMessage = "Starting batch processing...";
+        StateHasChanged();
+
+        var newSubscriptions = new List<TbSubscription>();
+        int total = targetRows.Count;
+        int current = 0;
+
+        try
+        {
+            // === Phase 1: Create all subscriptions in database (skip email in loop) ===
+            foreach (var row in targetRows)
+            {
+                current++;
+                _batchProgressPercentage = (current * 100.0) / total;
+                _batchProgressMessage = $"Creating subscription ({current}/{total}): {row.Email}...";
+                StateHasChanged();
+
+                try
+                {
+                    // Create subscription in DB without sending email (sendEmail: false)
+                    var sub = await SubscriptionService.ActivateUserSubscriptionAsync(row.Email, row.UserName, sendEmail: false);
+                    if (sub != null)
+                    {
+                        newSubscriptions.Add(sub);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to auto-create subscription for {Email} during batch activation.", row.Email);
+                }
+            }
+
+            // === Phase 2: Process email notifications based on user choice ===
+            if (newSubscriptions.Any())
+            {
+                if (shouldSendEmail)
+                {
+                    _batchProgressPercentage = 0;
+                    _batchProgressMessage = "Sending notification emails...";
+                    StateHasChanged();
+
+                    int emailTotal = newSubscriptions.Count;
+                    int emailCurrent = 0;
+                    int emailSuccess = 0;
+                    int emailFailed = 0;
+
+                    foreach (var sub in newSubscriptions)
+                    {
+                        emailCurrent++;
+                        _batchProgressPercentage = (emailCurrent * 100.0) / emailTotal;
+                        _batchProgressMessage = $"Sending email ({emailCurrent}/{emailTotal}): {sub.OwnerEmail}...";
+                        StateHasChanged();
+
+                        try
+                        {
+                            await EmailSender.SendEmailCreateSubscribeAsync(sub);
+                            emailSuccess++;
+                        }
+                        catch (Exception emailEx)
+                        {
+                            emailFailed++;
+                            Logger.LogError(emailEx, "Failed to send subscription creation email to {Email}", sub.OwnerEmail);
+                        }
+                    }
+
+                    if (emailFailed > 0)
+                    {
+                        NotificationService.Notify(NotificationSeverity.Warning, "Process Completed", 
+                            $"Successfully created {newSubscriptions.Count} subscription(s) | Emails sent: {emailSuccess}, Failed: {emailFailed} (Check log for SMTP details).");
+                    }
+                    else
+                    {
+                        NotificationService.Notify(NotificationSeverity.Success, "Process Completed", 
+                            $"Successfully created {newSubscriptions.Count} subscription(s) and sent all notification emails.");
+                    }
+                }
+                else
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Process Completed", 
+                        $"Successfully created {newSubscriptions.Count} subscription(s) (email notifications skipped).");
+                }
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Unable to create subscriptions. Please check the system logs.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unexpected error occurred during batch subscription activation.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", $"An error occurred during processing: {ex.Message}");
+        }
+        finally
+        {
+            _isBatchProcessing = false;
+            _batchProgressPercentage = 0;
+            _batchProgressMessage = string.Empty;
+            await LoadDataAsync();
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private async Task OnRowDoubleClick(DataGridRowMouseEventArgs<UserSubscriptionRow> args)
+    {
+        #region hide [2026-08-20]
+        if (args.Data == null) return;
+        var row = args.Data;
+        if (!row.HasSubscription)
+        {
+            await ActivateSingleUserHandlerAsync(row);
+        }
+        else if (row.Subscription != null)
+        {
+            NavigateToSubscriptionEdit(row.Subscription.Id);
+        }
+        #endregion
+    }
+    #endregion
+}

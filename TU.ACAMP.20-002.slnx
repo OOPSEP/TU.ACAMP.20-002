@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="TU.ACAMP.Domain/TU.ACAMP.Domain.csproj" />
+  <Project Path="TU.ACAMP.Tests.E2E/TU.ACAMP.Tests.E2E.csproj" />
+  <Project Path="TU.ACAMP.WebApp/TU.ACAMP.WebApp.csproj" Id="b15011b9-cf8b-4ffb-9d9a-f07b26689f3d" />
+</Solution>

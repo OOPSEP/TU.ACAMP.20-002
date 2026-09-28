@@ -1,0 +1,294 @@
+@page "/library/activity-topics/files"
+@page "/activities/topics/files"
+
+@using System.Text.Json.Nodes
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Components.Common
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+
+@attribute [Authorize]
+
+@inject ActivityTopicService ActivityTopicService
+@inject SubscriptionService SubscriptionService
+@inject CorporateService CorporateService
+@inject CompanyService CompanyService
+@inject FacilityService FacilityService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<PageActivityTopicFiles> Logger
+
+<PageTitle>Topic Attached Files - ACAMP</PageTitle>
+
+<div class="container-fluid py-2 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@GoBack" Class="me-2" Style="border-radius: 6px;" Title="Back to previous page" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    Topic Attached Files & References
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0 ms-5">
+                Upload evidence documents, files, and external reference links for this activity topic.
+            </RadzenText>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading topic attachments..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_topic == null)
+    {
+        <div class="alert alert-danger text-center py-4 border rounded-3 bg-light shadow-sm">
+            <RadzenIcon Icon="error" Style="font-size: 2rem;" Class="text-danger mb-2 d-block" />
+            <strong>Activity Topic Not Found:</strong> The requested activity topic does not exist or you do not have permission.
+        </div>
+    }
+    else
+    {
+        <!-- Section 1: Topic Overview Card -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+            <RadzenRow AlignItems="AlignItems.Center" Class="g-3">
+                <RadzenColumn Size="12" SizeMD="8">
+                    <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                        <span class="badge @BadgeScopeColor" style="font-size: 0.8rem; font-weight: 600; border-radius: 4px; padding: 4px 10px;">
+                            @ScopeBadgeText
+                        </span>
+                        <RadzenText TextStyle="TextStyle.H6" Class="m-0 fw-bold text-dark">
+                            @_topic.Title
+                        </RadzenText>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_topic.Remark))
+                    {
+                        <RadzenText TextStyle="TextStyle.Body2" Class="text-muted mb-3">
+                            Remark: @_topic.Remark
+                        </RadzenText>
+                    }
+                    <div class="row g-2 text-secondary small" style="font-size: 0.88rem;">
+                        <div class="col-12 col-md-6">
+                            <strong>Activity Group:</strong> @(_masterChild?.ActivityGroup?.Title ?? "-")
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Emission Source:</strong> @(_masterChild?.Source?.Title ?? "-")
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Topic Public Key:</strong> <code class="text-primary fw-bold">@_topicKey</code>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Level / Organization:</strong> <span class="badge bg-light text-dark border">@_topic.Level</span>
+                        </div>
+                    </div>
+                </RadzenColumn>
+                <RadzenColumn Size="12" SizeMD="4" Class="text-md-end">
+                    <div class="p-3 bg-light rounded border text-center text-md-end">
+                        <div class="text-muted small mb-1">Attached Files Count</div>
+                        <div class="fs-4 fw-bold text-info">
+                            <RadzenIcon Icon="attach_file" Class="me-1" />
+                            @_fileCount Files
+                        </div>
+                    </div>
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenCard>
+
+        <!-- Section 2: Attached Files Widget Card -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex align-items-center gap-2">
+                    <RadzenIcon Icon="folder_shared" Class="text-info" Style="font-size: 1.4rem;" />
+                    <RadzenText TextStyle="TextStyle.Subtitle1" Class="m-0 fw-bold text-dark">
+                        Files & Evidence Links
+                    </RadzenText>
+                </div>
+            </div>
+
+            <AttachedFilesWidget JsonDataFiles="@_topic.JsonDataFiles"
+                                 JsonDataFilesChanged="@(node => _topic.JsonDataFiles = node)"
+                                 SubscriptionId="@_topic.SubscriptionId"
+                                 IsReadOnly="@_isReadOnly"
+                                 OnModelChanged="@SaveTopicFilesAsync" />
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _isLoading = true;
+    private bool _isReadOnly = false;
+    private int _topicId = 0;
+    private int _subscriptionId = 0;
+    private TbActivityTopic? _topic;
+    private TbActivityTopicChild? _masterChild;
+    private string _topicKey = string.Empty;
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+
+    public string? ReturnUrl { get; set; }
+
+    private int _fileCount => TbFileEntity.DeserializeListFromJson(_topic?.JsonDataFiles?.ToJsonString(null) ?? "[]")?.Count ?? 0;
+
+    private eTgoScopeNo ScopeNo => _masterChild?.ActivityGroup?.TgoScopeNo
+        ?? _masterChild?.Source?.Group?.TgoScopeNo
+        ?? eTgoScopeNo.Scope1;
+
+    private string ScopeBadgeText => ScopeNo switch
+    {
+        eTgoScopeNo.Scope1 => "Scope 1 (Direct GHG)",
+        eTgoScopeNo.Scope2 => "Scope 2 (Indirect Energy)",
+        eTgoScopeNo.Scope3 => "Scope 3 (Other Indirect)",
+        _ => "Separate Report"
+    };
+
+    private string BadgeScopeColor => ScopeNo switch
+    {
+        eTgoScopeNo.Scope1 => "bg-primary text-white",
+        eTgoScopeNo.Scope2 => "bg-success text-white",
+        eTgoScopeNo.Scope3 => "bg-info text-white",
+        _ => "bg-secondary text-white"
+    };
+    #endregion
+
+    #region class methods
+    protected override async Task OnParametersSetAsync()
+    {
+        ResolveParameters();
+        await LoadDataAsync();
+    }
+
+    private void ResolveParameters()
+    {
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            _topicId = DataProtection.UnprotectInt(SecureId) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureSid))
+        {
+            _subscriptionId = DataProtection.UnprotectInt(SecureSid) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureRet))
+        {
+            ReturnUrl = DataProtection.Unprotect(SecureRet);
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            if (_topicId <= 0)
+            {
+                _topic = null;
+                return;
+            }
+
+            _topic = await ActivityTopicService.GetByIdAsync(_topicId, includeRelations: true);
+            if (_topic != null)
+            {
+                _topicKey = PublicKeyCodec.Encode(PublicKeyCodec.TopicPrefix, _topic.Id);
+                _masterChild = _topic.Childs.FirstOrDefault(c => c.IsActive && !c.IsDeleted) ?? _topic.Childs.FirstOrDefault();
+
+                var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+                var user = authState.User;
+                var isAdmin = user.IsInRole(SystemRoles.Administrator);
+                var currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity?.Name ?? string.Empty);
+
+                if (!isAdmin)
+                {
+                    var editableSubIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(currentUserEmail, isAdmin);
+                    var canEditSub = editableSubIds.Contains(_topic.SubscriptionId);
+
+                    var canEditContext = true;
+                    if (_topic.Level == eTopicLevel.Corporate && _topic.TargetId > 0)
+                    {
+                        var editableCorpIds = await CorporateService.GetEditableCorporateIdsAsync(currentUserEmail, isAdmin);
+                        canEditContext = editableCorpIds.Contains(_topic.TargetId);
+                    }
+                    else if (_topic.Level == eTopicLevel.Company && _topic.TargetId > 0)
+                    {
+                        var editableComIds = await CompanyService.GetEditableCompanyIdsAsync(currentUserEmail, isAdmin);
+                        canEditContext = editableComIds.Contains(_topic.TargetId);
+                    }
+                    else if (_topic.Level == eTopicLevel.Facility && _topic.TargetId > 0)
+                    {
+                        var editableFacIds = await FacilityService.GetEditableFacilityIdsAsync(currentUserEmail, isAdmin);
+                        canEditContext = editableFacIds.Contains(_topic.TargetId);
+                    }
+
+                    _isReadOnly = !(canEditSub && canEditContext);
+                }
+                else
+                {
+                    _isReadOnly = false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading topic files for topic ID: {Id}", _topicId);
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load topic files.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveTopicFilesAsync()
+    {
+        if (_topic != null && _topic.Id > 0 && !_isReadOnly)
+        {
+            try
+            {
+                await ActivityTopicService.UpdateAsync(_topic);
+                NotificationService.Notify(NotificationSeverity.Success, "Saved", "Attached files and references updated successfully.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error saving topic attachments for topic ID: {Id}", _topic.Id);
+                NotificationService.Notify(NotificationSeverity.Error, "Save Error", "Failed to save file changes.");
+            }
+        }
+    }
+
+    private void GoBack()
+    {
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+            return;
+        }
+        NavigationManager.NavigateTo("/library/activity-topics");
+    }
+    #endregion
+}

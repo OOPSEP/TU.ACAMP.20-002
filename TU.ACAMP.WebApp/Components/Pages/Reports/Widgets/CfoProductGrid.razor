@@ -1,0 +1,199 @@
+@* [2026-09-17][Claude] Reusable product-output grid for Fr-01 (Calculate Year / Base Year tabs) *@
+@using TU.ACAMP.WebApp.Services.Reports
+
+<div>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <span class="fw-semibold small text-secondary">@Title</span>
+            <span class="badge bg-light text-dark border">Total: @TotalAmount.ToString("N2") @PrimaryUnit</span>
+        </div>
+        <RadzenButton Text="Add Product" Icon="add" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Outlined" Size="ButtonSize.Small"
+                      Click="@AddRowAsync" Style="border-radius: 6px;" />
+    </div>
+
+    <RadzenDataGrid @ref="_grid" Data="@Items" TItem="CfoReportService.CfoProductItemDto"
+                    RowDoubleClick="@(async (Radzen.DataGridRowMouseEventArgs<CfoReportService.CfoProductItemDto> args) => await EditRowAsync(args.Data))"
+                    Density="Density.Compact" EmptyText="No product items yet. Click Add Product to create one."
+                    Style="border: 1px solid #e2e8f0; border-radius: 6px;">
+        <Columns>
+            <RadzenDataGridColumn TItem="CfoReportService.CfoProductItemDto" Property="Index" Title="#" Width="55px" TextAlign="TextAlign.Center">
+                <Template Context="item">
+                    <span class="fw-bold text-muted">@item.Index</span>
+                </Template>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="CfoReportService.CfoProductItemDto" Property="ProductName" Title="Product Name">
+                <Template Context="item">
+                    <span>@item.ProductName</span>
+                </Template>
+                <EditTemplate Context="item">
+                    <RadzenTextBox @bind-Value="item.ProductName" Style="width: 100%;" Placeholder="e.g. Primary Product"
+                                   @onkeydown="@(async (KeyboardEventArgs e) => { if (e.Key == "Enter") await SaveRowAsync(item); else if (e.Key == "Escape") await CancelEditAsync(item); })" />
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="CfoReportService.CfoProductItemDto" Property="Amount" Title="Product Amount" Width="160px">
+                <Template Context="item">
+                    <span>@item.Amount.ToString("N2")</span>
+                </Template>
+                <EditTemplate Context="item">
+                    <RadzenNumeric @bind-Value="item.Amount" TValue="decimal" Format="N2" Style="width: 100%;"
+                                   @onkeydown="@(async (KeyboardEventArgs e) => { if (e.Key == "Enter") await SaveRowAsync(item); else if (e.Key == "Escape") await CancelEditAsync(item); })" />
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="CfoReportService.CfoProductItemDto" Property="Unit" Title="Unit" Width="140px">
+                <Template Context="item">
+                    <span>@item.Unit</span>
+                </Template>
+                <EditTemplate Context="item">
+                    <RadzenTextBox @bind-Value="item.Unit" Style="width: 100%;" Placeholder="e.g. Tonnes, Pieces"
+                                   @onkeydown="@(async (KeyboardEventArgs e) => { if (e.Key == "Enter") await SaveRowAsync(item); else if (e.Key == "Escape") await CancelEditAsync(item); })" />
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="CfoReportService.CfoProductItemDto" Context="item" Filterable="false" Sortable="false" TextAlign="TextAlign.Center" Width="95px">
+                <Template Context="item">
+                    <div class="d-inline-flex gap-1">
+                        <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall" Variant="Variant.Flat"
+                                      Click="@(async () => await EditRowAsync(item))" Title="Edit (Double-click)" />
+                        <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.ExtraSmall" Variant="Variant.Flat"
+                                      Click="@(async () => await DeleteRowAsync(item))" Title="Delete" />
+                    </div>
+                </Template>
+                <EditTemplate Context="item">
+                    <div class="d-inline-flex gap-1">
+                        <RadzenButton Icon="check" ButtonStyle="ButtonStyle.Success" Size="ButtonSize.ExtraSmall" Variant="Variant.Flat"
+                                      Click="@(async () => await SaveRowAsync(item))" Title="Update (Enter)" />
+                        <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall" Variant="Variant.Flat"
+                                      Click="@(async () => await CancelEditAsync(item))" Title="Cancel (Esc)" />
+                    </div>
+                </EditTemplate>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Product Output Items";
+
+    [Parameter, EditorRequired] public List<CfoReportService.CfoProductItemDto> Items { get; set; } = new();
+    [Parameter] public EventCallback<List<CfoReportService.CfoProductItemDto>> ItemsChanged { get; set; }
+
+    [Parameter] public string DefaultUnit { get; set; } = "Tonnes";
+
+    private RadzenDataGrid<CfoReportService.CfoProductItemDto>? _grid;
+
+    // [2026-09-17][Claude] Snapshot taken before editing so Cancel can restore the row (the edit templates bind the item itself)
+    private readonly Dictionary<CfoReportService.CfoProductItemDto, CfoReportService.CfoProductItemDto> _backups = new();
+
+    // [2026-09-17][Claude] Rows created by Add Product but never confirmed; cancelling removes them again
+    private readonly HashSet<CfoReportService.CfoProductItemDto> _uncommitted = new();
+
+    private decimal TotalAmount => Items?.Sum(x => x.Amount) ?? 0m;
+
+    private string PrimaryUnit => Items?.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Unit))?.Unit ?? DefaultUnit;
+
+    private async Task EditRowAsync(CfoReportService.CfoProductItemDto item)
+    {
+        if (_grid is null)
+        {
+            return;
+        }
+
+        _backups[item] = new CfoReportService.CfoProductItemDto
+        {
+            Index = item.Index,
+            ProductName = item.ProductName,
+            Amount = item.Amount,
+            Unit = item.Unit
+        };
+
+        await _grid.EditRow(item);
+    }
+
+    private async Task SaveRowAsync(CfoReportService.CfoProductItemDto item)
+    {
+        _backups.Remove(item);
+        _uncommitted.Remove(item);
+
+        if (_grid is not null)
+        {
+            await _grid.UpdateRow(item);
+        }
+
+        await NotifyChangedAsync();
+    }
+
+    private async Task CancelEditAsync(CfoReportService.CfoProductItemDto item)
+    {
+        if (_backups.Remove(item, out var backup))
+        {
+            item.Index = backup.Index;
+            item.ProductName = backup.ProductName;
+            item.Amount = backup.Amount;
+            item.Unit = backup.Unit;
+        }
+
+        _grid?.CancelEditRow(item);
+
+        if (_uncommitted.Remove(item))
+        {
+            Items.Remove(item);
+            Reindex(Items);
+
+            if (_grid is not null)
+            {
+                await _grid.Reload();
+            }
+
+            await NotifyChangedAsync();
+        }
+    }
+
+    private async Task DeleteRowAsync(CfoReportService.CfoProductItemDto item)
+    {
+        _backups.Remove(item);
+        _uncommitted.Remove(item);
+        Items.Remove(item);
+        Reindex(Items);
+
+        if (_grid is not null)
+        {
+            await _grid.Reload();
+        }
+
+        await NotifyChangedAsync();
+    }
+
+    private async Task AddRowAsync()
+    {
+        var newItem = new CfoReportService.CfoProductItemDto
+        {
+            Index = Items.Count + 1,
+            ProductName = string.Empty,
+            Amount = 0m,
+            Unit = PrimaryUnit
+        };
+
+        Items.Add(newItem);
+        _uncommitted.Add(newItem);
+
+        if (_grid is not null)
+        {
+            await _grid.Reload();
+            await EditRowAsync(newItem);
+        }
+    }
+
+    private Task NotifyChangedAsync()
+        => ItemsChanged.HasDelegate ? ItemsChanged.InvokeAsync(Items) : Task.CompletedTask;
+
+    private static void Reindex(List<CfoReportService.CfoProductItemDto> list)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            list[i].Index = i + 1;
+        }
+    }
+}

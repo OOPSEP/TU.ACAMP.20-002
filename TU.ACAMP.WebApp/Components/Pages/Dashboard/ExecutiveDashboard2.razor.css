@@ -1,0 +1,109 @@
+/* [2026-09-17][Gemini] CSS Variables and Scoped Styles for Executive Dashboard V2 */
+:root {
+    --dash-total: #0f766e;
+    --dash-scope1: #10b981;
+    --dash-scope2: #3b82f6;
+    --dash-scope3: #f97316;
+    --dash-biogenic: #8b5cf6;
+    --dash-biogenic-bg: #ede9fe;
+    --dash-biogenic-text: #7c3aed;
+    --dash-target: #f59e0b;
+    --dash-target-met: #10b981;
+    --dash-target-exceeded: #e11d48;
+    --dash-base-year: #cbd5e1;
+    --dash-hotspot: #ef4444;
+    --dash-facility: #3b82f6;
+}
+
+/* Card Borders */
+.dash-card-total {
+    border-left: 5px solid var(--dash-total) !important;
+}
+
+.dash-card-scope1 {
+    border-left: 5px solid var(--dash-scope1) !important;
+}
+
+.dash-card-scope2 {
+    border-left: 5px solid var(--dash-scope2) !important;
+}
+
+.dash-card-scope3 {
+    border-left: 5px solid var(--dash-scope3) !important;
+}
+
+.dash-card-biogenic {
+    border-left: 5px solid var(--dash-biogenic) !important;
+}
+
+.dash-card-intensity {
+    border-left: 5px solid var(--dash-total) !important;
+}
+
+.dash-card-quality {
+    border-left: 5px solid var(--dash-target) !important;
+}
+
+/* [2026-09-25][Antigravity] Net Footprint Card */
+.dash-card-net {
+    border-left: 5px solid #059669 !important;
+}
+
+/* Icon & Sub-element Colors */
+.dash-icon-total {
+    color: var(--dash-total);
+}
+
+.dash-icon-scope1 {
+    color: var(--dash-scope1);
+}
+
+.dash-icon-scope2 {
+    color: var(--dash-scope2);
+}
+
+.dash-icon-scope3 {
+    color: var(--dash-scope3);
+}
+
+.dash-icon-biogenic {
+    color: var(--dash-biogenic-text);
+}
+
+.dash-bg-biogenic {
+    background-color: var(--dash-biogenic-bg);
+    color: var(--dash-biogenic-text);
+}
+
+.dash-badge-biogenic {
+    background-color: var(--dash-biogenic-bg);
+    color: var(--dash-biogenic-text);
+}
+
+.dash-hotspot-badge {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--dash-hotspot);
+}
+
+.dash-facility-badge {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: var(--dash-facility);
+}
+
+.dash-cursor-pointer {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dash-cursor-pointer:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.dash-grid-row-clickable {
+    cursor: pointer;
+}
+
+.dash-grid-row-clickable:hover {
+    background-color: rgba(16, 185, 129, 0.04) !important;
+}

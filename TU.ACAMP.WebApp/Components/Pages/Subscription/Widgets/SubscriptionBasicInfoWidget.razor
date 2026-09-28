@@ -1,0 +1,185 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Services.Identity
+@inject SubscriptionService SubscriptionService
+
+<div class="p-4">
+    <div class="row g-3">
+        <div class="col-12 col-md-6">
+            <RadzenFormField Text="Owner Type *" Style="width: 100%;">
+                <RadzenDropDown TValue="eSubscriptionOwnerType"
+                                Data="@_ownerTypeOptions"
+                                TextProperty="Text"
+                                ValueProperty="Value"
+                                @bind-Value="@Model.OwnerType"
+                                Change="@OnFieldValueChanged"
+                                Disabled="@IsFieldDisabled" />
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-6">
+            <RadzenFormField Text="Tax ID / Registration No. (13 digits) *" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@Model.TaxId" MaxLength="13" Change="@OnTaxIdOrTitleChangedAsync" Disabled="@IsFieldDisabled" Placeholder="e.g. 0105558000000" />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-8">
+            <RadzenFormField Text="Subscription / Organization Title *" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@Model.Title" Change="@OnTaxIdOrTitleChangedAsync" Disabled="@IsFieldDisabled" Placeholder="e.g. Thammasat Carbon Accounting Platform" />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Owner / Juristic Name" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@Model.OwnerName" Change="@OnFieldValueChanged" Disabled="@IsFieldDisabled" Placeholder="e.g. ACAMP Co., Ltd." />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        @* [2026-09-28][Gemini] แสดงการแจ้งเตือนแบบ Inline พร้อมคำแนะนำการตั้งชื่อแยก Sub License ระดับองค์กร (BU, ESG Scope, Contract) เมื่อพบว่ามี Subscription ซ้ำ *@
+        @if (IsCreateMode && _duplicateSubscriptions.Any())
+        {
+            <div class="col-12">
+                <div class="alert alert-warning border border-warning shadow-sm rounded-3 p-3 mb-1" style="background-color: #fffdf5;">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <RadzenIcon Icon="warning_amber" Style="font-size: 1.4rem; color: #d97706;" />
+                        <span class="fw-bold" style="color: #92400e; font-size: 0.95rem;">
+                            Existing Organization Subscription Detected (@_duplicateSubscriptions.Count active license@( _duplicateSubscriptions.Count > 1 ? "s" : "" ) found)
+                        </span>
+                    </div>
+
+                    <div style="font-size: 0.85rem; color: #78350f;">
+                        The system found existing subscription tenant(s) matching this Tax ID or Title:
+                        <div class="d-flex flex-wrap gap-2 my-2">
+                            @foreach (var sub in _duplicateSubscriptions.Take(3))
+                            {
+                                <span class="badge bg-light text-dark border p-2 text-start" style="font-size: 0.82rem; font-weight: normal;">
+                                    <strong>@sub.Title</strong> | Tax ID: @sub.TaxId | <span class="badge bg-primary">@sub.SubscriptionPlan</span> | Owner: @sub.OwnerEmail
+                                </span>
+                            }
+                        </div>
+
+                        <div class="p-3 mt-2 rounded bg-white border border-warning-subtle">
+                            <div class="fw-bold text-dark mb-1">
+                                <RadzenIcon Icon="lightbulb" Style="font-size: 1.1rem; color: #eab308; vertical-align: middle;" />
+                                Organization-Level License Scope Recommendation:
+                            </div>
+                            <p class="mb-2 text-muted" style="line-height: 1.45;">
+                                Subscriptions operate as top-level organizational tenants (above Corporate groups, Companies, and Facilities).
+                                When an organization (e.g., Boon Rawd Brewery or large conglomerates) acquires multiple licenses, we recommend distinguishing this subscription by its <strong>high-level organizational scope or purpose</strong> rather than physical branches:
+                            </p>
+                            <ul class="mb-2 ps-3 text-secondary" style="line-height: 1.5;">
+                                <li><strong>By Business Unit / Division:</strong> e.g., <code>[Beverage BU]</code>, <code>[Packaging BU]</code>, <code>[Agri-Business BU]</code></li>
+                                <li><strong>By ESG / Strategic Scope:</strong> e.g., <code>[Scope 1-2 Direct]</code>, <code>[Supply Chain / Scope 3]</code>, <code>[Export ESG]</code></li>
+                                <li><strong>By Contract / License ID:</strong> e.g., <code>[License #2]</code>, <code>[Contract 2026-2028]</code></li>
+                            </ul>
+                            <div class="d-flex align-items-center gap-2 pt-2 border-top flex-wrap">
+                                <span class="fw-semibold text-secondary" style="font-size: 0.8rem;">Quick Append Scope:</span>
+                                <RadzenButton Text="+ [License #2]" Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Click="@(() => AppendScopeSuffixAsync("[License #2]"))" />
+                                <RadzenButton Text="+ [Supply Chain]" Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Click="@(() => AppendScopeSuffixAsync("[Supply Chain]"))" />
+                                <RadzenButton Text="+ [Business Unit 2]" Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Click="@(() => AppendScopeSuffixAsync("[Business Unit 2]"))" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Owner Email *" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@Model.OwnerEmail" Change="@OnFieldValueChanged" Disabled="@IsFieldDisabled" Placeholder="owner@domain.com" />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Phone Number" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@Model.OwnerPhone" Change="@OnFieldValueChanged" Disabled="@IsFieldDisabled" Placeholder="02-xxx-xxxx" />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Contact Person" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@Model.ContactPerson" Change="@OnFieldValueChanged" Disabled="@IsFieldDisabled" Placeholder="Contact coordinator name" />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12">
+            <RadzenFormField Text="Billing Address *" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextArea @bind-Value="@Model.BillingAddress" Rows="2" Change="@OnFieldValueChanged" Disabled="@IsFieldDisabled" Placeholder="Enter registered billing / tax invoice address" />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12">
+            <RadzenFormField Text="Remarks / Notes" Style="width: 100%;">
+                <ChildContent>
+                    <RadzenTextArea @bind-Value="@Model.Remarks" Rows="2" Change="@OnFieldValueChanged" Disabled="@IsFieldDisabled" Placeholder="Internal notes or project remarks..." />
+                </ChildContent>
+            </RadzenFormField>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TbSubscription Model { get; set; } = null!;
+    [Parameter] public bool IsFieldDisabled { get; set; }
+    [Parameter] public bool IsCreateMode { get; set; } = true;
+    [Parameter] public EventCallback OnFieldValueChanged { get; set; }
+
+    private record DropdownOption<T>(T Value, string Text);
+    private List<TbSubscription> _duplicateSubscriptions = new();
+
+    private readonly List<DropdownOption<eSubscriptionOwnerType>> _ownerTypeOptions = new()
+    {
+        new(eSubscriptionOwnerType.Individual, "Individual"),
+        new(eSubscriptionOwnerType.Juristic, "Juristic")
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // [2026-09-28][Gemini] โหลดและตรวจสอบรายการซ้ำเมื่อเปิดหน้า Create
+        if (IsCreateMode && (!string.IsNullOrWhiteSpace(Model.TaxId) || !string.IsNullOrWhiteSpace(Model.Title)))
+        {
+            await CheckDuplicatesAsync();
+        }
+    }
+
+    private async Task OnTaxIdOrTitleChangedAsync()
+    {
+        await OnFieldValueChanged.InvokeAsync();
+        await CheckDuplicatesAsync();
+    }
+
+    private async Task CheckDuplicatesAsync()
+    {
+        if (!IsCreateMode) return;
+        _duplicateSubscriptions = await SubscriptionService.FindDuplicateSubscriptionsAsync(Model.TaxId, Model.Title, Model.Id);
+        StateHasChanged();
+    }
+
+    private async Task AppendScopeSuffixAsync(string suffix)
+    {
+        if (string.IsNullOrWhiteSpace(Model.Title))
+        {
+            Model.Title = suffix;
+        }
+        else if (!Model.Title.Contains(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            Model.Title = $"{Model.Title.Trim()} - {suffix}";
+        }
+        await OnFieldValueChanged.InvokeAsync();
+        await CheckDuplicatesAsync();
+    }
+}

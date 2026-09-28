@@ -1,0 +1,461 @@
+@using System.Text.Json.Nodes
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Forms
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+
+@inject NotificationService NotificationService
+@inject NavigationManager NavigationManager
+@inject DialogService DialogService
+@inject ILogger<AttachedFilesWidget> Logger
+@inject IJSRuntime JSRuntime
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IWebHostEnvironment Env
+@inject FileStorageService FileStorageService
+@inject SubscriptionService SubscriptionService
+
+<RadzenStack Gap="0.5rem" Style="width: 100%;">
+    <RadzenTabs RenderMode="TabRenderMode.Client" Class="w-100 border bg-white rounded-3 shadow-sm" Style="border-radius: 8px;">
+        <Tabs>
+            @RenderFileShareLinksTab
+            @RenderAttachedFilesTab
+        </Tabs>
+    </RadzenTabs>
+</RadzenStack>
+
+@code {
+    #region class field
+    private readonly string _fileInputId = $"widgetFileInput_{Guid.NewGuid():N}";
+    private bool _isLoading = false;
+    private bool _isAdmin = false;
+    private int _pageSize = 15;
+    private readonly IEnumerable<int> _pageSizeOptions = new int[] { 15, 25, 50, 100 };
+    private RadzenDataGrid<TbFileEntity> _grid = default!;
+    private List<TbFileEntity> _fileList = new();
+    private List<TbFileEntity> UrlItems => _fileList.Where(x => x.StorageProvider == eStorageProvider.URL).ToList();
+    private List<TbFileEntity> PhysicalFileItems => _fileList.Where(x => x.StorageProvider == eStorageProvider.Local).ToList();
+    private string _currentUserEmail = "system";
+    private string _lastBoundJson = string.Empty;
+    private string _shareLinkUrl = string.Empty;
+    private string _shareLinkName = string.Empty;
+    private string _selectedTag = string.Empty;
+    #endregion
+
+    #region class properties
+    [Parameter] public JsonNode JsonDataFiles { get; set; } = JsonNode.Parse("[]")!;
+    [Parameter] public EventCallback<JsonNode> JsonDataFilesChanged { get; set; }
+    [Parameter] public int? SubscriptionId { get; set; }
+    [Parameter] public EventCallback OnModelChanged { get; set; }
+    [Parameter] public List<dynamic>? TagOptions { get; set; }
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-17]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value
+            ?? user.FindFirst(ClaimTypes.Name)?.Value
+            ?? user.Identity?.Name
+            ?? "system";
+        _isAdmin = user.IsInRole(TU.ACAMP.Domain.Identity.SystemRoles.Administrator);
+        #endregion
+    }
+
+    protected override void OnParametersSet()
+    {
+        #region hide [2026-08-17]
+        var currentJson = JsonDataFiles?.ToJsonString(null) ?? "[]";
+        if (currentJson != _lastBoundJson)
+        {
+            _fileList = TbFileEntity.DeserializeListFromJson(currentJson);
+            _lastBoundJson = currentJson;
+        }
+        #endregion
+    }
+
+    private string GetDocTypeText(string tagValue)
+    {
+        #region hide [2026-08-17]
+        if (string.IsNullOrWhiteSpace(tagValue)) return string.Empty;
+        if (TagOptions == null) return tagValue;
+
+        foreach (var opt in TagOptions)
+        {
+            try
+            {
+                if (opt.Value == tagValue)
+                {
+                    return opt.Text;
+                }
+            }
+            catch
+            {
+                // Fallback
+            }
+        }
+        return tagValue;
+        #endregion
+    }
+
+    private async Task OpenLink(TbFileEntity item)
+    {
+        #region hide [2026-08-17]
+        if (string.IsNullOrWhiteSpace(item.Url)) return;
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("window.open", item.Url, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to execute window.open operation for file link: {Url}", item.Url);
+            NavigationManager.NavigateTo(item.Url, forceLoad: false);
+        }
+        #endregion
+    }
+
+    private async Task HandleOnChangeFiles(InputFileChangeEventArgs e)
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            var subFolder = SubscriptionId.HasValue ? SubscriptionId.Value.ToString() : "default";
+            var sub = (SubscriptionId.HasValue && SubscriptionId.Value > 0)
+                ? await SubscriptionService.GetByIdAsync(SubscriptionId.Value)
+                : null;
+            var maxBytes = FileConstants.GetMaxUploadSizeBytes(sub?.AllowDataUploadCount);
+
+            foreach (var file in e.GetMultipleFiles(maximumFileCount: 10))
+            {
+                if (file.Size > maxBytes)
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "File Too Large", $"{file.Name} ({FileConstants.FormatFileSize(file.Size)}) exceeds the maximum allowed size of {FileConstants.FormatFileSize(maxBytes)}.");
+                    continue;
+                }
+
+                try
+                {
+                    var fileEntity = await FileStorageService.SaveFileAsync(file, subFolder, maxBytes);
+                    if (fileEntity != null)
+                    {
+                        fileEntity.StorageProvider = eStorageProvider.Local;
+                        fileEntity.Tag = _selectedTag;
+                        _fileList.Add(fileEntity);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "Upload Error", $"Failed to upload {file.Name}: {ex.Message}");
+                }
+            }
+
+            _grid?.Reload();
+            await SyncAndNotifyAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling physical file input batch read operation inside widget.");
+            NotificationService.Notify(NotificationSeverity.Error, "Upload Failure", "An error occurred during local file tracking.");
+        }
+        #endregion
+    }
+
+    private async Task RemoveFileItem(TbFileEntity item)
+    {
+        #region hide [2026-08-17]
+        var confirmed = await DialogService.Confirm(
+            "Are you sure you want to delete this file?",
+            "Delete File",
+            new ConfirmOptions { OkButtonText = "Delete", CancelButtonText = "Cancel" });
+        if (confirmed == true)
+        {
+            if (item.StorageProvider == eStorageProvider.Local)
+            {
+                FileStorageService.DeletePhysicalFile(item.Url);
+            }
+            _fileList.Remove(item);
+            await SyncAndNotifyAsync();
+        }
+        #endregion
+    }
+
+    private async Task DownloadFile(TbFileEntity item)
+    {
+        #region hide [2026-08-17]
+        if (item == null || string.IsNullOrWhiteSpace(item.Url)) return;
+
+        try
+        {
+            byte[]? bytes = null;
+            if (item.StorageProvider == eStorageProvider.GoogleDrive)
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Unavailable", "Google Drive direct download is currently not configured.");
+                return;
+            }
+            else
+            {
+                bytes = await FileStorageService.ReadFileAsync(item);
+            }
+
+            if (bytes != null)
+            {
+                var base64 = Convert.ToBase64String(bytes);
+                await JSRuntime.InvokeVoidAsync("fileUtils.saveAsFile", item.FileName, base64);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Error", "File not found on server.");
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Error", $"Failed to download file: {ex.Message}");
+        }
+        #endregion
+    }
+
+    private async Task AddShareLinkClick()
+    {
+        #region hide [2026-08-17]
+        if (string.IsNullOrWhiteSpace(_shareLinkUrl))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation Error", "Please provide a valid file share URL.");
+            return;
+        }
+
+        var linkItem = new TbFileEntity
+        {
+            FileName = !string.IsNullOrWhiteSpace(_shareLinkName) ? _shareLinkName.Trim() : "Shared Link Reference",
+            Url = _shareLinkUrl.Trim(),
+            StorageProvider = eStorageProvider.URL,
+            Extension = ".URL",
+            ContentType = "text/html",
+            UploadDate = DateTime.UtcNow,
+            Size = 0,
+            Tag = _selectedTag
+        };
+
+        _fileList.Add(linkItem);
+        _shareLinkUrl = string.Empty;
+        _shareLinkName = string.Empty;
+
+        await SyncAndNotifyAsync();
+        #endregion
+    }
+
+    private async Task SyncAndNotifyAsync()
+    {
+        #region hide [2026-08-17]
+        var serialized = TbFileEntity.SerializeListToJson(_fileList);
+        _lastBoundJson = serialized;
+
+        var node = JsonNode.Parse(serialized) ?? JsonNode.Parse("[]")!;
+        JsonDataFiles = node;
+
+        if (JsonDataFilesChanged.HasDelegate)
+        {
+            await JsonDataFilesChanged.InvokeAsync(node);
+        }
+        await NotifyChange();
+        #endregion
+    }
+
+    private async Task NotifyChange()
+    {
+        #region hide [2026-08-17]
+        await OnModelChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task TriggerFileUpload()
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("fileUtils.clickElement", _fileInputId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to invoke file input trigger.");
+        }
+        #endregion
+    }
+    #endregion
+
+    #region Render Fragments
+    private RenderFragment RenderAttachedFilesTab => __builder =>
+    {
+        <RadzenTabsItem Text="Attached Files" Icon="attach_file">
+            <div class="p-3" style="max-width: 100%; overflow-x: auto;">
+                <RadzenRow AlignItems="AlignItems.Center" class="mb-3">
+                    <RadzenColumn Size="12" SizeMD="4">
+                        <RadzenText Text="Uploaded File Documents" TextStyle="TextStyle.Subtitle2" class="text-muted m-0" />
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="8" class="text-end">
+                        <div class="d-flex align-items-center justify-content-end gap-2 flex-wrap">
+                            @if (TagOptions != null && TagOptions.Any())
+                            {
+                                <div style="min-width: 180px; text-align: left;">
+                                    <RadzenDropDown @bind-Value="@_selectedTag" Data="@TagOptions" TextProperty="Text" ValueProperty="Value" Style="width: 100%;" Placeholder="Select Document Type" Disabled="@IsReadOnly" />
+                                </div>
+                            }
+                            <InputFile OnChange="HandleOnChangeFiles" style="display:none;" id="@_fileInputId" accept="@TbFileEntity.FileRefAccept" multiple />
+                            <RadzenButton Icon="add_circle_outline" Text="Upload File" Click="@TriggerFileUpload" Variant="Variant.Flat" ButtonStyle="ButtonStyle.Primary" Disabled="@IsReadOnly" />
+                        </div>
+                    </RadzenColumn>
+                </RadzenRow>
+                <div style="max-width: 100%; overflow-x: auto;">
+                    <RadzenDataGrid @ref="_grid" Data="@PhysicalFileItems" TItem="TbFileEntity"
+                                    IsLoading="@_isLoading" AllowColumnResize="true"
+                                    AllowPaging="true" PageSize="@_pageSize" PageSizeOptions="@_pageSizeOptions"
+                                    AllowSorting="true"
+                                    PagerHorizontalAlign="HorizontalAlign.Right" ShowPagingSummary="true"
+                                    Style="@(GridStyles.Default + "; width: 100%;")">
+                        <Columns>
+                            @if (Env.IsDevelopment() || _isAdmin)
+                            {
+                                <RadzenDataGridColumn TItem="TbFileEntity" Property="Id" Title="ID" Width="60px" TextAlign="TextAlign.Center" />
+                            }
+
+                            <RadzenDataGridColumn Title="#" Width="50px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    @(PhysicalFileItems.IndexOf(item) + 1)
+                                </Template>
+                            </RadzenDataGridColumn>
+                            @if (TagOptions != null && TagOptions.Any())
+                            {
+                                <RadzenDataGridColumn Property="Tag" Title="Document Type" Width="140px">
+                                    <Template Context="item">
+                                        <span class="fw-bold text-secondary">@GetDocTypeText(item.Tag)</span>
+                                    </Template>
+                                </RadzenDataGridColumn>
+                            }
+                            <RadzenDataGridColumn Property="FileName" Title="File Name" MinWidth="180px" />
+                            <RadzenDataGridColumn Property="Extension" Title="Extension" Width="90px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    <RadzenBadge Text="@item.Extension.ToUpperInvariant().Replace(".", "")" BadgeStyle="BadgeStyle.Secondary" Variant="Variant.Outlined" IsPill="true" />
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn Property="Size" Title="Size" Width="100px" TextAlign="TextAlign.Right">
+                                <Template Context="item">
+                                    @FileConstants.FormatFileSize(item.Size)
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn Property="UploadDate" Title="Upload Date" Width="150px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    @TU.ACAMP.Domain.Tools.AppTimeZone.ToLocal(item.UploadDate).ToString("g")
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn Title="Actions" Width="100px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.Center" Gap="0.25rem">
+                                        <RadzenButton Icon="download" ButtonStyle="ButtonStyle.Info" Size="ButtonSize.Small" Variant="Variant.Flat" Click="@(() => DownloadFile(item))" ToolTip="Download File" />
+                                        @if (!IsReadOnly)
+                                        {
+                                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Variant="Variant.Flat" Click="@(() => RemoveFileItem(item))" ToolTip="Delete File" />
+                                        }
+                                    </RadzenStack>
+                                </Template>
+                            </RadzenDataGridColumn>
+                        </Columns>
+                    </RadzenDataGrid>
+                </div>
+            </div>
+        </RadzenTabsItem>
+    };
+
+    private RenderFragment RenderFileShareLinksTab => __builder =>
+    {
+        <RadzenTabsItem Text="File Share Links (URL)" Icon="link">
+            <div class="p-3" style="max-width: 100%; overflow-x: auto;">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3 w-100">
+                    @if (TagOptions != null && TagOptions.Any())
+                    {
+                        <div style="flex: 1 1 160px; min-width: 130px;">
+                            <RadzenFormField Text="Document Type" Style="width: 100%;">
+                                <RadzenDropDown @bind-Value="@_selectedTag" Data="@TagOptions" TextProperty="Text" ValueProperty="Value" Style="width: 100%;" Placeholder="Select Type" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                        </div>
+                    }
+
+                    <div style="flex: 2 1 200px; min-width: 180px;">
+                        <RadzenFormField Text="Target URL" Style="width: 100%;">
+                            <RadzenTextBox @bind-Value="@_shareLinkUrl" Placeholder="Paste file sharing URL here..." Style="width: 100%;" Disabled="@IsReadOnly" />
+                        </RadzenFormField>
+                    </div>
+
+                    <div style="flex: 1 1 160px; min-width: 140px;">
+                        <RadzenFormField Text="Link Name" Style="width: 100%;">
+                            <RadzenTextBox @bind-Value="@_shareLinkName" Placeholder="Link Display Name (Optional)" Style="width: 100%;" Disabled="@IsReadOnly" />
+                        </RadzenFormField>
+                    </div>
+
+                    <div style="flex: 0 0 auto; align-self: flex-end;" class="pb-1">
+                        <RadzenButton Icon="add_link" Text="Attach Link" Click="@AddShareLinkClick" Variant="Variant.Flat" ButtonStyle="ButtonStyle.Primary" Style="min-height: 38px; white-space: nowrap;" Disabled="@IsReadOnly" />
+                    </div>
+                </div>
+
+                <div style="max-width: 100%; overflow-x: auto;">
+                    <RadzenDataGrid Data="@UrlItems" TItem="TbFileEntity"
+                                    IsLoading="@_isLoading" AllowColumnResize="true"
+                                    AllowPaging="true" PageSize="@_pageSize" PageSizeOptions="@_pageSizeOptions"
+                                    AllowSorting="true"
+                                    PagerHorizontalAlign="HorizontalAlign.Right" ShowPagingSummary="true"
+                                    Style="@(GridStyles.Default + "; width: 100%;")">
+                        <Columns>
+                            @if (Env.IsDevelopment() || _isAdmin)
+                            {
+                                <RadzenDataGridColumn TItem="TbFileEntity" Property="Id" Title="ID" Width="60px" TextAlign="TextAlign.Center" />
+                            }
+
+                            <RadzenDataGridColumn Title="#" Width="50px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    @(UrlItems.IndexOf(item) + 1)
+                                </Template>
+                            </RadzenDataGridColumn>
+                            @if (TagOptions != null && TagOptions.Any())
+                            {
+                                <RadzenDataGridColumn Property="Tag" Title="Document Type" Width="140px">
+                                    <Template Context="item">
+                                        <span class="fw-bold text-secondary">@GetDocTypeText(item.Tag)</span>
+                                    </Template>
+                                </RadzenDataGridColumn>
+                            }
+                            <RadzenDataGridColumn Property="FileName" Title="Link Name / Target URL" MinWidth="180px">
+                                <Template Context="item">
+                                    <div class="d-flex flex-column" style="max-width: 100%; overflow: hidden;">
+                                        <span class="fw-bold text-dark text-truncate">@item.FileName</span>
+                                        <a href="@item.Url" target="_blank" class="text-primary small text-truncate" style="max-width: 100%;">@item.Url</a>
+                                    </div>
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn Property="UploadDate" Title="Attached Date" Width="150px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    @TU.ACAMP.Domain.Tools.AppTimeZone.ToLocal(item.UploadDate).ToString("g")
+                                </Template>
+                            </RadzenDataGridColumn>
+                            <RadzenDataGridColumn Title="Actions" Width="100px" TextAlign="TextAlign.Center">
+                                <Template Context="item">
+                                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.Center" Gap="0.25rem">
+                                        <RadzenButton Icon="open_in_new" ButtonStyle="ButtonStyle.Info" Size="ButtonSize.Small" Variant="Variant.Flat" Click="@(() => OpenLink(item))" ToolTip="Open Link" />
+                                        @if (!IsReadOnly)
+                                        {
+                                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Variant="Variant.Flat" Click="@(() => RemoveFileItem(item))" ToolTip="Remove Link" />
+                                        }
+                                    </RadzenStack>
+                                </Template>
+                            </RadzenDataGridColumn>
+                        </Columns>
+                    </RadzenDataGrid>
+                </div>
+            </div>
+        </RadzenTabsItem>
+    };
+    #endregion
+}

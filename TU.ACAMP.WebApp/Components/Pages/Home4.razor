@@ -1,0 +1,159 @@
+@page "/"
+@page "/home4"
+
+@*
+    [2026-09-21][Gemini] Home4 — Landing page under Carbon Intelligence Platform (CIP)
+    Adapted from Home3 to share MainLayout (like Home1.razor) without duplicate navbar/footer.
+*@
+
+<PageTitle>Carbon Intelligence Platform</PageTitle>
+
+<div class="cip-landing">
+
+    <!-- ============ HERO ============ -->
+    <section class="cip-hero">
+        <div class="cip-glow cip-glow-a" aria-hidden="true"></div>
+        <div class="cip-glow cip-glow-b" aria-hidden="true"></div>
+
+        <div class="cip-shell cip-hero-grid">
+            <div class="cip-hero-copy">
+                <p class="cip-eyebrow"><span></span> Carbon intelligence for the enterprise</p>
+                <h1>Every tonne, <em>traceable.</em><br />Every decision, defensible.</h1>
+                <p class="cip-lede">
+                    One platform to collect activity data, compute emissions with governed factors,
+                    and publish audit-ready inventories — from raw evidence to board-level insight.
+                </p>
+
+                <div class="cip-hero-actions">
+                    <a class="cip-btn" href="/Account/Register">Request access <span aria-hidden="true">&#8594;</span></a>
+                    <a class="cip-ghost" href="/Account/Login">Sign in to workspace</a>
+                </div>
+
+                <dl class="cip-metrics">
+                    <div><dt>Scopes covered</dt><dd>1 &middot; 2 &middot; 3</dd></div>
+                    <div><dt>Evidence trail</dt><dd>Source &#8594; Report</dd></div>
+                    <div><dt>Report output</dt><dd>Excel &amp; Word</dd></div>
+                </dl>
+            </div>
+
+            <!-- Dashboard preview (static, illustrative) -->
+            <aside class="cip-panel" aria-label="Platform preview">
+                <div class="cip-panel-bar">
+                    <span class="cip-dot"></span>
+                    <span>Corporate carbon footprint</span>
+                    <span class="cip-badge-live">LIVE</span>
+                </div>
+
+                <div class="cip-panel-body">
+                    <div class="cip-panel-head">
+                        <div>
+                            <p>Reporting year 2025</p>
+                            <h2>1,284.6 <small>tCO&#8322;e</small></h2>
+                        </div>
+                        <span class="cip-delta">&#8595; 12.4% vs base year</span>
+                    </div>
+
+                    <div class="cip-chart" aria-hidden="true">
+                        <svg viewBox="0 0 520 170" preserveAspectRatio="none" role="presentation">
+                            <defs>
+                                <linearGradient id="cipArea" x1="0" x2="0" y1="0" y2="1">
+                                    <stop offset="0" stop-color="#0e9f6e" stop-opacity=".22" />
+                                    <stop offset="1" stop-color="#10b981" stop-opacity="0" />
+                                </linearGradient>
+                            </defs>
+                            <path d="M0 132 L65 118 L130 124 L195 96 L260 104 L325 72 L390 78 L455 44 L520 30 L520 170 L0 170 Z" fill="url(#cipArea)" />
+                            <path d="M0 132 L65 118 L130 124 L195 96 L260 104 L325 72 L390 78 L455 44 L520 30" fill="none" stroke="#0e9f6e" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+                        </svg>
+                    </div>
+
+                    <ul class="cip-scopes">
+                        <li><span class="cip-s1"></span><p>Scope 1</p><strong>18%</strong></li>
+                        <li><span class="cip-s2"></span><p>Scope 2</p><strong>27%</strong></li>
+                        <li><span class="cip-s3"></span><p>Scope 3</p><strong>55%</strong></li>
+                    </ul>
+                </div>
+
+                <div class="cip-float">
+                    <span class="cip-float-icon" aria-hidden="true">&#10003;</span>
+                    <div><small>Verification status</small><strong>94% evidence verified</strong></div>
+                </div>
+            </aside>
+        </div>
+    </section>
+
+    <!-- ============ STANDARDS BAND ============ -->
+    <section id="standards" class="cip-band">
+        <div class="cip-shell">
+            <p>ALIGNED WITH THE STANDARDS YOUR AUDITOR USES</p>
+            <div class="cip-band-items">
+                <span>ISO 14064-1</span><i></i>
+                <span>GHG Protocol</span><i></i>
+                <span>TGO CFO</span><i></i>
+                <span>IPCC AR5</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PLATFORM ============ -->
+    <section id="platform" class="cip-section cip-shell">
+        <div class="cip-section-head">
+            <p class="cip-eyebrow"><span></span> What the platform does</p>
+            <h2>Four layers between raw data and a signed report.</h2>
+        </div>
+
+        <div class="cip-cards">
+            <article class="cip-card">
+                <span class="cip-card-no">01</span>
+                <h3>Governed data intake</h3>
+                <p>Structure organizational boundaries, facilities, and activity data once — then reuse them across every reporting cycle.</p>
+            </article>
+            <article class="cip-card">
+                <span class="cip-card-no">02</span>
+                <h3>Controlled emission factors</h3>
+                <p>A single managed factor library with mapping rules, so base year and reporting year are always computed on the same basis.</p>
+            </article>
+            <article class="cip-card">
+                <span class="cip-card-no">03</span>
+                <h3>Intelligence &amp; hotspots</h3>
+                <p>See where emissions concentrate across Scope 1, 2 and 3, and compare periods before committing to a reduction plan.</p>
+            </article>
+            <article class="cip-card">
+                <span class="cip-card-no">04</span>
+                <h3>Audit-ready output</h3>
+                <p>Register each report as a snapshot in the ledger, then download the official workbook and narrative document.</p>
+            </article>
+        </div>
+    </section>
+
+    <!-- ============ WORKFLOW ============ -->
+    <section id="workflow" class="cip-workflow">
+        <div class="cip-shell cip-workflow-grid">
+            <div class="cip-workflow-intro">
+                <p class="cip-eyebrow"><span></span> How a reporting cycle runs</p>
+                <h2>From activity log to verified ledger.</h2>
+                <p class="cip-lede cip-lede-tight">
+                    Each stage leaves a record, so a verifier can walk backwards from any number in the report to the evidence behind it.
+                </p>
+            </div>
+
+            <ol class="cip-steps">
+                <li><span>1</span><div><h3>Define boundary</h3><p>Corporate, company and facility structure with the consolidation approach.</p></div></li>
+                <li><span>2</span><div><h3>Collect activity data</h3><p>Quantities, ratios and ownership share captured per source and period.</p></div></li>
+                <li><span>3</span><div><h3>Compute inventory</h3><p>Emission factors applied consistently across base and reporting year.</p></div></li>
+                <li><span>4</span><div><h3>Register the report</h3><p>Snapshot published to the verification ledger for download.</p></div></li>
+            </ol>
+        </div>
+    </section>
+
+    <!-- ============ CTA ============ -->
+    <section class="cip-cta">
+        <div class="cip-shell cip-cta-inner">
+            <div>
+                <p class="cip-eyebrow"><span></span> Start the first cycle</p>
+                <h2>Put your carbon data under control.</h2>
+            </div>
+            <a class="cip-btn" href="/Account/Register">Request access <span aria-hidden="true">&#8594;</span></a>
+        </div>
+    </section>
+
+</div>

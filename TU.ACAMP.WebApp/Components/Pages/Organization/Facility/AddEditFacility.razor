@@ -1,0 +1,550 @@
+@page "/organization/facility/add"
+@page "/organization/facility/edit/{SecureId}"
+@page "/organization/facility/view/{SecureId}"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Components.Pages.Organization.Facility.Widgets
+
+@attribute [Authorize]
+
+@inject FacilityService FacilityService
+@inject CompanyService CompanyService
+@inject CorporateService CorporateService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<AddEditFacility> Logger
+
+<PageTitle>@(_isReadOnlyForm ? "View Facility" : (_model.Id == 0 ? "Add Facility" : "Edit Facility")) - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToBack" Class="me-2" Style="border-radius: 6px;" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isReadOnlyForm
+                        ? "View Facility"
+                        : (_model.Id == 0 ? "Add Facility" : "Edit Facility"))
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-1 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    Manage operational site parameters, physical location boundaries, and greenhouse gas monitoring topics.
+                </RadzenText>
+                @if (_selectedSubscriptionId.HasValue && !_isAdmin)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:var(--rz-primary-lighter,#e8f0fe); color:var(--rz-primary,#3d6af8); border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">business</span>
+                        @(!string.IsNullOrWhiteSpace(_selectedSubscriptionName) ? _selectedSubscriptionName : "Subscription Workspace")
+                    </span>
+                }
+                else if (_isAdmin && _selectedSubscriptionId.HasValue)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:#d1ecf1; color:#0c5460; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">manage_accounts</span>
+                        @(!string.IsNullOrWhiteSpace(_selectedSubscriptionName) ? _selectedSubscriptionName : "Subscription")
+                    </span>
+                }
+
+                @if (_model.Company?.Corporate != null || _selectedCorporateId.HasValue)
+                {
+                    var corpTitle = _model.Company?.Corporate?.Title ?? _corporatesList.FirstOrDefault(c => c.Id == _selectedCorporateId)?.Title;
+                    if (!string.IsNullOrWhiteSpace(corpTitle))
+                    {
+                        <span style="display:inline-flex; align-items:center; gap:6px; background:#f1f5f9; color:#334155; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap; border: 1px solid #cbd5e1;">
+                            <span class="rzi" style="font-size:0.9rem;">corporate_fare</span>
+                            @corpTitle
+                        </span>
+                    }
+                }
+
+                @if (_model.Company != null || _selectedCompanyId.HasValue)
+                {
+                    var compTitle = _model.Company?.Title ?? _companiesList.FirstOrDefault(c => c.Id == _selectedCompanyId)?.Title;
+                    if (!string.IsNullOrWhiteSpace(compTitle))
+                    {
+                        <span style="display:inline-flex; align-items:center; gap:6px; background:#e0f2fe; color:#0369a1; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap; border: 1px solid #bae6fd;">
+                            <span class="rzi" style="font-size:0.9rem;">domain</span>
+                            @compTitle
+                        </span>
+                    }
+                }
+            </div>
+        </div>
+
+        @if (_hasChanges && !_isReadOnlyForm)
+        {
+            <div class="d-flex align-items-center">
+                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Unsaved Changes" IsPill="true" Class="px-3 py-2 shadow-sm" Style="font-size: 0.8rem; font-weight: 600;" />
+            </div>
+        }
+    </div>
+
+    <!-- Loading State -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading facility form..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenTemplateForm TItem="TbFacility" Data="@_model" Submit="@OnSubmit">
+            <RadzenTabs @bind-SelectedIndex="@_activeTabIndex" RenderMode="TabRenderMode.Client" Class="shadow-sm rounded-3" Style="border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <Tabs>
+                    <!-- TAB 1: BASIC INFORMATION -->
+                    <RadzenTabsItem Text="1. Basic Information">
+                        <ChildContent>
+                            <FacilityBasicInfoWidget Model="@_model"
+                                                    IsReadOnly="@_isReadOnlyForm"
+                                                    OnChanged="@HandleModelChanged" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+
+                    <!-- TAB 2: TOPICS / SCOPES -->
+                    <RadzenTabsItem Text="2. Topics & Scope Boundaries">
+                        <ChildContent>
+                            <FacilityTopicsWidget Model="@_model"
+                                                  TopicsList="@_topicsList"
+                                                  IsReadOnly="@_isReadOnlyForm"
+                                                  OnManageTopics="@NavigateToTopicManagement" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+                </Tabs>
+            </RadzenTabs>
+
+            <!-- Action Buttons -->
+            <RadzenRow Class="mt-3">
+                <RadzenColumn Size="12" Class="d-flex justify-content-end gap-2">
+                    <RadzenButton ButtonType="ButtonType.Button" Text="Cancel" ButtonStyle="ButtonStyle.Light"
+                                  Click="@NavigateToBack" Style="min-width: 100px; border-radius: 8px;" />
+                    @if (!_isReadOnlyForm)
+                    {
+                        <RadzenButton ButtonType="ButtonType.Submit" Text="Save" ButtonStyle="ButtonStyle.Primary"
+                                      Icon="save" Disabled="@(_isReadOnlyForm || _isSaving || (!_hasChanges && _model.Id > 0))"
+                                      Style="min-width: 100px; border-radius: 8px; font-weight: 600;" />
+                    }
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenTemplateForm>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _hasLoaded = false;
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _isSaving = false;
+    private bool _isReadOnlyForm = false;
+    private bool _hasChanges = false;
+    private string _originalSnapshot = string.Empty;
+
+    private int _activeTabIndex = 0;
+    private int _activeGridPageIndex = 0;
+    private string _searchText = string.Empty;
+
+    private string _currentUserEmail = string.Empty;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private HashSet<int> _editableCorporateIds = new();
+    private HashSet<int> _editableCompanyIds = new();
+    private HashSet<int> _editableFacilityIds = new();
+
+    private List<TbSubscription> _subscriptionsList = new();
+    private List<TbCorporate> _corporatesList = new();
+    private List<TbCompany> _companiesList = new();
+    private List<TbActivityTopic> _topicsList = new();
+
+    private int? _selectedSubscriptionId;
+    private string _selectedSubscriptionName = string.Empty;
+    private int? _selectedCorporateId;
+    private int? _selectedCompanyId;
+
+    private TbFacility _model = new() { IsActive = true };
+    #endregion
+
+    #region class properties
+    [Parameter]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "comid")]
+    public string? SecureComId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cid")]
+    public string? SecureCid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "gpage")]
+    public string? SecureGpage { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SecureSearchText { get; set; }
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-18]
+        if (_hasLoaded) return;
+        _isLoading = true;
+
+        try
+        {
+            await InitializeUserSessionAsync();
+            RestoreStateParameters();
+            DetermineFormMode();
+            await LoadCompaniesAsync();
+            await LoadModelDataAsync();
+
+            _originalSnapshot = CreateSnapshot(_model);
+            _hasChanges = false;
+            _hasLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing AddEditFacility form.");
+            NotificationService.Notify(NotificationSeverity.Error, "Form Error", "Failed to load facility form.");
+            await NavigateToBack();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-18]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+        }
+
+        _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(_currentUserEmail, _isAdmin);
+        _subscriptionsList = await SubscriptionService.GetSubscriptionsForUserAsync(_currentUserEmail, _isAdmin, includeInactive: false);
+        _editableCorporateIds = await CorporateService.GetEditableCorporateIdsAsync(_currentUserEmail, _isAdmin);
+        _editableCompanyIds = await CompanyService.GetEditableCompanyIdsAsync(_currentUserEmail, _isAdmin);
+        _editableFacilityIds = await FacilityService.GetEditableFacilityIdsAsync(_currentUserEmail, _isAdmin);
+        #endregion
+    }
+
+    private void RestoreStateParameters()
+    {
+        #region hide [2026-08-18]
+        var decryptedComId = DataProtection.UnprotectInt(SecureComId);
+        if (decryptedComId.HasValue && decryptedComId.Value > 0)
+        {
+            _selectedCompanyId = decryptedComId.Value;
+        }
+
+        var decryptedCid = DataProtection.UnprotectInt(SecureCid);
+        if (decryptedCid.HasValue && decryptedCid.Value > 0)
+        {
+            _selectedCorporateId = decryptedCid.Value;
+        }
+
+        var decryptedSid = DataProtection.UnprotectInt(SecureSid);
+        if (decryptedSid.HasValue && decryptedSid.Value > 0)
+        {
+            _selectedSubscriptionId = decryptedSid.Value;
+        }
+
+        var decryptedGpage = DataProtection.UnprotectInt(SecureGpage);
+        if (decryptedGpage.HasValue && decryptedGpage.Value >= 0)
+        {
+            _activeGridPageIndex = decryptedGpage.Value;
+        }
+
+        var decryptedQ = DataProtection.Unprotect(SecureSearchText);
+        if (!string.IsNullOrWhiteSpace(decryptedQ))
+        {
+            _searchText = decryptedQ;
+        }
+
+        if (_selectedSubscriptionId.HasValue)
+        {
+            _selectedSubscriptionName = _subscriptionsList.FirstOrDefault(s => s.Id == _selectedSubscriptionId.Value)?.Title ?? string.Empty;
+        }
+        #endregion
+    }
+
+    private void DetermineFormMode()
+    {
+        #region hide [2026-08-18]
+        var uri = NavigationManager.Uri;
+        if (uri.Contains("/organization/facility/view/"))
+        {
+            _isReadOnlyForm = true;
+        }
+        else
+        {
+            _isReadOnlyForm = false;
+        }
+        #endregion
+    }
+
+    private async Task LoadCompaniesAsync()
+    {
+        #region hide [2026-08-18]
+        try
+        {
+            _companiesList = await CompanyService.GetByCorporateIdAsync(
+                _selectedCorporateId,
+                _selectedSubscriptionId,
+                includeFacilities: false,
+                includeInactive: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading companies for facility form.");
+        }
+        #endregion
+    }
+
+    private async Task LoadModelDataAsync()
+    {
+        #region hide [2026-08-18]
+        var decryptedId = DataProtection.UnprotectInt(SecureId);
+
+        if (decryptedId.HasValue && decryptedId.Value > 0)
+        {
+            var facility = await FacilityService.GetByIdAsync(decryptedId.Value, includeTopics: true);
+            if (facility == null)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Not Found", "Facility entity not found.");
+                await NavigateToBack();
+                return;
+            }
+
+            _model = new TbFacility
+            {
+                Id = facility.Id,
+                CompanyId = facility.CompanyId,
+                Title = facility.Title,
+                Remark = facility.Remark,
+                IsActive = facility.IsActive,
+                Company = facility.Company
+            };
+
+            _topicsList = facility.Topics.ToList();
+
+            if (_model.Company != null)
+            {
+                _selectedCompanyId = _model.CompanyId;
+                _selectedCorporateId = _model.Company.CorporateId;
+                if (_model.Company.Corporate != null)
+                {
+                    _selectedSubscriptionId = _model.Company.Corporate.SubscriptionId;
+                    _selectedSubscriptionName = _model.Company.Corporate.Subscription?.Title ?? string.Empty;
+                }
+            }
+
+            if (!_isAdmin && !_isReadOnlyForm && !CanEditFacility(_model))
+            {
+                _isReadOnlyForm = true;
+                NotificationService.Notify(NotificationSeverity.Info, "Read-Only", "You only have view access for this facility.");
+            }
+        }
+        else
+        {
+            var defaultComId = _selectedCompanyId ?? (_companiesList.FirstOrDefault()?.Id ?? 0);
+            _model = new TbFacility
+            {
+                IsActive = true,
+                CompanyId = defaultComId,
+                Code = defaultComId > 0 ? await FacilityService.GenerateNextCodeAsync(defaultComId) : "FAC-001"
+            };
+
+            _topicsList = new List<TbActivityTopic>();
+        }
+        #endregion
+    }
+
+    private bool CanEditFacility(TbFacility item)
+    {
+        #region hide [2026-08-18]
+        if (_isAdmin) return true;
+        return _editableFacilityIds.Contains(item.Id) ||
+               _editableCompanyIds.Contains(item.CompanyId) ||
+               (item.Company != null && _editableCorporateIds.Contains(item.Company.CorporateId)) ||
+               (item.Company?.Corporate != null && _editableSubscriptionIds.Contains(item.Company.Corporate.SubscriptionId));
+        #endregion
+    }
+
+    private void HandleModelChanged()
+    {
+        #region hide [2026-08-18]
+        var currentSnapshot = SerializeForCheck(_model);
+        _hasChanges = _model.Id == 0 || !string.Equals(_originalSnapshot, currentSnapshot, StringComparison.Ordinal);
+        #endregion
+    }
+
+    private async Task HandleCompanyChanged(int comId)
+    {
+        #region hide [2026-08-18]
+        _selectedCompanyId = comId;
+        var comp = _companiesList.FirstOrDefault(c => c.Id == comId);
+        if (comp != null)
+        {
+            _model.Company = comp;
+            _selectedCorporateId = comp.CorporateId;
+        }
+        if (_model.Id == 0 && comId > 0)
+        {
+            _model.Code = await FacilityService.GenerateNextCodeAsync(comId);
+        }
+        HandleModelChanged();
+        #endregion
+    }
+
+    private string CreateSnapshot(TbFacility model)
+    {
+        #region hide [2026-08-18]
+        return SerializeForCheck(model);
+        #endregion
+    }
+    private string SerializeForCheck(TbFacility model)
+    {
+        #region hide [8/18/2026]
+        if (model == null) return string.Empty;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            model.CompanyId,
+            model.Code,
+            model.Title,
+            model.Remark,
+            model.IsActive
+          //  Users = users.Select(u => new { u.Email, u.Role, u.Remarks })
+        });
+        #endregion 
+    }
+    private async Task OnSubmit()
+    {
+        #region hide [2026-08-18]
+        if (_isReadOnlyForm) return;
+
+        if (_model.CompanyId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Please select a company entity.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.Title))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Facility title is required.");
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            if (_model.Id == 0)
+            {
+                var created = await FacilityService.CreateAsync(_model);
+                NotificationService.Notify(NotificationSeverity.Success, "Created", $"Facility '{created.Title}' created successfully.");
+                _hasChanges = false;
+                await NavigateToBack(created.Id);
+            }
+            else
+            {
+                var updated = await FacilityService.UpdateAsync(_model);
+                NotificationService.Notify(NotificationSeverity.Success, "Updated", $"Facility '{updated.Title}' updated successfully.");
+                _hasChanges = false;
+                await NavigateToBack();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving facility '{Title}'.", _model.Title);
+            NotificationService.Notify(NotificationSeverity.Error, "Save Failed", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+
+    private async Task NavigateToBack()
+    {
+        await NavigateToBack(null);
+    }
+
+    private async Task NavigateToBack(int? newCreatedId)
+    {
+        #region hide [2026-08-18]
+        if (newCreatedId == null && _hasChanges && !_isReadOnlyForm)
+        {
+            var confirmed = await DialogService.Confirm(
+                "You have unsaved changes. Are you sure you want to discard them?",
+                "Discard Changes",
+                new ConfirmOptions { OkButtonText = "Discard", CancelButtonText = "Continue Editing" });
+
+            if (confirmed != true) return;
+        }
+
+        var queryParams = new Dictionary<string, object?>();
+
+        if (_selectedCompanyId.HasValue)
+            queryParams["comid"] = DataProtection.Protect(_selectedCompanyId.Value);
+
+        if (_selectedCorporateId.HasValue)
+            queryParams["cid"] = DataProtection.Protect(_selectedCorporateId.Value);
+
+        if (_selectedSubscriptionId.HasValue)
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+        if (newCreatedId.HasValue)
+        {
+            queryParams["nid"] = DataProtection.Protect(newCreatedId.Value);
+        }
+        else
+        {
+            if (_activeGridPageIndex > 0)
+                queryParams["gpage"] = DataProtection.Protect(_activeGridPageIndex);
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                queryParams["q"] = DataProtection.Protect(_searchText);
+        }
+
+        var url = NavigationManager.GetUriWithQueryParameters("/organization/facility", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToTopicManagement()
+    {
+        #region hide [2026-08-18]
+        if (_model.Id > 0)
+        {
+            var secureFacId = DataProtection.Protect(_model.Id);
+            NavigationManager.NavigateTo($"/library/topic?facid={Uri.EscapeDataString(secureFacId)}");
+        }
+        #endregion
+    }
+    #endregion
+}

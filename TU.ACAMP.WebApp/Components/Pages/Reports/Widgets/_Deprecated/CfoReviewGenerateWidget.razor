@@ -1,0 +1,96 @@
+@* [2026-09-15][Antigravity] Step 7 Review & Generate Widget: Configuration recap, readiness checklist, and EF standard note *@
+
+<RadzenStack Gap="1.25rem" Class="pt-3">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Final Verification &amp; Snapshot Creation</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Review report configuration, verify checklist readiness, and generate locked audit ledger snapshot.
+        </RadzenText>
+    </div>
+
+    <!-- Setup Review Summary -->
+    <RadzenCard Class="shadow-sm border rounded-3 bg-light p-3">
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Report Title</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@Title</RadzenText>
+            </div>
+            <div class="col-12 col-md-6">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Target Organization (B6)</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@OrgTitle</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">GHG Working Team (G4)</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@GhgTeam</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Calculate Year (H22)</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold text-primary mb-0">@SelectedCalculateYear</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Base Year (H24)</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@(SelectedBaseYear > 0 ? SelectedBaseYear.ToString() : "-")</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Consolidation / Threshold</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@ConsolidationApproach (@MaterialityThreshold%)</RadzenText>
+            </div>
+        </div>
+    </RadzenCard>
+
+    <!-- Readiness Checklist -->
+    <div class="row g-3">
+        <div class="col-12 col-md-6">
+            <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success">
+                <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-2 text-success">
+                    <RadzenIcon Icon="check_circle" Class="me-1" /> Filled by System
+                </RadzenText>
+                <ul class="small mb-0 ps-3 text-secondary">
+                    <li>Fr-01: Organization name, GHG team, certifier, activity summaries</li>
+                    <li>Fr-03.2: Scope 3 magnitude % and data-driven source checkmarks</li>
+                    <li>Fr-04.1: Calculate year activity audit lines (@AuditLineCount items)</li>
+                    <li>Fr-04.2: Base year baseline activity audit lines</li>
+                    <li>Fr-05: Dynamic formula verification and gross breakdown</li>
+                </ul>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-md-6">
+            <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-warning">
+                <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-2 text-warning">
+                    <RadzenIcon Icon="edit" Class="me-1" /> Post-Export Manual Entries
+                </RadzenText>
+                <ul class="small mb-0 ps-3 text-secondary">
+                    <li>3.1 Organization structure and site boundary diagrams</li>
+                    <li>3.2.5 / 3.2.7 / 3.2.8 External supply, carbon sink, credits</li>
+                    <li>5.5 Carbon intensity denominator</li>
+                    <li>7.1 – 7.3 Data quality management and calibration records</li>
+                    <li>8. Uncertainty assessment, appendix, and revision log</li>
+                </ul>
+            </RadzenCard>
+        </div>
+    </div>
+
+    <!-- Emission Factor Notice -->
+    <div class="d-flex align-items-center gap-2">
+        <RadzenIcon Icon="verified" Class="text-success" />
+        <span class="small text-muted">
+            Emission Factor Standard: <strong>IPCC AR5 (100-year GWP - TGO Standard)</strong> | Validated against active library status.
+        </span>
+    </div>
+
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        Once generated, the snapshot is <strong>locked</strong> for audit integrity and its SHA-256 checksum is recorded in the ledger. It cannot be edited afterwards.
+    </RadzenAlert>
+</RadzenStack>
+
+@code {
+    // [2026-09-15][Antigravity] Parameters for Step 7 Review & Generate Widget
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string OrgTitle { get; set; } = string.Empty;
+    [Parameter] public string GhgTeam { get; set; } = string.Empty;
+    [Parameter] public int SelectedCalculateYear { get; set; }
+    [Parameter] public int SelectedBaseYear { get; set; }
+    [Parameter] public string ConsolidationApproach { get; set; } = string.Empty;
+    [Parameter] public decimal MaterialityThreshold { get; set; }
+    [Parameter] public int AuditLineCount { get; set; }
+}

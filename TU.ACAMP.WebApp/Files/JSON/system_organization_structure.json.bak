@@ -1,0 +1,25 @@
+[
+  {
+    "SubscriptionId": 1,
+    "Corporate": {
+      "Code": "CRP-001",
+      "Title": "Global Green Corporate Group",
+      "Remark": "Corporate Headquarter Level",
+      "MaterialityThreshold": 5.0,
+      "IsActive": true
+    },
+    "Company": {
+      "Code": "COM-001",
+      "Title": "Eco Tech Manufacturing Thailand Co., Ltd.",
+      "EquityShare": 100,
+      "Remark": "Company Subsidiary Level",
+      "IsActive": true
+    },
+    "Facility": {
+      "Code": "FAC-001",
+      "Title": "Bangkok Smart Manufacturing Plant Facility",
+      "Remark": "Facility Plant Level",
+      "IsActive": true
+    }
+  }
+]

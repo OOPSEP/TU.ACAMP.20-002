@@ -1,0 +1,1494 @@
+@page "/dashboard"
+@page "/dashboard2"
+@* [2026-09-25][Antigravity] Executive Carbon Dashboard V2 promoted to primary /dashboard route. *@
+
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using Radzen
+@using Radzen.Blazor
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Dashboard
+@using TU.ACAMP.WebApp.Components.Pages.Dashboard.Dialogs
+@using TU.ACAMP.WebApp.Services.Common
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.WebApp.Components.Common
+@using TU.ACAMP.WebApp.Components.Pages.Dashboard.Widgets
+
+@attribute [Authorize]
+
+@inject ExecutiveDashboardService2 DashboardService
+@inject NetZeroTargetService NetZeroService
+@inject GhgTargetAlertService AlertService
+@inject SubscriptionService SubscriptionService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavigationManager
+@inject NotificationService NotificationService
+@inject DialogService DialogService
+@inject IDataProtectionProvider DataProtection
+@inject IJSRuntime JSRuntime
+@inject ILogger<ExecutiveDashboard2> Logger
+
+<PageTitle>Executive Carbon Dashboard - CARBON ONE</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- TOP TITLE & FILTER BAR -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-3">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <!-- Brand Lockup: Bar Chart Icon + CARBON ONE + v2.0 Badge -->
+                <RadzenIcon Visible="false" Icon="bar_chart" Style="font-size: 2rem; color: #10B981;" />
+                <span class="fs-4" style="letter-spacing: -0.5px;" hidden>
+                    <strong style="font-weight: 800; color: #0F172A;">CARBON</strong>
+                    <strong style="font-weight: 800; color: #10B981;">ONE</strong>
+                </span>
+                <RadzenBadge Visible="false" Text="v2.0" BadgeStyle="BadgeStyle.Success" Style="font-weight: 700; font-size: 0.72rem; padding: 3px 7px; border-radius: 6px;" />
+                <span class="text-muted fs-5 fw-light mx-1">|</span>
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    Executive Carbon Dashboard
+                </RadzenText>
+                <RadzenBadge Text="ISO 14064 Compliant" BadgeStyle="BadgeStyle.Light" Style="border-radius: 6px; font-size: 0.75rem; padding: 4px 8px; border: 1px solid #cbd5e1;" />
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                Multi-Tier Corporate Carbon Footprint Analytics, Scope Breakdown & Materiality Intelligence
+            </RadzenText>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Last Updated Badge -->
+            <div class="px-2 py-1 bg-light rounded-2 border text-muted small d-flex align-items-center gap-1">
+                <RadzenIcon Icon="schedule" Style="font-size: 15px; color: #64748b;" />
+                <span>Data as of: <strong>@_result.LastUpdatedAt.ToString("yyyy-MM-dd HH:mm:ss")</strong></span>
+            </div>
+
+            <!-- Export Excel Button -->
+            <RadzenButton Icon="file_download" Text="Export Excel" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                          Size="ButtonSize.Small" Click="@ExportToExcelAsync" IsBusy="@_isExporting"
+                          Disabled="@(!CanExport)" Title="@(CanExport ? "Export dashboard to Excel" : "Export is restricted to users with edit permissions.")"
+                          Style="border-radius: 6px;" />
+
+            <!-- Refresh Button (Bypasses Memory Cache) -->
+            <RadzenButton Icon="refresh" Text="Refresh" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+                          Click="@(() => RefreshDashboardAsync(bypassCache: true))" Style="border-radius: 6px;" />
+        </div>
+    </div>
+
+    <!-- CASCADING ORGANIZATION & REPORTING YEAR FILTER BAR -->
+    @* [2026-09-26][Claude] แยกเป็น ExecutiveDashboardFilterWidget (Widgets/) เหมือนหน้าอื่น, ปุ่ม Advanced ชิดขวา *@
+    <ExecutiveDashboardFilterWidget AvailableYears="@_result.AvailableYears"
+                                    Corporates="@_result.Corporates"
+                                    Companies="@_result.Companies"
+                                    Facilities="@_result.Facilities"
+                                    @bind-SelectedYear="_selectedYear"
+                                    @bind-SelectedCorporateId="_selectedCorporateId"
+                                    @bind-SelectedCompanyId="_selectedCompanyId"
+                                    @bind-SelectedFacilityId="_selectedFacilityId"
+                                    @bind-FiscalStartMonth="_fiscalStartMonth"
+                                    OnFilterChanged="@OnFilterChangedAsync"
+                                    OnCorporateChanged="@OnCorporateChangedAsync"
+                                    OnCompanyChanged="@OnCompanyChangedAsync"
+                                    OnFacilityChanged="@OnFacilityChangedAsync" />
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center my-5">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+            <RadzenText Text="Loading Executive GHG Carbon Insights (V2 Engine)..." TextStyle="TextStyle.Body1" Class="text-muted mt-3" />
+        </div>
+    }
+    else if (!_allowedSubscriptionIds.Any())
+    {
+        <div class="alert alert-warning p-4 rounded-3 text-center my-4 shadow-sm">
+            <RadzenIcon Icon="warning" Style="font-size: 2.5rem;" Class="mb-2 text-warning" />
+            <h5 class="fw-bold">No Active Subscriptions</h5>
+            <p class="text-muted mb-0">You do not currently have access to any subscription workspaces. Please contact your system administrator.</p>
+        </div>
+    }
+    else
+    {
+        <!-- ROW 1: EXECUTIVE DECARBONIZATION & GOVERNANCE KPIS (4 CARDS) -->
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-3">
+            <!-- Total Gross Footprint Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-total">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Gross Footprint</span>
+                            <h3 class="fw-bold text-dark mb-0">@_result.GrossEmissions.ToString("N2") <small class="fs-6 text-muted font-normal">tCO₂e</small></h3>
+                        </div>
+                        <div class="p-2 bg-success-subtle text-success rounded-3">
+                            <RadzenIcon Icon="cloud" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <!-- 12-Month Sparkline -->
+                    @if (_result.MonthlyTotalSparkline.Any(v => v > 0))
+                    {
+                        var spark = GenerateSparkline(_result.MonthlyTotalSparkline, 90, 22);
+                        <div class="mt-2" title="12-Month Gross Emissions Trend (@MonthRangeText)">
+                            <svg width="90" height="22" viewBox="0 0 90 22" style="overflow: visible; display: block;">
+                                <defs>
+                                    <linearGradient id="spark-total" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#0f766e" stop-opacity="0.35" />
+                                        <stop offset="100%" stop-color="#0f766e" stop-opacity="0.0" />
+                                    </linearGradient>
+                                </defs>
+                                <path d="@spark.AreaPath" fill="url(#spark-total)" />
+                                <path d="@spark.LinePath" fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </div>
+                    }
+                    <div class="mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">vs. Prior Year</span>
+                        @if (_result.YoYChangePercent.HasValue)
+                        {
+                            <span class="@(_result.YoYChangePercent.Value <= 0 ? "text-success" : "text-danger") fw-bold small">
+                                <RadzenIcon Icon="@(_result.YoYChangePercent.Value <= 0 ? "trending_down" : "trending_up")" Style="font-size: 15px; vertical-align: text-bottom;" />
+                                @Math.Abs(_result.YoYChangePercent.Value).ToString("F1")%
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary-subtle text-secondary fw-semibold">N/A</span>
+                        }
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Net Footprint & Offsets Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-net">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Net Footprint</span>
+                            <h3 class="fw-bold text-dark mb-0">@_result.NetEmissions.ToString("N2") <small class="fs-6 text-muted font-normal">tCO₂e</small></h3>
+                        </div>
+                        <div class="p-2 rounded-3" style="background-color: #d1fae5; color: #059669;">
+                            <RadzenIcon Icon="energy_savings_leaf" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <small class="text-muted d-block">
+                            Offsets / RECs: <strong class="text-success">@_result.CarbonOffsets.ToString("N2") tCO₂e</strong>
+                        </small>
+                    </div>
+                    <div class="mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Offset Ratio</span>
+                        <span class="badge @(_result.CarbonOffsets > 0m ? "bg-success" : "bg-light text-muted border") fw-bold">
+                            @_result.OffsetRatioPercent.ToString("F1")% Neutralized
+                        </span>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Emission Intensity Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-intensity">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Emission Intensity</span>
+                            @if (_result.EmissionIntensity.HasValue)
+                            {
+                                @* [2026-09-25][Gemini] ปรับฟอร์แมตตัวเลขแสดงภาพรวมเป็น N2 *@
+                                <h3 class="fw-bold text-dark mb-0">@_result.EmissionIntensity.Value.ToString("N2")</h3>
+                                <small class="text-muted">tCO₂e / @_result.ProductionUnit</small>
+                            }
+                            else
+                            {
+                                <h4 class="fw-bold text-muted mb-0 mt-1">N/A</h4>
+                                <small class="text-muted">No Fr-01 product data</small>
+                            }
+                        </div>
+                        <div class="p-2 bg-info-subtle text-info rounded-3">
+                            <RadzenIcon Icon="precision_manufacturing" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <div class="mt-3 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Basis</span>
+                        <span class="badge bg-light text-dark fw-semibold">Fr-01 Output</span>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Data Quality / Coverage Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-quality dash-cursor-pointer"
+                            @onclick="@OpenDataQualityPanel">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Data Quality</span>
+                            @if (_result.DataQuality.TopicsWithoutDataCount == 0 && _result.DataQuality.ExpiredEfCount == 0)
+                            {
+                                <h4 class="fw-bold text-success mb-0 mt-1">100%</h4>
+                                <small class="text-success fw-semibold">Verified & Complete</small>
+                            }
+                            else
+                            {
+                                <h4 class="fw-bold text-warning mb-0 mt-1">@_result.DataQuality.TopicsWithDataCount/@_result.DataQuality.InScopeTopicsCount</h4>
+                                <small class="text-danger fw-semibold">@(_result.DataQuality.TopicsWithoutDataCount) Missing | @(_result.DataQuality.ExpiredEfCount) Expired</small>
+                            }
+                        </div>
+                        <div class="p-2 bg-warning-subtle text-warning rounded-3">
+                            <RadzenIcon Icon="verified_user" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <div class="mt-3 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Inspection</span>
+                        <span class="badge bg-warning-subtle text-dark fw-bold">Click to Review</span>
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+
+        <!-- ROW 2: MULTI-SCOPE GHG BREAKDOWN (4 CARDS) -->
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
+            <!-- Scope 1 Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-scope1">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Scope 1 (Direct)</span>
+                            <h3 class="fw-bold text-dark mb-0">@_result.Scope1Emissions.ToString("N2") <small class="fs-6 text-muted font-normal">tCO₂e</small></h3>
+                        </div>
+                        <div class="p-2 bg-success-subtle text-success rounded-3">
+                            <RadzenIcon Icon="local_fire_department" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <!-- 12-Month Sparkline -->
+                    @if (_result.MonthlyScope1Sparkline.Any(v => v > 0))
+                    {
+                        var spark = GenerateSparkline(_result.MonthlyScope1Sparkline, 90, 22);
+                        <div class="mt-2" title="12-Month Scope 1 Trend (@MonthRangeText)">
+                            <svg width="90" height="22" viewBox="0 0 90 22" style="overflow: visible; display: block;">
+                                <defs>
+                                    <linearGradient id="spark-s1" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#10b981" stop-opacity="0.35" />
+                                        <stop offset="100%" stop-color="#10b981" stop-opacity="0.0" />
+                                    </linearGradient>
+                                </defs>
+                                <path d="@spark.AreaPath" fill="url(#spark-s1)" />
+                                <path d="@spark.LinePath" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </div>
+                    }
+                    <div class="mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Share of Gross</span>
+                        <span class="fw-bold small text-dark">@_result.Scope1Share.ToString("F1")%</span>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Scope 2 Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-scope2">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Scope 2 (Electricity)</span>
+                            <h3 class="fw-bold text-dark mb-0">@_result.Scope2Emissions.ToString("N2") <small class="fs-6 text-muted font-normal">tCO₂e</small></h3>
+                        </div>
+                        <div class="p-2 bg-primary-subtle text-primary rounded-3">
+                            <RadzenIcon Icon="bolt" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <!-- 12-Month Sparkline -->
+                    @if (_result.MonthlyScope2Sparkline.Any(v => v > 0))
+                    {
+                        var spark = GenerateSparkline(_result.MonthlyScope2Sparkline, 90, 22);
+                        <div class="mt-2" title="12-Month Scope 2 Trend (@MonthRangeText)">
+                            <svg width="90" height="22" viewBox="0 0 90 22" style="overflow: visible; display: block;">
+                                <defs>
+                                    <linearGradient id="spark-s2" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.35" />
+                                        <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0" />
+                                    </linearGradient>
+                                </defs>
+                                <path d="@spark.AreaPath" fill="url(#spark-s2)" />
+                                <path d="@spark.LinePath" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </div>
+                    }
+                    <div class="mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Share of Gross</span>
+                        <span class="fw-bold small text-dark">@_result.Scope2Share.ToString("F1")%</span>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Scope 3 Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-scope3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Scope 3 (Value Chain)</span>
+                            <h3 class="fw-bold text-dark mb-0">@_result.Scope3Emissions.ToString("N2") <small class="fs-6 text-muted font-normal">tCO₂e</small></h3>
+                        </div>
+                        <div class="p-2 bg-warning-subtle text-warning rounded-3">
+                            <RadzenIcon Icon="alt_route" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <!-- 12-Month Sparkline -->
+                    @if (_result.MonthlyScope3Sparkline.Any(v => v > 0))
+                    {
+                        var spark = GenerateSparkline(_result.MonthlyScope3Sparkline, 90, 22);
+                        <div class="mt-2" title="12-Month Scope 3 Trend (@MonthRangeText)">
+                            <svg width="90" height="22" viewBox="0 0 90 22" style="overflow: visible; display: block;">
+                                <defs>
+                                    <linearGradient id="spark-s3" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#f97316" stop-opacity="0.35" />
+                                        <stop offset="100%" stop-color="#f97316" stop-opacity="0.0" />
+                                    </linearGradient>
+                                </defs>
+                                <path d="@spark.AreaPath" fill="url(#spark-s3)" />
+                                <path d="@spark.LinePath" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </div>
+                    }
+                    <div class="mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Share of Gross</span>
+                        <span class="fw-bold small text-dark">@_result.Scope3Share.ToString("F1")%</span>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Biogenic CO2 Card -->
+            <div class="col">
+                <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100 position-relative overflow-hidden dash-card-biogenic">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Biogenic CO₂</span>
+                            <h3 class="fw-bold text-dark mb-0">@_result.SeparateEmissions.ToString("N2") <small class="fs-6 text-muted font-normal">tCO₂e</small></h3>
+                        </div>
+                        <div class="p-2 rounded-3 dash-bg-biogenic">
+                            <RadzenIcon Icon="eco" Style="font-size: 24px;" />
+                        </div>
+                    </div>
+                    <div class="mt-3 pt-2 border-top d-flex align-items-center justify-content-between">
+                        <span class="small text-muted">Reporting Status</span>
+                        <span class="badge dash-badge-biogenic fw-semibold">Separate Report</span>
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+
+        <!-- ROW 2: CHARTS (DONUT DISTRIBUTION + UNIFIED MONTHLY TRAJECTORY) -->
+        <div class="row g-3 mb-4">
+            <!-- Donut Chart: Scope Share -->
+            <div class="col-12 col-lg-4">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold text-dark m-0">GHG Scope Distribution</h6>
+                        <RadzenBadge Text="ISO 14064" BadgeStyle="BadgeStyle.Light" />
+                    </div>
+                    <div class="flex-grow-1 d-flex align-items-center justify-content-center" style="min-height: 280px;">
+                        @if (_result.TotalEmissions > 0)
+                        {
+                            @* [2026-09-26][Claude] ปิด data label บนโดนัท (ตัวเลขไม่ format และทับกับ legend) → แสดงค่า N2 + % ใน legend ที่ทำเองด้านล่าง และ tooltip แบบ N2 *@
+                            <div class="w-100">
+                            <RadzenChart Style="width: 100%; height: 230px;">
+                                <RadzenDonutSeries Data="@_result.ScopeDistributionData" CategoryProperty="ScopeName" ValueProperty="Amount"
+                                                   Fills="@(new[] { Dashboard2Colors.Scope1, Dashboard2Colors.Scope2, Dashboard2Colors.Scope3 })">
+                                    <TooltipTemplate Context="item">
+                                        <div><strong>@item.ScopeName</strong></div>
+                                        <div>@item.Amount.ToString("N2") tCO₂e (@ScopeSharePercent(item.Amount).ToString("F1")%)</div>
+                                    </TooltipTemplate>
+                                    <TitleTemplate>
+                                        <div class="rz-donut-content text-center">
+                                            @* [2026-09-25][Gemini] ปรับฟอร์แมตปริมาณการปล่อยเป็น N2 เหมาะกับภาพรวมผู้บริหาร *@
+                                            <div class="fs-5 fw-bold">@_result.TotalEmissions.ToString("N2")</div>
+                                            <div class="small text-muted">tCO₂e</div>
+                                        </div>
+                                    </TitleTemplate>
+                                </RadzenDonutSeries>
+                                <RadzenLegend Visible="false" />
+                            </RadzenChart>
+                            <div class="mt-2">
+                                @{ var scopeFills = new[] { Dashboard2Colors.Scope1, Dashboard2Colors.Scope2, Dashboard2Colors.Scope3 }; }
+                                @for (int i = 0; i < _result.ScopeDistributionData.Count; i++)
+                                {
+                                    var item = _result.ScopeDistributionData[i];
+                                    var fill = scopeFills[i % scopeFills.Length];
+                                    <div class="d-flex align-items-center justify-content-between small py-1 border-bottom">
+                                        <span class="d-flex align-items-center gap-2">
+                                            <span style="display:inline-block; width:10px; height:10px; border-radius:2px; background:@fill;"></span>
+                                            @item.ScopeName
+                                        </span>
+                                        <span>
+                                            <strong>@item.Amount.ToString("N2")</strong>
+                                            <span class="text-muted ms-1">(@ScopeSharePercent(item.Amount).ToString("F1")%)</span>
+                                        </span>
+                                    </div>
+                                }
+                            </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-4">
+                                <RadzenIcon Icon="pie_chart_outline" Style="font-size: 3rem;" Class="mb-2 text-secondary opacity-50" />
+                                <div class="small fw-semibold">No Emission Distribution Data</div>
+                                <small class="text-muted">No activity events recorded for @_selectedYear.</small>
+                            </div>
+                        }
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Monthly Emissions Trajectory (Single Unified RadzenChart) -->
+            <div class="col-12 col-lg-8">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                        <div>
+                            <div class="d-flex align-items-center gap-2">
+                                <h6 class="fw-bold text-dark m-0">Monthly GHG Trajectory & Net-Zero Pathway (@YearDisplayText)</h6>
+                                @if (_result.MonthlyTrendData.Any(m => m.ActualExceededTargetAmount > 0))
+                                {
+                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle" style="font-size: 0.72rem;">Target Exceeded</span>
+                                }
+                                else if (_result.MonthlyTrendData.Any(m => m.ActualWarningTargetAmount > 0))
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size: 0.72rem;">Approaching Limit (>80%)</span>
+                                }
+                            </div>
+                            <span class="small text-muted">Baseline (@_baseYear) vs. Actual (@_selectedYear) vs. Net-Zero Pathway Target (@_targetYear)</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <RadzenButton Icon="mail" Text="Notify Members" ButtonStyle="ButtonStyle.Warning" Variant="Variant.Outlined"
+                                          Size="ButtonSize.Small" IsBusy="@_isSendingMembersAlert" Click="@NotifySubscriptionMembersAsync"
+                                          Style="border-radius: 6px;" Tooltip="Send GHG Net-Zero trajectory status alert to all subscription members" />
+                            <RadzenButton Icon="settings" Text="Annual Target Settings" ButtonStyle="ButtonStyle.Secondary"
+                                          Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@OpenNetZeroSettingsAsync" Style="border-radius: 6px;" />
+                        </div>
+                    </div>
+
+                    @if (!_result.BaseYearHasData)
+                    {
+                        <div class="alert alert-warning py-2 px-3 mb-2 rounded-3 small d-flex align-items-center gap-2">
+                            <RadzenIcon Icon="warning" Class="text-warning" />
+                            <span><strong>Notice:</strong> Base Year (@_baseYear) has no recorded activity data. Net-Zero target trajectory is hidden.</span>
+                        </div>
+                    }
+
+                    <div class="flex-grow-1" style="min-height: 290px;">
+                        <!-- Unified Single RadzenChart with Stacked Column + Line Series -->
+                        <RadzenChart @key="@($"TrajectoryChart_{_selectedYear}_{_baseYear}_{_targetYear}_{_targetReductionPercent}_{_result.LastUpdatedAt.Ticks}")" Style="width: 100%; height: 290px;">
+                            @* [2026-09-26][Claude] Overlay: แท่ง Base Year อยู่ "ด้านหน้า" แท่ง Actual แบบโปร่งใส เริ่มจาก 0 ทั้งคู่
+                               Radzen ไม่มี overlap ในตัว → ใช้ stack 3 ชั้น + สีที่ blend ไว้แล้ว (ดู MonthlyTrendItem2 / Dashboard2Colors)
+                               tooltip ทุกชั้นแสดงค่า Actual / Base Year จริง *@
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="OverlapMetAmount"
+                                                       Title="Overlap (Met)" Fill="@Dashboard2Colors.OverlapTargetMet">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="OverlapWarningAmount"
+                                                       Title="Overlap (Approaching)" Fill="@Dashboard2Colors.OverlapTargetWarning">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="OverlapExceededAmount"
+                                                       Title="Overlap (Exceeded)" Fill="@Dashboard2Colors.OverlapTargetExceeded">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="ExcessMetAmount"
+                                                       Title="Actual (Met Target)" Fill="@Dashboard2Colors.TargetMet">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="ExcessWarningAmount"
+                                                       Title="Actual (Approaching Target >80%)" Fill="@Dashboard2Colors.TargetWarning">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="ExcessExceededAmount"
+                                                       Title="Actual (Exceeded Target)" Fill="@Dashboard2Colors.TargetExceeded">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            <RadzenStackedColumnSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="BaseYearRemainderAmount"
+                                                       Title="@($"Base Year ({_baseYear})")" Fill="@Dashboard2Colors.BaseYearOverlay">
+                                <TooltipTemplate Context="m">
+                                    <div class="small">
+                                        <strong>@m.MonthName</strong><br />
+                                        Actual (@_selectedYear): <strong>@m.ActualAmount.ToString("N2")</strong> tCO₂e<br />
+                                        Base Year (@_baseYear): <strong>@m.BaseYearAmount.ToString("N2")</strong> tCO₂e
+                                        @if (m.NetZeroTargetAmount > 0)
+                                        {
+                                            <br /><span>Net-Zero Target: <strong>@m.NetZeroTargetAmount.ToString("N2")</strong> tCO₂e</span>
+                                        }
+                                    </div>
+                                </TooltipTemplate>
+                            </RadzenStackedColumnSeries>
+                            @if (_result.BaseYearHasData)
+                            {
+                                <RadzenLineSeries Data="@_result.MonthlyTrendData" CategoryProperty="MonthName" ValueProperty="NetZeroTargetAmount"
+                                                  Title="@($"Net-Zero Target ({_selectedYear})")" Stroke="@Dashboard2Colors.Target"
+                                                  LineType="LineType.Solid" Smooth="true" StrokeWidth="2.5" />
+                            }
+                            <RadzenValueAxis Min="0">
+                                <RadzenGridLines Visible="true" />
+                                <RadzenAxisTitle Text="tCO₂e" />
+                            </RadzenValueAxis>
+                            <RadzenCategoryAxis />
+                            @* [2026-09-26][Claude] ซ่อน legend ของ Radzen (มี 7 series จาก stack จำลอง) ใช้ legend HTML ด้านล่างแทน *@
+                            <RadzenLegend Visible="false" />
+                        </RadzenChart>
+                        <div class="d-flex flex-wrap justify-content-center gap-3 small text-secondary mt-1">
+                            <span class="d-inline-flex align-items-center gap-1"><span style="width:12px;height:12px;background:@Dashboard2Colors.BaseYearOverlay;border:1px solid @Dashboard2Colors.BaseYear;display:inline-block;"></span>Base Year (@_baseYear) — overlay</span>
+                            <span class="d-inline-flex align-items-center gap-1"><span style="width:12px;height:12px;background:@Dashboard2Colors.TargetMet;display:inline-block;"></span>Actual (Met Target)</span>
+                            <span class="d-inline-flex align-items-center gap-1"><span style="width:12px;height:12px;background:@Dashboard2Colors.TargetWarning;display:inline-block;"></span>Actual (Approaching Target &gt;80%)</span>
+                            <span class="d-inline-flex align-items-center gap-1"><span style="width:12px;height:12px;background:@Dashboard2Colors.TargetExceeded;display:inline-block;"></span>Actual (Exceeded Target)</span>
+                            @if (_result.BaseYearHasData)
+                            {
+                                <span class="d-inline-flex align-items-center gap-1"><span style="width:16px;height:3px;background:@Dashboard2Colors.Target;display:inline-block;"></span>Net-Zero Target (@_selectedYear)</span>
+                            }
+                        </div>
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+
+        <!-- ROW 3: CHARTS (HOTSPOTS + FACILITY BENCHMARKING) -->
+        <div class="row g-3 mb-4">
+            <!-- Top 5 Carbon Hotspots Bar Chart -->
+            <div class="col-12 col-lg-6">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold text-dark m-0">Top 5 Carbon Hotspots (by Activity Group)</h6>
+                        <span class="badge dash-hotspot-badge">Materiality Hotspots</span>
+                    </div>
+                    <div class="flex-grow-1" style="min-height: 250px;">
+                        @if (_result.TopHotspotsData != null && _result.TopHotspotsData.Any(h => h.Amount > 0))
+                        {
+                            <RadzenChart Style="width: 100%; height: 250px;">
+                                <RadzenBarSeries Data="@_result.TopHotspotsData" CategoryProperty="GroupName" ValueProperty="Amount"
+                                                 Title="tCO₂e" Fill="@Dashboard2Colors.Hotspot" />
+                                <RadzenValueAxis Min="0">
+                                    <RadzenGridLines Visible="true" />
+                                </RadzenValueAxis>
+                                <RadzenCategoryAxis />
+                                <RadzenLegend Visible="false" />
+                            </RadzenChart>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-items-center justify-content-center h-100 text-muted">
+                                <span>No carbon hotspots identified for selected filter.</span>
+                            </div>
+                        }
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Facility Footprint Benchmark Comparison -->
+            <div class="col-12 col-lg-6">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold text-dark m-0">Facility Footprint Benchmark</h6>
+                        <span class="badge dash-facility-badge">Benchmarking</span>
+                    </div>
+                    <div class="flex-grow-1" style="min-height: 250px;">
+                        @if (_result.FacilityComparisonData != null && _result.FacilityComparisonData.Any(f => f.Amount > 0))
+                        {
+                            <RadzenChart Style="width: 100%; height: 250px;">
+                                <RadzenColumnSeries Data="@_result.FacilityComparisonData" CategoryProperty="FacilityName" ValueProperty="Amount"
+                                                    Title="tCO₂e" Fill="@Dashboard2Colors.Facility" />
+                                <RadzenValueAxis Min="0">
+                                    <RadzenGridLines Visible="true" />
+                                </RadzenValueAxis>
+                                <RadzenCategoryAxis />
+                                <RadzenLegend Visible="false" />
+                            </RadzenChart>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-items-center justify-content-center h-100 text-muted">
+                                <span>No facility breakdown data available for selected filter.</span>
+                            </div>
+                        }
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+
+        <!-- ROW 4: SCOPE 3 VALUE CHAIN BREAKDOWN (15 GHG PROTOCOL CATEGORIES) -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <RadzenIcon Icon="hub" Style="color: #f97316; font-size: 1.3rem;" />
+                        <h6 class="fw-bold text-dark m-0">Scope 3 Value Chain Categories (GHG Protocol / ISO 14064-1)</h6>
+                        <RadzenBadge Text="@($"{_result.Scope3CategoriesData.Count(c => c.HasData)}/15 Reported")" BadgeStyle="BadgeStyle.Warning" Style="font-size: 0.72rem; padding: 2px 7px;" />
+                    </div>
+                    <span class="small text-muted">Evaluation of standard 15 upstream and downstream Scope 3 categories under TGO CFO Fr-03.2</span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="small text-muted">Scope 3 Total:</span>
+                    <strong class="text-dark fs-6">@_result.Scope3Emissions.ToString("N2") tCO₂e</strong>
+                </div>
+            </div>
+
+            <RadzenDataGrid Data="@_result.Scope3CategoriesData" TItem="Scope3CategoryItem2" AllowSorting="true" AllowColumnResize="true" Class="rz-border-radius-2" Density="Density.Compact">
+                <Columns>
+                    <RadzenDataGridColumn TItem="Scope3CategoryItem2" Property="CategoryNo" Title="Cat #" Width="70px" TextAlign="TextAlign.Center">
+                        <Template Context="cat">
+                            <span class="badge @(cat.HasData ? "bg-warning text-dark fw-bold" : "bg-light text-muted border") rounded-pill">
+                                @cat.CategoryNo.ToString("D2")
+                            </span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="Scope3CategoryItem2" Property="CategoryTitle" Title="Scope 3 Category Name">
+                        <Template Context="cat">
+                            <span class="@(cat.HasData ? "fw-bold text-dark" : "text-muted")">@cat.CategoryTitle</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="Scope3CategoryItem2" Property="EmissionsTon" Title="Emissions (tCO₂e)" Width="170px" TextAlign="TextAlign.Right">
+                        <Template Context="cat">
+                            @* [2026-09-25][Gemini] ปรับฟอร์แมตปริมาณการปล่อยเป็น N2 เหมาะกับภาพรวมผู้บริหาร *@
+                            <span class="@(cat.HasData ? "fw-bold text-dark fs-6" : "text-muted")">
+                                @cat.EmissionsTon.ToString("N2")
+                            </span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="Scope3CategoryItem2" Property="SharePercent" Title="Share of Scope 3" Width="200px">
+                        <Template Context="cat">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="progress flex-grow-1" style="height: 6px; background-color: #f1f5f9;">
+                                    <div class="progress-bar bg-warning" role="progressbar" style="width: @(Math.Min(100, (double)cat.SharePercent))%;"></div>
+                                </div>
+                                <span class="small fw-semibold text-muted" style="min-width: 45px; text-align: right;">
+                                    @cat.SharePercent.ToString("F1")%
+                                </span>
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="Scope3CategoryItem2" Property="HasData" Title="Status" Width="130px" TextAlign="TextAlign.Center">
+                        <Template Context="cat">
+                            @if (cat.HasData)
+                            {
+                                <span class="badge bg-success-subtle text-success border border-success-subtle fw-semibold">Reported</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-light text-muted border">No Activity</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenCard>
+
+        <!-- ROW 5: HOTSPOT MATERIALITY TABLE (WITH PAGING & DRILL-DOWN) -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h6 class="fw-bold text-dark m-0">Executive Materiality Matrix & Hotspot Summary</h6>
+                    <span class="small text-muted">Click any row to drill down into detailed activity analytics</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="d-flex align-items-center gap-2">
+                        <RadzenLabel Text="Display:" Class="small text-muted m-0" />
+                        <RadzenSelectBar @bind-Value="@_pageSize" TValue="int" Change="@OnPageSizeChanged" Size="ButtonSize.Small">
+                            <Items>
+                                <RadzenSelectBarItem Text="Top 5" Value="5" />
+                                <RadzenSelectBarItem Text="Top 10" Value="10" />
+                                <RadzenSelectBarItem Text="All" Value="0" />
+                            </Items>
+                        </RadzenSelectBar>
+                    </div>
+                    <RadzenButton Icon="open_in_new" Text="View Full Activity Analytics" ButtonStyle="ButtonStyle.Secondary"
+                                  Variant="Variant.Flat" Size="ButtonSize.Small" Click="@(() => NavigateToAnalytics())" />
+                </div>
+            </div>
+
+            <RadzenDataGrid Data="@_result.TopHotspotsTable" TItem="HotspotRow2" AllowPaging="@(_pageSize > 0)" PageSize="@(_pageSize > 0 ? _pageSize : 50)"
+                            AllowSorting="true" AllowColumnResize="true" Class="rz-border-radius-2" RowSelect="@OnRowClick">
+                <Columns>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Property="Rank" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                        <Template Context="row">
+                            <span class="badge bg-dark rounded-circle">@row.Rank</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Property="ActivityTopic" Title="Activity Topic / Category">
+                        <Template Context="row">
+                            <div class="dash-grid-row-clickable">
+                                <span class="fw-bold text-dark d-block">@row.ActivityTopic</span>
+                                <small class="text-muted">@row.ActivityGroup</small>
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Property="ScopeDisplay" Title="Scope" Width="130px">
+                        <Template Context="row">
+                            <span class="badge @(row.ScopeDisplay == "Scope 1" ? "bg-success" : row.ScopeDisplay == "Scope 2" ? "bg-primary" : row.ScopeDisplay == "Scope 3" ? "bg-warning text-dark" : "dash-badge-biogenic")">
+                                @row.ScopeDisplay
+                            </span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Property="TotalKg" Title="Emissions (tCO₂e)" Width="160px" TextAlign="TextAlign.Right">
+                        <Template Context="row">
+                            @* [2026-09-25][Gemini] ปรับฟอร์แมตปริมาณการปล่อยเป็น N2 เหมาะกับภาพรวมผู้บริหาร *@
+                            <span class="fw-bold text-dark fs-6">@row.TotalTon.ToString("N2")</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Property="SharePercent" Title="Share (%)" Width="120px" TextAlign="TextAlign.Right">
+                        <Template Context="row">
+                            <span class="badge bg-secondary-subtle text-dark fw-bold">@row.SharePercent.ToString("F1")%</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Title="Materiality Level" Width="150px" TextAlign="TextAlign.Center">
+                        <Template Context="row">
+                            @if (row.SharePercent >= 20m)
+                            {
+                                <span class="badge bg-danger text-white">Critical Hotspot</span>
+                            }
+                            else if (row.SharePercent >= 10m)
+                            {
+                                <span class="badge bg-warning text-dark">High Materiality</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-info text-white">Moderate</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="HotspotRow2" Title="Drill-down" Width="80px" TextAlign="TextAlign.Center">
+                        <Template Context="row">
+                            <RadzenButton Icon="arrow_forward" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall"
+                                          Click="@(() => NavigateToAnalytics(row.Level, row.TargetId, row.ActivityTopic))"
+                                          Title="Inspect in Activity Analytics" />
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    #region class fields & query parameters
+    [SupplyParameterFromQuery(Name = "yr")] public string? SecureYr { get; set; }
+    [SupplyParameterFromQuery(Name = "cid")] public string? SecureCid { get; set; }
+    [SupplyParameterFromQuery(Name = "cmp")] public string? SecureCmp { get; set; }
+    [SupplyParameterFromQuery(Name = "fac")] public string? SecureFac { get; set; }
+    // [2026-09-26][Claude] เดือนเริ่มปีบัญชี (1-12) เก็บใน URL ตาม State Persistence Standard
+    [SupplyParameterFromQuery(Name = "fym")] public string? SecureFym { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isExporting = false;
+    private int _pageSize = 5;
+
+    private int _selectedYear = AppTimeZone.LocalNow.Year;
+    private int? _selectedCorporateId = null;
+    private int? _selectedCompanyId = null;
+    private int? _selectedFacilityId = null;
+
+    // [2026-09-26][Claude] ตัวกรองเพิ่มเติม: เดือนเริ่มปีบัญชี (1 = มกราคม = ปีปฏิทิน)
+    private int _fiscalStartMonth = 1;
+    private static string MonthName(int month) => CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(month);
+
+    private string MonthRangeText => $"{MonthName(_fiscalStartMonth)} - {MonthName(((_fiscalStartMonth + 10) % 12) + 1)}";
+
+    private string CurrentPeriodText => ExecutiveDashboardService2.FormatFiscalPeriod(_selectedYear, _fiscalStartMonth);
+
+    private string YearDisplayText => _fiscalStartMonth == 1 ? _selectedYear.ToString() : $"FY{_selectedYear}: {CurrentPeriodText}";
+
+    private bool _isAdmin = false;
+    private HashSet<int> _allowedSubscriptionIds = new();
+    private HashSet<int> _editableSubscriptionIds = new();
+    private int _primarySubscriptionId = 0;
+
+    // [2026-09-26][Claude] เดิมเช็กแค่ "มีสิทธิ์แก้ไขอย่างน้อย 1 Subscription" ทำให้ export ข้อมูลของ Subscription ที่เป็นแค่ Viewer ได้
+    //   → ต้องมีสิทธิ์แก้ไขทุก Subscription ที่อยู่ในขอบเขตข้อมูลที่แสดงอยู่ (องค์กรที่เลือก หรือทั้งหมดเมื่อไม่ได้เลือก)
+    private bool CanExport => _isAdmin || (ExportScopeSubscriptionIds.Any() && ExportScopeSubscriptionIds.All(id => _editableSubscriptionIds.Contains(id)));
+
+    private HashSet<int> ExportScopeSubscriptionIds
+    {
+        get
+        {
+            int? corpId = _selectedCorporateId;
+            if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+            {
+                var companyId = _result.Facilities.FirstOrDefault(f => f.Id == _selectedFacilityId.Value)?.CompanyId;
+                corpId = _result.Companies.FirstOrDefault(c => c.Id == companyId)?.CorporateId;
+            }
+            else if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+            {
+                corpId = _result.Companies.FirstOrDefault(c => c.Id == _selectedCompanyId.Value)?.CorporateId;
+            }
+
+            if (corpId.HasValue && corpId.Value > 0)
+            {
+                var subId = _result.Corporates.FirstOrDefault(c => c.Id == corpId.Value)?.SubscriptionId;
+                return subId.HasValue ? new HashSet<int> { subId.Value } : new HashSet<int>();
+            }
+
+            return _allowedSubscriptionIds;
+        }
+    }
+
+    // Pathway Settings State
+    private int _baseYear = 2023;
+    private int _targetYear = 2030;
+    private decimal _targetReductionPercent = 50.0m;
+    // [2026-09-25][Antigravity] Carbon Offsets & RECs for Net Carbon Footprint
+    private decimal _carbonOffsets = 0.0m;
+    // [2026-09-25][Antigravity] Automated GHG target alert settings
+    private bool _enableAlert = true;
+    private decimal _alertThresholdPercent = 80.0m;
+    private string? _alertEmails;
+    // [2026-09-25][Gemini] สถานะการกดส่งอีเมลแจ้งเตือนไปยังสมาชิกทุกคนใน Subscription
+    private bool _isSendingMembersAlert = false;
+
+    private ExecutiveDashboardResult2 _result = new();
+
+    // [2026-09-25][Antigravity] Generates SVG path coordinates for responsive 12-month KPI sparklines
+    private static (string LinePath, string AreaPath) GenerateSparkline(IEnumerable<double>? values, int width = 90, int height = 22)
+    {
+        var list = values?.ToList() ?? new List<double>();
+        if (!list.Any()) return (string.Empty, string.Empty);
+        if (list.Count == 1) return ($"M 0 {height / 2} L {width} {height / 2}", string.Empty);
+
+        double min = list.Min();
+        double max = list.Max();
+        double range = max - min;
+        if (range < 0.0001) range = 1.0;
+
+        var points = new List<(double X, double Y)>();
+        double stepX = (double)width / (list.Count - 1);
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            double x = i * stepX;
+            double normY = (list[i] - min) / range;
+            double y = (height - 3) - (normY * (height - 6)) + 1;
+            points.Add((x, y));
+        }
+
+        var lineD = $"M {points[0].X:F1} {points[0].Y:F1} " + string.Join(" ", points.Skip(1).Select(p => $"L {p.X:F1} {p.Y:F1}"));
+        var areaD = $"{lineD} L {width} {height} L 0 {height} Z";
+
+        return (lineD, areaD);
+    }
+
+    private (eTopicLevel? Level, int? TargetId) EffectiveLevelAndTarget
+    {
+        get
+        {
+            if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+                return (eTopicLevel.Facility, _selectedFacilityId.Value);
+            if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+                return (eTopicLevel.Company, _selectedCompanyId.Value);
+            if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+                return (eTopicLevel.Corporate, _selectedCorporateId.Value);
+            return (null, null);
+        }
+    }
+
+    // [2026-09-26][Claude] สัดส่วน % ของแต่ละ Scope เทียบยอดรวม (ใช้ใน legend / tooltip ของกราฟโดนัท)
+    private decimal ScopeSharePercent(double amount) =>
+        _result.TotalEmissions > 0m ? (decimal)amount / _result.TotalEmissions * 100m : 0m;
+
+    private string CurrentFilterBoundaryText
+    {
+        get
+        {
+            if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+                return _result.Facilities.FirstOrDefault(f => f.Id == _selectedFacilityId.Value)?.Title ?? "Facility";
+            if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+                return _result.Companies.FirstOrDefault(c => c.Id == _selectedCompanyId.Value)?.Title ?? "Company";
+            if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+                return _result.Corporates.FirstOrDefault(c => c.Id == _selectedCorporateId.Value)?.Title ?? "Corporate";
+            return "All In-Scope Corporates";
+        }
+    }
+    #endregion
+
+    #region lifecycle methods
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            StateHasChanged();
+
+            if (!string.IsNullOrWhiteSpace(SecureYr) && int.TryParse(SecureYr, out var yr) && yr > 0)
+            {
+                _selectedYear = yr;
+            }
+
+            if (!string.IsNullOrWhiteSpace(SecureCid) && int.TryParse(SecureCid, out var cid) && cid > 0)
+            {
+                _selectedCorporateId = cid;
+            }
+
+            if (!string.IsNullOrWhiteSpace(SecureCmp) && int.TryParse(SecureCmp, out var cmp) && cmp > 0)
+            {
+                _selectedCompanyId = cmp;
+            }
+
+            if (!string.IsNullOrWhiteSpace(SecureFac) && int.TryParse(SecureFac, out var fac) && fac > 0)
+            {
+                _selectedFacilityId = fac;
+            }
+
+            // [2026-09-26][Claude] คืนค่าเดือนเริ่มปีบัญชีจาก URL (widget จะกางแถบ Advanced เองถ้าไม่ใช่ปีปฏิทิน)
+            if (!string.IsNullOrWhiteSpace(SecureFym) && int.TryParse(SecureFym, out var fym) && fym is >= 1 and <= 12)
+            {
+                _fiscalStartMonth = fym;
+            }
+
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var isAdmin = user.IsInRole(SystemRoles.Administrator);
+            var email = user.FindFirst(ClaimTypes.Email)?.Value
+                     ?? user.FindFirst(ClaimTypes.Name)?.Value
+                     ?? user.Identity?.Name;
+
+            _isAdmin = isAdmin;
+            if (!string.IsNullOrEmpty(email))
+            {
+                var userSubs = await SubscriptionService.GetSubscriptionsForUserAsync(email, isAdmin);
+                _allowedSubscriptionIds = userSubs.Select(s => s.Id).ToHashSet();
+                _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(email, isAdmin);
+                if (_allowedSubscriptionIds.Any())
+                {
+                    _primarySubscriptionId = _allowedSubscriptionIds.First();
+                }
+            }
+
+            if (_allowedSubscriptionIds.Any())
+            {
+                await LoadNetZeroTargetsAsync();
+                await LoadDashboardDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing Executive Dashboard V2.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error Loading Dashboard", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncBrowserUrlAsync();
+        }
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["yr"] = _selectedYear > 0 ? _selectedYear.ToString() : null,
+                ["cid"] = _selectedCorporateId.HasValue ? _selectedCorporateId.Value.ToString() : null,
+                ["cmp"] = _selectedCompanyId.HasValue ? _selectedCompanyId.Value.ToString() : null,
+                ["fac"] = _selectedFacilityId.HasValue ? _selectedFacilityId.Value.ToString() : null,
+                // [2026-09-26][Claude] เก็บเดือนเริ่มปีบัญชีเฉพาะเมื่อไม่ใช่ปีปฏิทิน
+                ["fym"] = _fiscalStartMonth != 1 ? _fiscalStartMonth.ToString() : null
+            };
+
+            var uri = NavigationManager.GetUriWithQueryParameters("/dashboard", queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // Ignore during prerendering
+        }
+    }
+    #endregion
+
+    #region filter event handlers
+    private async Task OnFilterChangedAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            StateHasChanged();
+            await SyncBrowserUrlAsync();
+            await LoadDashboardDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error changing reporting year filter.");
+            NotificationService.Notify(NotificationSeverity.Error, "Filter Error", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnCorporateChangedAsync()
+    {
+        try
+        {
+            _selectedCompanyId = null;
+            _selectedFacilityId = null;
+            _isLoading = true;
+            StateHasChanged();
+            await SyncBrowserUrlAsync();
+            await LoadNetZeroTargetsAsync();
+            await LoadDashboardDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error changing corporate filter.");
+            NotificationService.Notify(NotificationSeverity.Error, "Filter Error", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnCompanyChangedAsync()
+    {
+        try
+        {
+            _selectedFacilityId = null;
+            _isLoading = true;
+            StateHasChanged();
+            await SyncBrowserUrlAsync();
+            await LoadDashboardDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error changing company filter.");
+            NotificationService.Notify(NotificationSeverity.Error, "Filter Error", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnFacilityChangedAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            StateHasChanged();
+            await SyncBrowserUrlAsync();
+            await LoadDashboardDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error changing facility filter.");
+            NotificationService.Notify(NotificationSeverity.Error, "Filter Error", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshDashboardAsync(bool bypassCache = false)
+    {
+        try
+        {
+            _isLoading = true;
+            StateHasChanged();
+            await LoadNetZeroTargetsAsync();
+            await LoadDashboardDataAsync(bypassCache);
+            NotificationService.Notify(NotificationSeverity.Success, "Dashboard Refreshed", "Loaded latest real-time carbon data.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing dashboard V2.");
+            NotificationService.Notify(NotificationSeverity.Error, "Refresh Failed", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+    #endregion
+
+    #region data loading
+    private async Task LoadNetZeroTargetsAsync()
+    {
+        if (_primarySubscriptionId > 0)
+        {
+            var target = await NetZeroService.GetAsync(_primarySubscriptionId, _selectedCorporateId);
+            _baseYear = target.BaseYear;
+            _targetYear = target.TargetYear;
+            _targetReductionPercent = target.TargetReductionPercent;
+            // [2026-09-25][Antigravity] Load automated GHG target alert settings
+            _enableAlert = target.EnableAlert;
+            _alertThresholdPercent = target.AlertThresholdPercent;
+            _alertEmails = target.AlertEmails;
+        }
+    }
+
+    private async Task LoadDashboardDataAsync(bool bypassCache = false)
+    {
+        var (effLevel, effTargetId) = EffectiveLevelAndTarget;
+
+        _result = await DashboardService.GetDashboardDataAsync(
+            _allowedSubscriptionIds,
+            _selectedYear,
+            effLevel,
+            effTargetId,
+            _baseYear,
+            _targetYear,
+            _targetReductionPercent,
+            _carbonOffsets,
+            _alertThresholdPercent,
+            bypassCache,
+            _fiscalStartMonth
+        );
+
+        // Fallback year logic (ensures selectedYear exists in AvailableYears and dropdown is not empty)
+        if (_result.AvailableYears.Any())
+        {
+            if (!_result.AvailableYears.Contains(_selectedYear))
+            {
+                _selectedYear = _result.AvailableYears.First();
+                // Reload with fallback year
+                _result = await DashboardService.GetDashboardDataAsync(
+                    _allowedSubscriptionIds,
+                    _selectedYear,
+                    effLevel,
+                    effTargetId,
+                    _baseYear,
+                    _targetYear,
+                    _targetReductionPercent,
+                    _carbonOffsets,
+                    _alertThresholdPercent,
+                    bypassCache,
+                    _fiscalStartMonth
+                );
+            }
+        }
+        else
+        {
+            var currentY = AppTimeZone.LocalNow.Year;
+            _result.AvailableYears.Add(currentY);
+            _selectedYear = currentY;
+        }
+    }
+    #endregion
+
+    #region pathway dialog & data quality panel
+    private async Task OpenNetZeroSettingsAsync()
+    {
+        try
+        {
+            var model = new NetZeroSettingDialog.NetZeroSettingModel
+            {
+                BaseYear = _baseYear,
+                TargetYear = _targetYear,
+                TargetReductionPercent = _targetReductionPercent,
+                CarbonOffsets = _carbonOffsets,
+                // [2026-09-25][Antigravity] Pass alert settings to dialog
+                EnableAlert = _enableAlert,
+                AlertThresholdPercent = _alertThresholdPercent,
+                AlertEmails = _alertEmails
+            };
+
+            var dialogParams = new Dictionary<string, object>
+            {
+                { "Model", model },
+                { "YearOptions", _result.AvailableYears },
+                { "SubscriptionId", _primarySubscriptionId },
+                // [2026-09-26][Claude] ส่งข้อมูลปีที่เลือกให้ dialog แสดงเป้ารายปี (ยอด Gross Scope 1-3 ตรงกับหน้าจอ)
+                { "SelectedYear", _selectedYear },
+                { "LoadedBaseYear", _baseYear },
+                { "BaseYearHasData", _result.BaseYearHasData },
+                { "BaseYearEmissionsTon", (decimal)_result.MonthlyTrendData.Sum(m => m.BaseYearAmount) },
+                { "ActualEmissionsTon", _result.TotalEmissions }
+            };
+            if (_selectedCorporateId.HasValue)
+            {
+                dialogParams["CorporateId"] = _selectedCorporateId.Value;
+            }
+
+            // [2026-09-26][Claude] ใช้ NetZeroSettingDialog2 (เลย์เอาต์แนวกว้าง แบ่ง Tab)
+            var result = await DialogService.OpenAsync<NetZeroSettingDialog2>(
+                "⚙️ Annual Target & Alert Settings",
+                dialogParams,
+                new DialogOptions { Width = "920px", Resizable = false, Draggable = true }
+            );
+
+            if (result is NetZeroSettingDialog.NetZeroSettingModel updatedModel)
+            {
+                _baseYear = updatedModel.BaseYear;
+                _targetYear = updatedModel.TargetYear;
+                _targetReductionPercent = updatedModel.TargetReductionPercent;
+                _carbonOffsets = updatedModel.CarbonOffsets;
+                _enableAlert = updatedModel.EnableAlert;
+                _alertThresholdPercent = updatedModel.AlertThresholdPercent;
+                _alertEmails = updatedModel.AlertEmails;
+
+                if (_primarySubscriptionId > 0)
+                {
+                    await NetZeroService.SaveAsync(
+                        _primarySubscriptionId,
+                        _selectedCorporateId,
+                        _baseYear,
+                        _targetYear,
+                        _targetReductionPercent,
+                        _enableAlert,
+                        _alertThresholdPercent,
+                        _alertEmails
+                    );
+                }
+
+                _isLoading = true;
+                StateHasChanged();
+                await LoadDashboardDataAsync(bypassCache: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error opening Net-Zero settings dialog.");
+            NotificationService.Notify(NotificationSeverity.Error, "Settings Error", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // [2026-09-25][Gemini] ส่งอีเมลแจ้งเตือนสถานะ Monthly GHG Trajectory & Net-Zero Pathway (>80%) ไปยังสมาชิกทุกคนใน Subscription
+    private async Task NotifySubscriptionMembersAsync()
+    {
+        if (_primarySubscriptionId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "No Subscription", "Please select a valid subscription.");
+            return;
+        }
+
+        try
+        {
+            _isSendingMembersAlert = true;
+            var (success, count, message) = await AlertService.NotifyAllSubscriptionMembersAsync(
+                _primarySubscriptionId,
+                _selectedCorporateId,
+                _selectedYear);
+
+            if (success)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Alert Notification Sent", message);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Notification Skipped", message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error while notifying subscription members for Subscription {SubId}", _primarySubscriptionId);
+            NotificationService.Notify(NotificationSeverity.Error, "Notification Failed", ex.Message);
+        }
+        finally
+        {
+            _isSendingMembersAlert = false;
+        }
+    }
+
+    private async Task OpenDataQualityPanel()
+    {
+        await DialogService.OpenAsync("🛡️ Data Quality & Compliance Inspection", ds =>
+            @<div>
+                <RadzenTabs TabPosition="TabPosition.Top">
+                    <Tabs>
+                        <RadzenTabsItem Text="@($"Missing Activity Data ({_result.DataQuality.TopicsWithoutDataCount})")">
+                            @if (_result.DataQuality.MissingDataTopics.Any())
+                            {
+                                <RadzenDataGrid Data="@_result.DataQuality.MissingDataTopics" TItem="ProblemTopicItem2" AllowPaging="true" PageSize="5" Style="max-height: 350px;">
+                                    <Columns>
+                                        <RadzenDataGridColumn TItem="ProblemTopicItem2" Property="TopicTitle" Title="Activity Topic" />
+                                        <RadzenDataGridColumn TItem="ProblemTopicItem2" Property="TargetTitle" Title="Organization Level" Width="160px" />
+                                        <RadzenDataGridColumn TItem="ProblemTopicItem2" Property="ScopeDisplay" Title="Scope" Width="100px" />
+                                    </Columns>
+                                </RadzenDataGrid>
+                            }
+                            else
+                            {
+                                <div class="p-4 text-center text-success">
+                                    <RadzenIcon Icon="check_circle" Style="font-size: 2.5rem;" />
+                                    <div class="fw-bold mt-2">All topics have activity records for @_selectedYear!</div>
+                                </div>
+                            }
+                        </RadzenTabsItem>
+                        <RadzenTabsItem Text="@($"Expired Emission Factors ({_result.DataQuality.ExpiredEfCount})")">
+                            @if (_result.DataQuality.ExpiredEfs.Any())
+                            {
+                                <RadzenDataGrid Data="@_result.DataQuality.ExpiredEfs" TItem="ProblemEfItem2" AllowPaging="true" PageSize="5" Style="max-height: 350px;">
+                                    <Columns>
+                                        <RadzenDataGridColumn TItem="ProblemEfItem2" Property="SourceTitle" Title="Emission Source" />
+                                        <RadzenDataGridColumn TItem="ProblemEfItem2" Property="EF" Title="EF" Width="100px" TextAlign="TextAlign.Right" />
+                                        <RadzenDataGridColumn TItem="ProblemEfItem2" Property="UnitName" Title="Unit" Width="100px" />
+                                        <RadzenDataGridColumn TItem="ProblemEfItem2" Property="ExpiryDate" Title="Expired Date" Width="120px">
+                                            <Template Context="ef">
+                                                <span class="text-danger fw-bold">@(ef.ExpiryDate.HasValue ? ef.ExpiryDate.Value.ToString("yyyy-MM-dd") : "Expired")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+                                    </Columns>
+                                </RadzenDataGrid>
+                            }
+                            else
+                            {
+                                <div class="p-4 text-center text-success">
+                                    <RadzenIcon Icon="verified" Style="font-size: 2.5rem;" />
+                                    <div class="fw-bold mt-2">No expired emission factors found in active topics!</div>
+                                </div>
+                            }
+                        </RadzenTabsItem>
+                    </Tabs>
+                </RadzenTabs>
+                <div class="d-flex justify-content-end mt-3">
+                    <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Light" Click="@(() => ds.Close())" />
+                </div>
+            </div>,
+            new DialogOptions { Width = "700px", Resizable = true, Draggable = true }
+        );
+    }
+    #endregion
+
+    #region export & drill-down navigation
+    private async Task ExportToExcelAsync()
+    {
+        // [2026-09-19][Antigravity] Enforce edit permission check for exporting Executive Dashboard
+        if (!CanExport)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Access Denied", "Only users with edit permissions can export data.");
+            return;
+        }
+
+        try
+        {
+            _isExporting = true;
+            StateHasChanged();
+
+            var bytes = DashboardService.ExportToExcel(_result, _selectedYear, CurrentFilterBoundaryText, CurrentPeriodText);
+            var base64 = Convert.ToBase64String(bytes);
+            // [2026-09-21][Gemini] Standard Export Filename: executive_dashboard_{name}_{date}_{time}.xlsx
+            var contextName = $"{_selectedYear}_{CurrentFilterBoundaryText}";
+            var fileName = ExportFileNameHelper.Generate("executive_dashboard", contextName);
+
+            await JSRuntime.InvokeVoidAsync("saveAsFile", fileName, base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Export Complete", $"Dashboard saved as {fileName}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error exporting Executive Dashboard V2 to Excel.");
+            NotificationService.Notify(NotificationSeverity.Error, "Export Failed", ex.Message);
+        }
+        finally
+        {
+            _isExporting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnPageSizeChanged(int size)
+    {
+        _pageSize = size;
+        StateHasChanged();
+    }
+
+    private void OnRowClick(HotspotRow2 row)
+    {
+        NavigateToAnalytics(row.Level, row.TargetId, row.ActivityTopic);
+    }
+
+    private void NavigateToAnalytics(eTopicLevel? rowLevel = null, int? rowTargetId = null, string? searchKeyword = null)
+    {
+        var effLevel = rowLevel ?? EffectiveLevelAndTarget.Level;
+        var effTargetId = rowTargetId ?? EffectiveLevelAndTarget.TargetId;
+
+        var queryParams = new List<string> { $"yr={_selectedYear}" };
+
+        if (effTargetId.HasValue && effTargetId.Value > 0)
+        {
+            var encId = DataProtection.Protect(effTargetId.Value);
+            queryParams.Add($"id={Uri.EscapeDataString(encId)}");
+            int lvlValue = effLevel == eTopicLevel.Facility ? 3 : (effLevel == eTopicLevel.Company ? 2 : 1);
+            queryParams.Add($"level={lvlValue}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchKeyword))
+        {
+            queryParams.Add($"q={Uri.EscapeDataString(searchKeyword)}");
+        }
+
+        var retEnc = DataProtection.Protect("/dashboard");
+        queryParams.Add($"ret={Uri.EscapeDataString(retEnc)}");
+
+        NavigationManager.NavigateTo($"/organization/activity-analytics?{string.Join("&", queryParams)}");
+    }
+    #endregion
+}

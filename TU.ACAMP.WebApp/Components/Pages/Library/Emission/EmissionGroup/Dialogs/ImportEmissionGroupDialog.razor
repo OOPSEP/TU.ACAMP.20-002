@@ -1,0 +1,282 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject EmissionGroupExcelService ExcelService
+@inject EmissionGroupService EmissionGroupService
+@inject SubscriptionService SubscriptionService
+@inject IJSRuntime JSRuntime
+@inject ILogger<ImportEmissionGroupDialog> Logger
+
+<RadzenStack Gap="1.5rem" Style="padding: 0.5rem;">
+    <!-- Top Bar & Template Download -->
+    <RadzenCard Class="p-3 bg-light" Style="border-radius: 8px; border: 1px solid var(--rz-border-color);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <RadzenText Text="Import Emission Groups (.xlsx)" TextStyle="TextStyle.Subtitle1" class="fw-bold mb-1" />
+                <!-- [2026-09-20][Antigravity] ยกเลิกการแสดงและอ้างอิงถึง Code ในขั้นตอนนำเข้า/เทมเพลตตามความต้องการของผู้ใช้ -->
+                <RadzenText Text="Upload an Excel file containing 2 fields: Title and Scope." TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+            </div>
+            <RadzenButton Text="Download Template" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@DownloadTemplateAsync" />
+        </div>
+    </RadzenCard>
+
+    <!-- File Upload Section -->
+    <div>
+        <label class="form-label fw-semibold small text-muted">Select Excel File (.xlsx):</label>
+        <InputFile OnChange="@OnInputFileChange" accept=".xlsx" class="form-control form-control-sm" />
+    </div>
+
+    @if (_isParsing)
+    {
+        <div class="py-4 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Parsing Excel file..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_parsedItems != null)
+    {
+        <!-- Validation Summary Badges -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2">
+                Total Rows: <b>@_parsedItems.Count</b>
+            </span>
+            <span class="badge bg-primary-subtle text-primary-emphasis border px-3 py-2">
+                Ready to Import: <b>@_parsedItems.Count(i => i.IsValid)</b>
+            </span>
+            @if (_parsedItems.Any(i => i.IsDuplicated))
+            {
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2">
+                    Duplicated (Skipped): <b>@_parsedItems.Count(i => i.IsDuplicated)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => !i.IsValid && !i.IsDuplicated))
+            {
+                <span class="badge bg-danger-subtle text-danger-emphasis border px-3 py-2">
+                    Invalid: <b>@_parsedItems.Count(i => !i.IsValid && !i.IsDuplicated)</b>
+                </span>
+            }
+        </div>
+
+        <!-- Preview DataGrid -->
+        <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--rz-border-color); border-radius: 8px;">
+            <RadzenDataGrid Data="@_parsedItems" TItem="EmissionGroupImportItemDto" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="EmissionGroupImportItemDto" Title="Row" Width="60px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @item.RowNumber
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionGroupImportItemDto" Title="Title" MinWidth="240px" Property="Title">
+                        <Template Context="item">
+                            <span class="fw-bold text-dark">@item.Title</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionGroupImportItemDto" Title="Scope" Width="150px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (item.ValidationErrors.Any(e => e.Contains("scope", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                <span class="text-warning fw-semibold" title="@item.ScopeText">@(string.IsNullOrEmpty(item.ScopeText) ? "-" : item.ScopeText)</span>
+                            }
+                            else
+                            {
+                                <span class="text-secondary fw-semibold">@EmissionGroupExcelService.FormatScope(item.Scope)</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionGroupImportItemDto" Title="Status" Width="150px" TextAlign="TextAlign.Center" Sortable="false">
+                        <Template Context="item">
+                            @{
+                                var errText = string.Join("; ", item.ValidationErrors);
+                            }
+                            @if (item.IsDuplicated)
+                            {
+                                <RadzenBadge Text="Duplicated" BadgeStyle="BadgeStyle.Warning" IsPill="true" title="@errText" />
+                            }
+                            else if (!item.IsValid)
+                            {
+                                <RadzenBadge Text="Invalid" BadgeStyle="BadgeStyle.Danger" IsPill="true" title="@errText" />
+                            }
+                            else
+                            {
+                                <RadzenBadge Text="Valid" BadgeStyle="BadgeStyle.Success" IsPill="true" />
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </div>
+    }
+
+    <!-- Action Buttons -->
+    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.75rem" Class="mt-3">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close(false))" />
+        <RadzenButton Text="@($"Import ({_parsedItems?.Count(i => i.IsValid) ?? 0} Valid Items)")"
+                      Icon="file_upload"
+                      ButtonStyle="ButtonStyle.Success"
+                      Disabled="@(_parsedItems == null || !_parsedItems.Any(i => i.IsValid) || _isSaving)"
+                      Click="@ExecuteImportAsync" />
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    #region class field
+    [Parameter] public int SubscriptionId { get; set; }
+
+    private bool _isParsing = false;
+    private bool _isSaving = false;
+    private List<EmissionGroupImportItemDto>? _parsedItems;
+    #endregion
+
+    #region class methods
+    private async Task DownloadTemplateAsync()
+    {
+        #region hide [2026-09-06]
+        try
+        {
+            var bytes = await ExcelService.GenerateTemplateExcelAsync();
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("saveAsFile", "Template_EmissionGroups.xlsx", base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Template Downloaded", "Emission group import template saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate emission group import template.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to download template.");
+        }
+        #endregion
+    }
+
+    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    {
+        #region hide [2026-09-06]
+        var file = e.File;
+        if (file == null) return;
+
+        _isParsing = true;
+        StateHasChanged();
+
+        try
+        {
+            var sub = SubscriptionId > 0 ? await SubscriptionService.GetByIdAsync(SubscriptionId) : null;
+            var maxBytes = FileConstants.GetMaxUploadSizeBytes(sub?.AllowDataUploadCount);
+
+            if (file.Size > maxBytes)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "File Too Large", $"{file.Name} ({FileConstants.FormatFileSize(file.Size)}) exceeds maximum allowed upload limit of {FileConstants.FormatFileSize(maxBytes)}.");
+                _isParsing = false;
+                StateHasChanged();
+                return;
+            }
+
+            using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            _parsedItems = await ExcelService.ParseImportExcelAsync(ms, SubscriptionId);
+
+            if (_parsedItems.Count == 0)
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "No Data Found", "Could not detect the 'Title' column header or the file contains no data rows.");
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Info, "Excel Parsed", $"Parsed {_parsedItems.Count} rows.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to parse uploaded emission group Excel file.");
+            NotificationService.Notify(NotificationSeverity.Error, "Parsing Error", "Failed to parse Excel file. Please ensure it is a valid .xlsx file.");
+            _parsedItems = null;
+        }
+        finally
+        {
+            _isParsing = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private async Task ExecuteImportAsync()
+    {
+        #region hide [2026-09-06]
+        if (_parsedItems == null || !_parsedItems.Any(i => i.IsValid)) return;
+
+        if (SubscriptionId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Subscription Required", "Please select a subscription workspace before importing.");
+            return;
+        }
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            int successCount = 0;
+            int failedCount = 0;
+
+            foreach (var item in _parsedItems.Where(i => i.IsValid).ToList())
+            {
+                try
+                {
+                    await EmissionGroupService.CreateAsync(new TbEmissionGroup
+                    {
+                        Code = item.GeneratedCode,
+                        Title = item.Title,
+                        TitleTh = string.Empty,
+                        Remark = string.Empty,
+                        TgoScopeNo = item.Scope,
+                        IsoCategoryNo = item.IsoCategoryNo,
+                        SubscriptionId = SubscriptionId,
+                        SourceType = eSourceType.Custom,
+                        IsReadOnly = false
+                    });
+                    successCount++;
+                }
+                catch (Exception exItem)
+                {
+                    failedCount++;
+                    item.IsValid = false;
+                    item.ValidationErrors.Add(exItem.Message);
+                    Logger.LogWarning(exItem, "Skipped emission group import row {Row}: {Title}", item.RowNumber, item.Title);
+                }
+            }
+
+            if (successCount > 0)
+            {
+                var msg = failedCount > 0
+                    ? $"Imported {successCount} emission groups. {failedCount} rows were skipped."
+                    : $"Successfully imported {successCount} emission groups.";
+                NotificationService.Notify(NotificationSeverity.Success, "Import Successful", msg);
+                DialogService.Close(true);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Nothing Imported", "No emission group could be imported. Please review the validation status.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save imported emission groups.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save imported emission groups.");
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+    #endregion
+}

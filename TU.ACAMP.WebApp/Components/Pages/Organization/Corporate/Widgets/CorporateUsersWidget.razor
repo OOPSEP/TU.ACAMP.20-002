@@ -1,0 +1,335 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@inject NotificationService NotificationService
+
+<div class="p-4">
+    <!-- Header with Live Quota Counter -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Authorized Corporate Members</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted">
+                Manage members assigned to this corporate group. Subscription members inherit access automatically according to their global role.
+            </RadzenText>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <RadzenBadge BadgeStyle="@(IsQuotaReached ? BadgeStyle.Danger : BadgeStyle.Info)"
+                         Text="@($"Total: {DistinctMembersCount} / {AllowCorporateUserCount} Max Allowed")"
+                         IsPill="true"
+                         Style="font-size: 0.85rem; padding: 6px 14px; font-weight: 600;" />
+        </div>
+    </div>
+
+    <!-- SECTION 1: INHERITED SUBSCRIPTION MEMBERS (READ-ONLY) -->
+    <div class="mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-dark m-0 d-flex align-items-center gap-2">
+                <RadzenIcon Icon="admin_panel_settings" Style="color: #6366f1; font-size: 1.2rem;" />
+                <span>1. Inherited Subscription Members</span>
+                <span class="badge bg-secondary-subtle text-secondary border small px-2 py-0">@(InheritedUsers.Count) Members</span>
+            </RadzenText>
+            <span class="text-muted small" style="font-size: 0.75rem;">Global Workspace Authority</span>
+        </div>
+
+        @if (!InheritedUsers.Any())
+        {
+            <div class="p-3 text-center text-muted border rounded-3 bg-light small">
+                No subscription members found.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive border rounded-3 bg-light">
+                <table class="table table-sm table-hover align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 50px;" class="text-center">#</th>
+                            <th>Member Email</th>
+                            <th>Subscription Role</th>
+                            <th>Access Scope</th>
+                            <th class="text-center" style="width: 150px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int i = 0; i < InheritedUsers.Count; i++)
+                        {
+                            var idx = i;
+                            var subUser = InheritedUsers[idx];
+                            <tr>
+                                <td class="text-center">@(idx + 1)</td>
+                                <td class="fw-bold text-dark">
+                                    <RadzenIcon Icon="person" Style="font-size: 14px; vertical-align: middle; color: #6366f1;" Class="me-1" />
+                                    @subUser.Email
+                                </td>
+                                <td>
+                                    <RadzenBadge Text="@subUser.Role.ToString()" BadgeStyle="@GetSubRoleBadgeStyle(subUser.Role)" IsPill="true" />
+                                </td>
+                                <td class="text-muted">Subscription-Wide</td>
+                                <td class="text-center">
+                                    <span class="badge bg-primary-subtle text-primary border" style="font-size: 0.72rem;">
+                                        <RadzenIcon Icon="lock" Style="font-size: 11px; vertical-align: middle;" Class="me-1" />Inherited (Read-Only)
+                                    </span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- SECTION 2: DIRECT CORPORATE MEMBERS (MANAGEABLE) -->
+    <div>
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-dark m-0 d-flex align-items-center gap-2">
+                <RadzenIcon Icon="groups" Style="color: #10b981; font-size: 1.2rem;" />
+                <span>2. Direct Corporate Members</span>
+                <span class="badge bg-success-subtle text-success border small px-2 py-0">@(UserList.Count) Members</span>
+            </RadzenText>
+            @if (IsQuotaReached)
+            {
+                <span class="badge bg-danger-subtle text-danger border" style="font-size: 0.75rem;">
+                    <RadzenIcon Icon="warning" Style="font-size: 12px; vertical-align: middle;" Class="me-1" />Group Quota Full (@AllowCorporateUserCount Max)
+                </span>
+            }
+        </div>
+
+        @if (!IsReadOnly)
+        {
+            @if (IsQuotaReached)
+            {
+                <div class="alert alert-warning d-flex align-items-center mb-3 py-2 small" role="alert">
+                    <RadzenIcon Icon="info" Class="me-2 fs-5" />
+                    <div>
+                        <strong>Corporate Quota Reached:</strong> This corporate group has reached its maximum limit of <b>@AllowCorporateUserCount</b> members. To add more members, please remove an existing member or upgrade the Subscription Plan.
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="p-3 mb-3 bg-light rounded border">
+                    <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-2 text-dark">Add Corporate Member</RadzenText>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-4">
+                            <RadzenFormField Text="Member Email *" Style="width:100%;">
+                                <RadzenTextBox @bind-Value="@_newUserEmail" Placeholder="user@domain.com" />
+                            </RadzenFormField>
+                        </div>
+                        <div class="col-12 col-md-3">
+                            <RadzenFormField Text="Corporate Role *" Style="width:100%;">
+                                <RadzenDropDown TValue="eCorporateRole"
+                                                Data="@_roleOptions"
+                                                TextProperty="Text"
+                                                ValueProperty="Value"
+                                                @bind-Value="@_newUserRole" />
+                            </RadzenFormField>
+                        </div>
+                        <div class="col-12 col-md-3">
+                            <RadzenFormField Text="Remarks / Notes" Style="width:100%;">
+                                <RadzenTextBox @bind-Value="@_newUserRemarks" Placeholder="Optional note" />
+                            </RadzenFormField>
+                        </div>
+                        <div class="col-12 col-md-2">
+                            <RadzenButton Text="Add"
+                                          Icon="person_add"
+                                          ButtonStyle="ButtonStyle.Secondary"
+                                          Size="ButtonSize.Medium"
+                                          Click="@AddUserToCorporate"
+                                          Class="w-100"
+                                          Disabled="@IsQuotaReached"
+                                          Style="border-radius: 6px;" />
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+
+        @if (!UserList.Any())
+        {
+            <div class="p-4 text-center text-muted border rounded-3">
+                <RadzenIcon Icon="people_outline" Style="font-size: 36px; opacity: 0.5;" Class="mb-1" />
+                <div>No direct corporate members assigned yet.</div>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive border rounded-3">
+                <table class="table table-hover align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 50px;" class="text-center">#</th>
+                            <th>User Email</th>
+                            <th>Assigned Role</th>
+                            <th>Role Description</th>
+                            <th>Remarks</th>
+                            @if (!IsReadOnly)
+                            {
+                                <th class="text-center" style="width: 90px;">Action</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int i = 0; i < UserList.Count; i++)
+                        {
+                            var idx = i;
+                            var u = UserList[idx];
+                            <tr>
+                                <td class="text-center">@(idx + 1)</td>
+                                <td class="fw-bold text-primary">@u.Email</td>
+                                <td>
+                                    <RadzenBadge Text="@u.Role.ToString()" BadgeStyle="@GetRoleBadgeStyle(u.Role)" IsPill="true" />
+                                </td>
+                                <td class="text-muted small">@GetRoleDescription(u.Role)</td>
+                                <td class="text-muted small">@u.Remarks</td>
+                                @if (!IsReadOnly)
+                                {
+                                    <td class="text-center">
+                                        <RadzenButton Icon="delete"
+                                                      Size="ButtonSize.ExtraSmall"
+                                                      ButtonStyle="ButtonStyle.Danger"
+                                                      Variant="Variant.Outlined"
+                                                      Click="@(() => RemoveUserFromCorporate(idx))"
+                                                      Title="Remove member" />
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public List<TbCorporateUser> UserList { get; set; } = new();
+    [Parameter] public List<TbSubscriptionUser> InheritedUsers { get; set; } = new();
+    [Parameter] public int AllowCorporateUserCount { get; set; } = 9;
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    #endregion
+
+    #region class fields
+    private string _newUserEmail = string.Empty;
+    private eCorporateRole _newUserRole = eCorporateRole.Viewer;
+    private string _newUserRemarks = string.Empty;
+
+    private record DropdownOption<T>(T Value, string Text);
+
+    private readonly List<DropdownOption<eCorporateRole>> _roleOptions = new()
+    {
+        new(eCorporateRole.Manager, "Manager"),
+        new(eCorporateRole.Editor, "Editor"),
+        new(eCorporateRole.Consultant, "Consultant"),
+        new(eCorporateRole.Viewer, "Viewer")
+    };
+    #endregion
+
+    #region computed properties
+    private int DistinctMembersCount
+    {
+        get
+        {
+            var adminEmails = InheritedUsers.Select(a => a.Email.Trim().ToLowerInvariant());
+            var directEmails = UserList.Select(u => u.Email.Trim().ToLowerInvariant());
+            return adminEmails.Concat(directEmails).Distinct().Count();
+        }
+    }
+
+    private bool IsQuotaReached => DistinctMembersCount >= AllowCorporateUserCount;
+    #endregion
+
+    #region class methods
+    private async Task AddUserToCorporate()
+    {
+        #region hide [2026-08-18]
+        if (string.IsNullOrWhiteSpace(_newUserEmail))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Please enter a valid user email.");
+            return;
+        }
+
+        var trimmedEmail = _newUserEmail.Trim().ToLowerInvariant();
+        if (!trimmedEmail.Contains("@") || !trimmedEmail.Contains("."))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Please enter a valid email format.");
+            return;
+        }
+
+        // Check if already in direct list
+        if (UserList.Any(u => u.Email.Equals(trimmedEmail, StringComparison.OrdinalIgnoreCase)))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Duplicate", "This user is already assigned to this corporate.");
+            return;
+        }
+
+        // Check if already an inherited subscription member
+        if (InheritedUsers.Any(a => a.Email.Equals(trimmedEmail, StringComparison.OrdinalIgnoreCase)))
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "Notice", "This user is already a Subscription Member with inherited workspace access.");
+            return;
+        }
+
+        // Check quota
+        if (DistinctMembersCount >= AllowCorporateUserCount)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Quota Exceeded", $"Maximum allowed users for this corporate group is {AllowCorporateUserCount}.");
+            return;
+        }
+
+        UserList.Add(new TbCorporateUser
+        {
+            Email = trimmedEmail,
+            Role = _newUserRole,
+            Remarks = _newUserRemarks.Trim()
+        });
+
+        _newUserEmail = string.Empty;
+        _newUserRemarks = string.Empty;
+        _newUserRole = eCorporateRole.Viewer;
+
+        await OnChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task RemoveUserFromCorporate(int index)
+    {
+        #region hide [2026-08-18]
+        if (index >= 0 && index < UserList.Count)
+        {
+            UserList.RemoveAt(index);
+            await OnChanged.InvokeAsync();
+        }
+        #endregion
+    }
+
+    private BadgeStyle GetRoleBadgeStyle(eCorporateRole role) => role switch
+    {
+        eCorporateRole.Manager => BadgeStyle.Danger,
+        eCorporateRole.Editor => BadgeStyle.Primary,
+        eCorporateRole.Consultant => BadgeStyle.Info,
+        eCorporateRole.Viewer => BadgeStyle.Secondary,
+        _ => BadgeStyle.Light
+    };
+
+    private BadgeStyle GetSubRoleBadgeStyle(eSubscriptionRole role) => role switch
+    {
+        eSubscriptionRole.Owner => BadgeStyle.Danger,
+        eSubscriptionRole.Admin => BadgeStyle.Primary,
+        eSubscriptionRole.Editor => BadgeStyle.Success,
+        eSubscriptionRole.Consultant => BadgeStyle.Info,
+        eSubscriptionRole.Viewer => BadgeStyle.Secondary,
+        _ => BadgeStyle.Light
+    };
+
+    private string GetRoleDescription(eCorporateRole role) => role switch
+    {
+        eCorporateRole.Manager => "Full corporate management access",
+        eCorporateRole.Editor => "Can edit activity and emission data",
+        eCorporateRole.Consultant => "Verification & audit read access",
+        eCorporateRole.Viewer => "Read-only summary access",
+        _ => string.Empty
+    };
+    #endregion
+}

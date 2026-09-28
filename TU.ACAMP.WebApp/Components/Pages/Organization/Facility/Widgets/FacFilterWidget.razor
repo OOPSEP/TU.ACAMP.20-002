@@ -1,0 +1,523 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Components.Common
+
+@inject ActivityGroupService ActivityGroupService
+
+<RadzenCard Class="mb-4 p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+    <!-- [2026-09-13][Antigravity] Row 1: Primary Filter Bar using .acamp-filter-bar with spring search -->
+    <div class="acamp-filter-bar justify-content-between">
+        <!-- 1. Search Box -->
+        <div class="acamp-filter-search">
+            <RadzenFormField Text="Search Facility">
+                <ChildContent>
+                    <RadzenTextBox Value="@SearchText"
+                                   @oninput="@OnSearchInput"
+                                   Placeholder="Search title, remark..."
+                                   Style="width: 100%;" />
+                </ChildContent>
+                <Start>
+                    <RadzenIcon Icon="search" />
+                </Start>
+                <End>
+                    @if (!string.IsNullOrWhiteSpace(SearchText))
+                    {
+                        <RadzenButton Icon="close" Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Light"
+                                      Variant="Variant.Text" Click="@ClearSearch" Title="Clear search" />
+                    }
+                </End>
+            </RadzenFormField>
+        </div>
+
+        <div class="d-flex align-items-end gap-2 flex-wrap ms-auto flex-shrink-0">
+            <!-- 2. Subscription Option Dropdown -->
+            @if (IsAdmin || SubscriptionCount > 1)
+            {
+                <RadzenFormField Text="Subscription" Style="width: 180px;">
+                    <RadzenDropDown TValue="int?"
+                                    Value="@SelectedSubscriptionId"
+                                    ValueChanged="@OnSubscriptionChanged"
+                                    Data="@SubscriptionsList"
+                                    TextProperty="Title"
+                                    ValueProperty="Id"
+                                    Placeholder="All Subscriptions"
+                                    AllowClear="@IsAdmin"
+                                    Style="width: 100%;">
+                        <Template Context="sub">
+                            @if (sub is TbSubscription s)
+                            {
+                                <div class="d-flex align-items-center gap-2">
+                                    <RadzenBadge BadgeStyle="@GetPlanBadgeStyle(s.SubscriptionPlan)" Text="@s.SubscriptionPlan.ToString()" IsPill="true" />
+                                    <span class="text-truncate">@s.Title</span>
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDropDown>
+                </RadzenFormField>
+            }
+
+            <!-- 3. Corporate Group Dropdown (Cascading) -->
+            <RadzenFormField Text="Corporate Group" Style="width: 180px;">
+                <RadzenDropDown TValue="int?"
+                                Value="@SelectedCorporateId"
+                                ValueChanged="@OnCorporateChanged"
+                                Data="@FilteredCorporatesList"
+                                TextProperty="Title"
+                                ValueProperty="Id"
+                                Placeholder="All Corporates"
+                                AllowClear="true"
+                                AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                Style="width: 100%;">
+                    <Template Context="corp">
+                        @if (corp is TbCorporate c)
+                        {
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-light text-dark border px-1" style="font-size: 0.75rem;">@c.Code</span>
+                                <span class="text-truncate">@c.Title</span>
+                            </div>
+                        }
+                    </Template>
+                </RadzenDropDown>
+            </RadzenFormField>
+
+            <!-- 4. Company Dropdown (Cascading) -->
+            <RadzenFormField Text="Company Entity" Style="width: 180px;">
+                <RadzenDropDown TValue="int?"
+                                Value="@SelectedCompanyId"
+                                ValueChanged="@OnCompanyChanged"
+                                Data="@FilteredCompaniesList"
+                                TextProperty="Title"
+                                ValueProperty="Id"
+                                Placeholder="All Companies"
+                                AllowClear="true"
+                                AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                Style="width: 100%;">
+                    <Template Context="com">
+                        @if (com is TbCompany comp)
+                        {
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-light text-dark border px-1" style="font-size: 0.75rem;">@comp.Code</span>
+                                <span class="text-truncate">@comp.Title</span>
+                            </div>
+                        }
+                    </Template>
+                </RadzenDropDown>
+            </RadzenFormField>
+
+            <!-- 5. Reporting Year Dropdown -->
+            <RadzenFormField Text="Reporting Year" Style="width: 140px;">
+                <RadzenDropDown TValue="int"
+                                Value="@SelectedYear"
+                                ValueChanged="@OnYearChanged"
+                                Data="@EffectiveYearsList"
+                                Style="width: 100%;" />
+            </RadzenFormField>
+
+            <!-- 6. Expand / Advanced Toggle Button -->
+            <div class="d-flex align-items-end position-relative">
+                @* [2026-09-26][Claude] ใช้ปุ่มมาตรฐาน AdvancedFilterToggle *@
+                <AdvancedFilterToggle IsExpanded="@_isExpanded"
+                                      HasActive="@HasActiveAdvancedFilters"
+                                      OnToggle="@ToggleExpand" />
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Advanced Filter Section (Fiscal Month, Activity Scopes, Activity Groups) -->
+    @if (_isExpanded)
+    {
+        <div class="row g-3 align-items-center mt-2 pt-3 border-top" style="border-color: var(--rz-border-color) !important;">
+            <!-- 1. Month Start (Fiscal Year Period) -->
+            <div class="col-12 col-md-4">
+                <RadzenFormField Text="Month Start (Fiscal Year Period)" Style="width: 100%;">
+                    <RadzenDropDown TValue="int"
+                                    Value="@StartMonth"
+                                    ValueChanged="@OnMonthChanged"
+                                    Data="@_monthsList"
+                                    TextProperty="Text"
+                                    ValueProperty="Value"
+                                    Style="width: 100%;">
+                        <Template Context="month">
+                            @if (month is MonthOption m)
+                            {
+                            <div class="d-flex align-items-center justify-content-between" style="width: 100%;">
+                                <span>@m.Text</span>
+                                @if (!string.IsNullOrEmpty(m.Tag))
+                                {
+                                    <span class="badge rounded-pill ms-2 px-2 py-1" style="font-size: 0.7rem; font-weight: 600; background-color: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7;">
+                                        @m.Tag
+                                    </span>
+                                }
+                            </div>
+                            }
+                        </Template>
+                    </RadzenDropDown>
+                </RadzenFormField>
+            </div>
+
+            <!-- 2. Activity Scopes (Multi-Select) -->
+            <div class="col-12 col-md-4">
+                <RadzenFormField Text="Activity Scopes" Style="width: 100%;">
+                    <RadzenDropDown TValue="IEnumerable<eTgoScopeNo>"
+                                    Value="@SelectedScopes"
+                                    ValueChanged="@OnScopesChanged"
+                                    Data="@_scopesList"
+                                    TextProperty="Text"
+                                    ValueProperty="Value"
+                                    Multiple="true"
+                                    AllowClear="true"
+                                    Placeholder="All Scopes"
+                                    Chips="true"
+                                    Style="width: 100%;" />
+                </RadzenFormField>
+            </div>
+
+            <!-- 3. Activity Groups (Cascading Multi-Select) -->
+            <div class="col-12 col-md-4">
+                <RadzenFormField Text="Activity Groups" Style="width: 100%;">
+                    <RadzenDropDown TValue="IEnumerable<int>"
+                                    Value="@SelectedActivityGroupIds"
+                                    ValueChanged="@OnActivityGroupsChanged"
+                                    Data="@_filteredActivityGroups"
+                                    TextProperty="DisplayText"
+                                    ValueProperty="Id"
+                                    Multiple="true"
+                                    AllowClear="true"
+                                    Placeholder="All Activity Groups"
+                                    Chips="true"
+                                    AllowFiltering="true"
+                                    FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                    Style="width: 100%;" />
+                </RadzenFormField>
+            </div>
+
+            <!-- Quick Reset Bar for Advanced Filters -->
+            @if (HasActiveAdvancedFilters)
+            {
+                <div class="col-12 d-flex justify-content-end pt-1">
+                    <RadzenButton Text="Reset Advanced Filters"
+                                  Icon="refresh"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Variant="Variant.Text"
+                                  Size="ButtonSize.Small"
+                                  Click="@ResetAdvancedFilters"
+                                  Style="font-size: 0.8rem;" />
+                </div>
+            }
+        </div>
+    }
+</RadzenCard>
+
+@code {
+    #region records & helper types
+    public record MonthOption(string Text, int Value, string Tag);
+    public record ScopeOption(string Text, eTgoScopeNo Value);
+    public record ActivityGroupItem(int Id, string DisplayText, eTgoScopeNo Scope);
+    #endregion
+
+    #region class properties
+    [Parameter] public string SearchText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> SearchTextChanged { get; set; }
+
+    [Parameter] public int? SelectedSubscriptionId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedSubscriptionIdChanged { get; set; }
+
+    [Parameter] public int? SelectedCorporateId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedCorporateIdChanged { get; set; }
+
+    [Parameter] public int? SelectedCompanyId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedCompanyIdChanged { get; set; }
+
+    [Parameter] public List<TbSubscription> SubscriptionsList { get; set; } = new();
+    [Parameter] public List<TbCorporate> CorporatesList { get; set; } = new();
+    [Parameter] public List<TbCompany> CompaniesList { get; set; } = new();
+
+    [Parameter] public int SelectedYear { get; set; } = DateTime.UtcNow.Year;
+    [Parameter] public EventCallback<int> SelectedYearChanged { get; set; }
+
+    /// <summary>
+    /// [2026-09-17][Gemini] รายการปีที่มีข้อมูลจริง + ปีปัจจุบันจาก ActivityEventService
+    /// </summary>
+    [Parameter] public List<int>? YearsList { get; set; }
+
+    [Parameter] public int StartMonth { get; set; } = 1;
+    [Parameter] public EventCallback<int> StartMonthChanged { get; set; }
+
+    [Parameter] public IEnumerable<eTgoScopeNo> SelectedScopes { get; set; } = Enumerable.Empty<eTgoScopeNo>();
+    [Parameter] public EventCallback<IEnumerable<eTgoScopeNo>> SelectedScopesChanged { get; set; }
+
+    [Parameter] public IEnumerable<int> SelectedActivityGroupIds { get; set; } = Enumerable.Empty<int>();
+    [Parameter] public EventCallback<IEnumerable<int>> SelectedActivityGroupIdsChanged { get; set; }
+
+    [Parameter] public bool IsAdmin { get; set; } = false;
+    [Parameter] public EventCallback OnFilterChanged { get; set; }
+    #endregion
+
+    #region class fields
+    private bool _isExpanded = false;
+    private readonly List<int> _yearsList = Enumerable.Range(DateTime.UtcNow.Year - 4, 6).Reverse().ToList();
+    // [2026-09-17][Gemini] ใช้รายการปีที่มีข้อมูลจริงจาก TbActivityEvent หากระบุไว้ มิฉะนั้นใช้ค่าเริ่มต้น
+    private IEnumerable<int> EffectiveYearsList => (YearsList != null && YearsList.Count > 0) ? YearsList : _yearsList;
+
+    private readonly List<MonthOption> _monthsList = new()
+    {
+        new("January (01)", 1, ""),
+        new("February (02)", 2, ""),
+        new("March (03)", 3, ""),
+        new("April (04)", 4, "Japan FY"),
+        new("May (05)", 5, "Japan FY (Alt)"),
+        new("June (06)", 6, ""),
+        new("July (07)", 7, ""),
+        new("August (08)", 8, ""),
+        new("September (09)", 9, ""),
+        new("October (10)", 10, "Thai Gov FY"),
+        new("November (11)", 11, ""),
+        new("December (12)", 12, "")
+    };
+
+    private readonly List<ScopeOption> _scopesList = new()
+    {
+        new("Scope 1: Direct Emissions", eTgoScopeNo.Scope1),
+        new("Scope 2: Energy Indirect", eTgoScopeNo.Scope2),
+        new("Scope 3: Other Indirect", eTgoScopeNo.Scope3),
+        new("Scope 4: Separate Report", eTgoScopeNo.SeparateReport)
+    };
+
+    private List<TbActivityGroup> _allActivityGroups = new();
+    private List<ActivityGroupItem> _filteredActivityGroups = new();
+
+    private IEnumerable<TbCorporate> FilteredCorporatesList
+    {
+        get
+        {
+            var source = (CorporatesList ?? new List<TbCorporate>()).Where(c => c != null);
+            return SelectedSubscriptionId.HasValue && SelectedSubscriptionId.Value > 0
+                ? source.Where(c => c.SubscriptionId == SelectedSubscriptionId.Value)
+                : source;
+        }
+    }
+
+    private IEnumerable<TbCompany> FilteredCompaniesList
+    {
+        get
+        {
+            var query = (CompaniesList ?? new List<TbCompany>()).Where(c => c != null);
+            if (SelectedCorporateId.HasValue && SelectedCorporateId.Value > 0)
+            {
+                query = query.Where(c => c.CorporateId == SelectedCorporateId.Value);
+            }
+            else if (SelectedSubscriptionId.HasValue && SelectedSubscriptionId.Value > 0)
+            {
+                // Corporate navigation อาจไม่ถูก Include มา จึงเทียบผ่าน CorporatesList เป็นหลัก
+                var corpIds = (CorporatesList ?? new List<TbCorporate>())
+                    .Where(x => x != null && x.SubscriptionId == SelectedSubscriptionId.Value)
+                    .Select(x => x.Id)
+                    .ToHashSet();
+
+                query = query.Where(c => corpIds.Contains(c.CorporateId) ||
+                                         (c.Corporate != null && c.Corporate.SubscriptionId == SelectedSubscriptionId.Value));
+            }
+            return query.Where(c => c != null);
+        }
+    }
+
+    private int SubscriptionCount => SubscriptionsList?.Count ?? 0;
+
+    private bool HasActiveAdvancedFilters =>
+        StartMonth != 1 ||
+        (SelectedScopes != null && SelectedScopes.Any()) ||
+        (SelectedActivityGroupIds != null && SelectedActivityGroupIds.Any());
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-18]
+        try
+        {
+            _allActivityGroups = await ActivityGroupService.GetAllAsync();
+            UpdateFilteredActivityGroups();
+        }
+        catch
+        {
+            _allActivityGroups = TbActivityGroup.GetMasterList().ToList();
+            UpdateFilteredActivityGroups();
+        }
+        #endregion
+    }
+
+    private void ToggleExpand()
+    {
+        #region hide [2026-08-18]
+        _isExpanded = !_isExpanded;
+        #endregion
+    }
+
+    private void UpdateFilteredActivityGroups()
+    {
+        #region hide [2026-08-18]
+        var scopes = SelectedScopes?.ToList() ?? new List<eTgoScopeNo>();
+
+        var query = _allActivityGroups.AsEnumerable();
+        if (scopes.Any())
+        {
+            query = query.Where(g => scopes.Contains(g.TgoScopeNo));
+        }
+
+        _filteredActivityGroups = query
+            .OrderBy(g => g.TgoScopeNo)
+            .ThenBy(g => g.Code)
+            .Select(g => new ActivityGroupItem(g.Id, $"[{g.Code}] {g.Title}", g.TgoScopeNo))
+            .ToList();
+        #endregion
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs args)
+    {
+        #region hide [2026-08-18]
+        SearchText = args.Value?.ToString() ?? string.Empty;
+        await SearchTextChanged.InvokeAsync(SearchText);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task ClearSearch()
+    {
+        #region hide [2026-08-18]
+        SearchText = string.Empty;
+        await SearchTextChanged.InvokeAsync(SearchText);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnSubscriptionChanged(int? value)
+    {
+        #region hide [2026-08-18]
+        SelectedSubscriptionId = value;
+        // If the currently selected corporate doesn't belong to the newly selected subscription, clear it
+        if (SelectedSubscriptionId.HasValue && SelectedCorporateId.HasValue)
+        {
+            var corp = (CorporatesList ?? new List<TbCorporate>()).FirstOrDefault(c => c != null && c.Id == SelectedCorporateId.Value);
+            if (corp != null && corp.SubscriptionId != SelectedSubscriptionId.Value)
+            {
+                SelectedCorporateId = null;
+                await SelectedCorporateIdChanged.InvokeAsync(null);
+                SelectedCompanyId = null;
+                await SelectedCompanyIdChanged.InvokeAsync(null);
+            }
+        }
+
+        await SelectedSubscriptionIdChanged.InvokeAsync(SelectedSubscriptionId);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnCorporateChanged(int? value)
+    {
+        #region hide [2026-08-18]
+        SelectedCorporateId = value;
+
+        // เคลียร์ Company ที่ไม่เข้าเงื่อนไขใหม่ ครอบคลุมกรณี Corporate ถูกล้างเป็น null ด้วย
+        if (SelectedCompanyId.HasValue)
+        {
+            bool stillValid = FilteredCompaniesList.Any(c => c.Id == SelectedCompanyId.Value);
+            if (!stillValid)
+            {
+                SelectedCompanyId = null;
+                await SelectedCompanyIdChanged.InvokeAsync(null);
+            }
+        }
+
+        await SelectedCorporateIdChanged.InvokeAsync(SelectedCorporateId);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnCompanyChanged(int? value)
+    {
+        #region hide [2026-08-18]
+        SelectedCompanyId = value;
+        await SelectedCompanyIdChanged.InvokeAsync(SelectedCompanyId);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnYearChanged(int value)
+    {
+        #region hide [2026-08-18]
+        SelectedYear = value;
+        await SelectedYearChanged.InvokeAsync(SelectedYear);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnMonthChanged(int value)
+    {
+        #region hide [2026-08-18]
+        StartMonth = value;
+        await StartMonthChanged.InvokeAsync(StartMonth);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnScopesChanged(IEnumerable<eTgoScopeNo> values)
+    {
+        #region hide [2026-08-18]
+        SelectedScopes = values ?? Enumerable.Empty<eTgoScopeNo>();
+        UpdateFilteredActivityGroups();
+
+        if (SelectedScopes.Any())
+        {
+            var validIds = _filteredActivityGroups.Select(g => g.Id).ToHashSet();
+            var pruned = (SelectedActivityGroupIds ?? Enumerable.Empty<int>()).Where(validIds.Contains).ToList();
+            if (pruned.Count != (SelectedActivityGroupIds?.Count() ?? 0))
+            {
+                SelectedActivityGroupIds = pruned;
+                await SelectedActivityGroupIdsChanged.InvokeAsync(SelectedActivityGroupIds);
+            }
+        }
+
+        await SelectedScopesChanged.InvokeAsync(SelectedScopes);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnActivityGroupsChanged(IEnumerable<int> values)
+    {
+        #region hide [2026-08-18]
+        SelectedActivityGroupIds = values ?? Enumerable.Empty<int>();
+        await SelectedActivityGroupIdsChanged.InvokeAsync(SelectedActivityGroupIds);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task ResetAdvancedFilters()
+    {
+        #region hide [2026-08-18]
+        StartMonth = 1;
+        SelectedScopes = Enumerable.Empty<eTgoScopeNo>();
+        SelectedActivityGroupIds = Enumerable.Empty<int>();
+        UpdateFilteredActivityGroups();
+
+        await StartMonthChanged.InvokeAsync(StartMonth);
+        await SelectedScopesChanged.InvokeAsync(SelectedScopes);
+        await SelectedActivityGroupIdsChanged.InvokeAsync(SelectedActivityGroupIds);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private BadgeStyle GetPlanBadgeStyle(eSubscriptionPlan plan) => plan switch
+    {
+        eSubscriptionPlan.Basic => BadgeStyle.Secondary,
+        eSubscriptionPlan.Pro => BadgeStyle.Info,
+        eSubscriptionPlan.Premium => BadgeStyle.Primary,
+        eSubscriptionPlan.Enterprise => BadgeStyle.Success,
+        _ => BadgeStyle.Light
+    };
+    #endregion
+}

@@ -1,0 +1,96 @@
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Constants
+
+<div class="p-4">
+    @if (Model.Id == 0)
+    {
+        <div class="alert alert-info d-flex align-items-center mb-0" role="alert">
+            <RadzenIcon Icon="info" Class="me-2 fs-5" />
+            <div>
+                Facilities and operational sites can be added and configured after saving the Company record.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold m-0">
+                Associated Facilities & Sites (@(FacilitiesList.Count))
+            </RadzenText>
+            <div class="d-flex gap-2">
+                <RadzenButton Text="Manage Facilities" Icon="factory" ButtonStyle="ButtonStyle.Primary"
+                              Size="ButtonSize.Small" Click="@HandleManageFacilities"
+                              Style="border-radius: 6px;" />
+            </div>
+        </div>
+
+        @if (!FacilitiesList.Any())
+        {
+            <div class="p-4 text-center text-muted border rounded bg-light">
+                <RadzenIcon Icon="factory" Style="font-size: 36px; opacity: 0.5;" Class="mb-2" />
+                <div>No operational facilities or sites currently registered under this company.</div>
+            </div>
+        }
+        else
+        {
+            <RadzenDataGrid Data="@FacilitiesList" TItem="TbFacility" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="TbFacility" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @(FacilitiesList.IndexOf(item) + 1)
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbFacility" Property="Title" Title="Facility Title / Operational Site" MinWidth="220px">
+                        <Template Context="item">
+                            <div class="d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="factory" Style="color: var(--rz-primary); font-size: 1.1rem;" />
+                                <span class="fw-bold">@item.Title</span>
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbFacility" Title="Topics" Width="140px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <span class="badge bg-success-subtle text-success-emphasis border fw-bold px-2 py-1">
+                                @((item.Topics?.Count ?? 0)) Topics
+                            </span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbFacility" Property="IsActive" Title="Status" Width="110px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (item.IsActive)
+                            {
+                                <span class="badge bg-success-subtle text-success border px-2 py-1" style="font-size: 0.75rem;">Active</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary-subtle text-secondary border px-2 py-1" style="font-size: 0.75rem;">Inactive</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbFacility" Property="Remark" Title="Remark" MinWidth="200px" />
+                </Columns>
+            </RadzenDataGrid>
+        }
+    }
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public TbCompany Model { get; set; } = new();
+    [Parameter] public List<TbFacility> FacilitiesList { get; set; } = new();
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnManageFacilities { get; set; }
+    #endregion
+
+    #region class methods
+    private async Task HandleManageFacilities()
+    {
+        #region hide [2026-08-18]
+        if (OnManageFacilities.HasDelegate)
+        {
+            await OnManageFacilities.InvokeAsync();
+        }
+        #endregion
+    }
+    #endregion
+}

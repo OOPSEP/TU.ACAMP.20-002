@@ -1,0 +1,193 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Services.Reports
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject CfoReportStorageService ReportStorageService
+
+<RadzenStack Gap="1.25rem" Class="p-1">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold m-0 text-dark">
+            Create Verification Report Snapshot
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted m-0">
+            Generate an immutable, audit-ready CFO report snapshot by pairing Calculate Year with Base Year.
+        </RadzenText>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" Size="AlertSize.Small">
+            @_errorMessage
+        </RadzenAlert>
+    }
+
+    <RadzenStack Gap="1rem">
+        <!-- Target Organization -->
+        <RadzenFormField Text="Target Organization" Variant="Variant.Outlined">
+            <RadzenTextBox Value="@OrganizationTitle" Disabled="true" Style="width: 100%;" />
+        </RadzenFormField>
+
+        <!-- Report Title -->
+        <RadzenFormField Text="Report Title / Name *" Variant="Variant.Outlined">
+            <RadzenTextBox @bind-Value="@_title" Placeholder="e.g. GHG Emissions Report Year 2026" Style="width: 100%;" />
+        </RadzenFormField>
+
+        <!-- Year Pair Selector -->
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
+                <RadzenFormField Text="Calculate / Reporting Year *" Variant="Variant.Outlined" Style="width: 100%;">
+                    <RadzenDropDown Data="@_calculateYearOptions" @bind-Value="@_selectedCalculateYear" Style="width: 100%;" />
+                </RadzenFormField>
+            </div>
+            <div class="col-12 col-md-6">
+                <RadzenFormField Text="Base Year" Variant="Variant.Outlined" Style="width: 100%;">
+                    <RadzenDropDown Data="@_baseYearOptions" TextProperty="Text" ValueProperty="Value" @bind-Value="@_selectedBaseYear" Style="width: 100%;" />
+                </RadzenFormField>
+            </div>
+        </div>
+
+        <!-- Preparer / Verifier Name -->
+        <RadzenFormField Text="Preparer / Lead Verifier Name" Variant="Variant.Outlined">
+            <RadzenTextBox @bind-Value="@_createdBy" Placeholder="e.g. Lead GHG Auditor / Team" Style="width: 100%;" />
+        </RadzenFormField>
+
+        @if (_showAcknowledgmentSection)
+        {
+            <div class="alert alert-warning border border-warning rounded-3 p-3 my-2">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <RadzenIcon Icon="warning" Class="text-warning" />
+                    <strong class="text-dark">Warning: Expired or unapproved Emission Factors detected (@_expiredOrPendingList.Count items)</strong>
+                </div>
+                <p class="small text-muted mb-2">
+                    The selected reporting year includes Emission Factors with Expired or NotYetApproved status. Please specify an acknowledgment reason to record into the Audit Registry:
+                </p>
+                <ul class="small text-danger mb-2 ps-3">
+                    @foreach (var item in _expiredOrPendingList.Take(5))
+                    {
+                        <li><strong>@item.SourceName</strong> (@item.TopicTitle) — Status: <code>@item.EfValidityStatus</code></li>
+                    }
+                </ul>
+                <RadzenFormField Text="Audit Acknowledgment Reason *" Variant="Variant.Outlined" Style="width: 100%;">
+                    <RadzenTextArea @bind-Value="@_acknowledgmentReason" Rows="2" Placeholder="e.g. Approved temporary substitute value by validation body / using original baseline factor" Style="width: 100%;" />
+                </RadzenFormField>
+            </div>
+        }
+    </RadzenStack>
+
+    <div class="d-flex justify-content-end align-items-center gap-2 pt-2 border-top">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Click="@(() => DialogService.Close(null))" Disabled="@_isSaving" />
+        <RadzenButton Text="@(_isSaving ? "Generating Snapshot..." : _showAcknowledgmentSection ? "Acknowledge & Generate Snapshot" : "Generate & Lock Snapshot")"
+                      Icon="@(_isSaving ? "" : "verified")"
+                      ButtonStyle="ButtonStyle.Success"
+                      Variant="Variant.Flat"
+                      Click="@HandleSubmitAsync"
+                      Disabled="@_isSaving"
+                      IsBusy="@_isSaving" />
+    </div>
+</RadzenStack>
+
+@code {
+    [Parameter] public eTopicLevel Level { get; set; } = eTopicLevel.Corporate;
+    [Parameter] public int TargetId { get; set; }
+    [Parameter] public string OrganizationTitle { get; set; } = string.Empty;
+    [Parameter] public HashSet<int>? AllowedSubscriptionIds { get; set; }
+
+    [Inject] public CfoReportService CfoReportService { get; set; } = default!;
+
+    private string _title = string.Empty;
+    private int _selectedCalculateYear = AppTimeZone.LocalNow.Year;
+    private int _selectedBaseYear = AppTimeZone.LocalNow.Year - 2;
+    private string _createdBy = "Corporate GHG Team";
+    private bool _isSaving = false;
+    private string? _errorMessage;
+
+    private bool _showAcknowledgmentSection = false;
+    private string _acknowledgmentReason = string.Empty;
+    private List<CfoReportService.ActivityAuditLineDto> _expiredOrPendingList = new();
+
+    private List<int> _calculateYearOptions = new();
+    private List<YearOptionItem> _baseYearOptions = new();
+
+    protected override void OnInitialized()
+    {
+        int currentYear = AppTimeZone.LocalNow.Year;
+        _calculateYearOptions = Enumerable.Range(currentYear - 5, 7).Reverse().ToList();
+
+        _baseYearOptions = new List<YearOptionItem>
+        {
+            new YearOptionItem { Value = 0, Text = "(None / Standalone Year)" }
+        };
+        _baseYearOptions.AddRange(Enumerable.Range(currentYear - 10, 11).Reverse().Select(y => new YearOptionItem { Value = y, Text = $"Base Year {y}" }));
+
+        _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            _errorMessage = "Please specify a report title.";
+            return;
+        }
+
+        try
+        {
+            _isSaving = true;
+            _errorMessage = null;
+
+            // [GHG-12] Pre-flight Check for Expired / NotYetApproved Emission Factors
+            if (!_showAcknowledgmentSection)
+            {
+                var preflight = await CfoReportService.GenerateReportAsync(Level, TargetId, _selectedCalculateYear, AllowedSubscriptionIds);
+                _expiredOrPendingList = preflight.AuditLines
+                    .Where(l => l.EfValidityStatus == "Expired" || l.EfValidityStatus == "NotYetApproved")
+                    .ToList();
+
+                if (_expiredOrPendingList.Any())
+                {
+                    _showAcknowledgmentSection = true;
+                    _errorMessage = "Expired or unapproved Emission Factors detected. Please provide an audit acknowledgment reason below before generating snapshot.";
+                    _isSaving = false;
+                    return;
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_acknowledgmentReason))
+                {
+                    _errorMessage = "Please specify an audit acknowledgment reason for using expired or unapproved Emission Factors.";
+                    _isSaving = false;
+                    return;
+                }
+            }
+
+            var doc = await ReportStorageService.CreateReportSnapshotAsync(
+                Level,
+                TargetId,
+                _title,
+                _selectedBaseYear,
+                _selectedCalculateYear,
+                _createdBy,
+                AllowedSubscriptionIds,
+                _acknowledgmentReason);
+
+            NotificationService.Notify(NotificationSeverity.Success, "Snapshot Created", $"Successfully generated and locked report snapshot '{doc.Title}'.");
+            DialogService.Close(doc);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to create report snapshot: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private class YearOptionItem
+    {
+        public int Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+}

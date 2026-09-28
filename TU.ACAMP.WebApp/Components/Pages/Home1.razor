@@ -1,0 +1,231 @@
+@page "/home1"
+@* [2026-09-21][Gemini] Added route "/home1" to allow navigating to Home1 directly *@
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>ACAMP - Automatic Carbon Account Management Platform</PageTitle>
+
+<div class="container-fluid p-0">
+    <!-- HERO SECTION -->
+    <div class="hero-bg py-5 px-4 md:px-5">
+        <div class="container-xl py-4">
+            <RadzenRow AlignItems="AlignItems.Center" Gap="2.5rem">
+                <!-- Left Column: Hero Text & Call to Action -->
+                <RadzenColumn Size="12" SizeMD="6" Class="d-flex flex-column gap-3">
+                    <div class="d-flex align-items-center gap-2">
+                        <RadzenBadge Text="Version 2.0" BadgeStyle="BadgeStyle.Success" Style="font-size: 0.85rem; border-radius: 8px; padding: 4px 10px;" />
+                        <RadzenBadge Text="ISO 14064 Compliant" BadgeStyle="BadgeStyle.Info" Style="font-size: 0.85rem; border-radius: 8px; padding: 4px 10px;" />
+                    </div>
+
+                    <RadzenText TextStyle="TextStyle.DisplayH4" TagName="TagName.H1" class="fw-bold mb-0">
+                        Automatic Carbon Account <br />
+                        <span class="glow-text">Management Platform</span>
+                    </RadzenText>
+
+                    <RadzenText TextStyle="TextStyle.Subtitle1" class="text-muted mb-4" Style="line-height: 1.6; max-width: 550px;">
+                        An automated carbon footprint accounting and management platform.
+                        Empowering large enterprises and SMEs to accurately measure, analyze,
+                        and strategically mitigate greenhouse gas emissions in full compliance with
+                        global ISO 14064 and TGO standards.
+                    </RadzenText>
+
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.4rem" Wrap="FlexWrap.Wrap">
+                        <RadzenButton Text="Sign In" Icon="login" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large" Click="@NavigateToLogin" Style="border-radius: 10px; padding: 12px 28px;" />
+                        <RadzenButton Text="Apply for Programme" Icon="assignment" ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Large" Click="@OpenRegisterForm" Style="border-radius: 10px; padding: 12px 28px;" />
+                    </RadzenStack>
+                </RadzenColumn>
+
+                <!-- Right Column: Live Interactive Preview Dashboard -->
+                <RadzenColumn Size="12" SizeMD="6" Class="d-flex">
+                    <div class="glass-preview p-4 d-flex flex-column justify-content-between w-100" style="min-height: 360px;">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <RadzenText Text="Carbon Footprint Overview" TextStyle="TextStyle.H6" TagName="TagName.H2" class="fw-bold mb-0" Style="color: var(--rz-text-title-color);" />
+                                <RadzenText Text="SME Factory Demo Dashboard" TextStyle="TextStyle.Caption" class="text-muted" />
+                            </div>
+                            <RadzenBadge Text="Live Preview" BadgeStyle="BadgeStyle.Primary" Style="border-radius: 6px;" />
+                        </div>
+
+                        <!-- Mini Stat Cards -->
+                        <RadzenRow Gap="0.4rem" Class="mb-3">
+                            <RadzenColumn Size="6">
+                                <RadzenCard Style="padding: 12px; background: var(--rz-base-50); border-radius: 10px;">
+                                    <RadzenText Text="Total Emissions" TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+                                    <RadzenText Text="355.8 tCO2e" TextStyle="TextStyle.H6" class="fw-bold text-success" />
+                                </RadzenCard>
+                            </RadzenColumn>
+                            <RadzenColumn Size="6">
+                                <RadzenCard Style="padding: 12px; background: var(--rz-base-50); border-radius: 10px;">
+                                    <RadzenText Text="Net Zero Target" TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+                                    <RadzenText Text="Year 2030" TextStyle="TextStyle.H6" class="fw-bold text-primary" />
+                                </RadzenCard>
+                            </RadzenColumn>
+                        </RadzenRow>
+
+                        <!-- Chart Preview Container -->
+                        <div class="flex-grow-1" style="min-height: 180px; position: relative;">
+                            <RadzenChart Style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; overflow: visible;">
+                                <RadzenColumnSeries Data="@emissions" CategoryProperty="Scope" ValueProperty="Amount" Title="tCO2e" Fills="@(new[] { "#10b981", "#3b82f6", "#f97316" })" />
+                                <RadzenValueAxis Min="0" Max="200" Step="50">
+                                    <RadzenGridLines Visible="true" />
+                                </RadzenValueAxis>
+                                <RadzenCategoryAxis Padding="20" />
+                                <RadzenLegend Visible="false" />
+                            </RadzenChart>
+                        </div>
+                    </div>
+                </RadzenColumn>
+            </RadzenRow>
+        </div>
+    </div>
+
+    <!-- FUNDING SECTION -->
+    <div class="container-xl py-5 my-3">
+        <div class="funding-card p-4 p-md-5">
+            <RadzenRow AlignItems="AlignItems.Center" Gap="2rem">
+                <RadzenColumn Size="12" SizeMD="8">
+                    <RadzenStack Gap="0.5rem">
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-warning text-dark fw-bold">DTI Support 2026</span>
+                            <span class="badge bg-light text-dark fw-bold">SME Operators Only</span>
+                        </div>
+                        <RadzenText Text="Green Transition Funding Programme" TextStyle="TextStyle.H4" class="fw-bold text-white mb-0" />
+                        <RadzenText TextStyle="TextStyle.Body1" class="text-light mb-0" Style="opacity: 0.9;">
+                            An exclusive opportunity for factories and SMEs to apply for financial subsidy to deploy the ACAMP 2.0 platform.
+                            Get a maximum funding value of up to <strong>220,000 THB</strong> (with a co-payment of only 20,000 THB from operators)
+                            to drive full-scale carbon footprint implementation.
+                        </RadzenText>
+                    </RadzenStack>
+                </RadzenColumn>
+                <RadzenColumn Size="12" SizeMD="4" Class="d-flex flex-column align-items-center text-center">
+                    <RadzenCard Style="padding: 10px; background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color); border-radius: 12px; width: 140px; height: 140px; display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 20px rgba(0,0,0,0.15);">
+                        <RadzenIcon Icon="qr_code_2" Style="font-size: 80px; color: var(--rz-primary);" />
+                    </RadzenCard>
+                    <RadzenText Text="Scan to Register" TextStyle="TextStyle.Subtitle2" class="text-white fw-bold mt-2 mb-0" />
+                    <RadzenText Text="Limited Allocation for 2026" TextStyle="TextStyle.Caption" class="text-light" Style="opacity: 0.8;" />
+                </RadzenColumn>
+            </RadzenRow>
+        </div>
+    </div>
+
+    <!-- FEATURES SECTION -->
+    <div style="background-color: var(--rz-body-background-color); padding: 3rem 0;">
+        <div class="container-xl py-4">
+            <div class="text-center mb-5">
+                <RadzenText Text="ACAMP Platform Features" TextStyle="TextStyle.H5" class="fw-bold mb-1" Style="color: var(--rz-text-title-color);" />
+                <RadzenText Text="Innovative tools driving sustainable transformation for green businesses" TextStyle="TextStyle.Body2" class="text-muted" />
+            </div>
+
+            <RadzenRow Gap="1.5rem">
+                <!-- Feature 1 -->
+                <RadzenColumn Size="12" SizeMD="4">
+                    <RadzenCard Class="feature-card p-4 d-flex flex-column gap-2" Style="border-radius: 12px; height: 100%;">
+                        <div class="d-flex align-items-center justify-content-center bg-success text-white rounded-circle" style="width: 48px; height: 48px;">
+                            <RadzenIcon Icon="analytics" Style="font-size: 24px;" />
+                        </div>
+                        <RadzenText Text="Carbon Accounting" TextStyle="TextStyle.H6" class="fw-bold mt-2 mb-1" Style="color: var(--rz-text-title-color);" />
+                        <RadzenText Text="Automatically calculate and report Corporate Carbon Footprint (CFO) in compliance with international standards, minimizing administrative overhead." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+                    </RadzenCard>
+                </RadzenColumn>
+
+                <!-- Feature 2 -->
+                <RadzenColumn Size="12" SizeMD="4">
+                    <RadzenCard Class="feature-card p-4 d-flex flex-column gap-2" Style="border-radius: 12px; height: 100%;">
+                        <div class="d-flex align-items-center justify-content-center bg-primary text-white rounded-circle" style="width: 48px; height: 48px;">
+                            <RadzenIcon Icon="electric_car" Style="font-size: 24px;" />
+                        </div>
+                        <RadzenText Text="Real-time Integration" TextStyle="TextStyle.H6" class="fw-bold mt-2 mb-1" Style="color: var(--rz-text-title-color);" />
+                        <RadzenText Text="Seamlessly integrate energy consumption, raw materials, and factory utility metrics to stream immediate insights directly onto your dashboard." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+                    </RadzenCard>
+                </RadzenColumn>
+
+                <!-- Feature 3 -->
+                <RadzenColumn Size="12" SizeMD="4">
+                    <RadzenCard Class="feature-card p-4 d-flex flex-column gap-2" Style="border-radius: 12px; height: 100%;">
+                        <div class="d-flex align-items-center justify-content-center bg-warning text-white rounded-circle" style="width: 48px; height: 48px;">
+                            <RadzenIcon Icon="assignment_turned_in" Style="font-size: 24px;" />
+                        </div>
+                        <RadzenText Text="ISO 14064 Compliance" TextStyle="TextStyle.H6" class="fw-bold mt-2 mb-1" Style="color: var(--rz-text-title-color);" />
+                        <RadzenText Text="Generate formatted auditable data arrays and legal-ready inventories optimized for verification processes by TGO and global certification bodies." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+                    </RadzenCard>
+                </RadzenColumn>
+            </RadzenRow>
+        </div>
+    </div>
+
+    <!-- NET ZERO PATHWAY SECTION -->
+    <div style="background-color: var(--rz-base-50); border-top: 1px solid var(--rz-border-color); border-bottom: 1px solid var(--rz-border-color); padding: 3rem 0;">
+        <div class="container-xl py-4">
+            <div class="text-center mb-5">
+                <RadzenText Text="ACAMP in Net Zero Pathway" TextStyle="TextStyle.H5" class="fw-bold mb-1" Style="color: var(--rz-text-title-color);" />
+                <RadzenText Text="Operational roadmap towards corporate carbon neutrality" TextStyle="TextStyle.Body2" class="text-muted" />
+            </div>
+
+            <RadzenRow Gap="0.4rem" AlignItems="AlignItems.Center">
+                <RadzenColumn Size="12" SizeMD="3">
+                    <div class="step-card text-center">
+                        <RadzenText Text="1. Measure" TextStyle="TextStyle.Subtitle1" class="fw-bold text-success mb-1" />
+                        <RadzenText Text="Quantify baseline carbon footprint metrics" TextStyle="TextStyle.Caption" class="text-muted" />
+                    </div>
+                </RadzenColumn>
+
+                <RadzenColumn Size="12" SizeMD="3">
+                    <div class="step-card text-center">
+                        <RadzenText Text="2. Analyze" TextStyle="TextStyle.Subtitle1" class="fw-bold text-primary mb-1" />
+                        <RadzenText Text="Pinpoint high-emission carbon hot spots" TextStyle="TextStyle.Caption" class="text-muted" />
+                    </div>
+                </RadzenColumn>
+
+                <RadzenColumn Size="12" SizeMD="3">
+                    <div class="step-card text-center">
+                        <RadzenText Text="3. Plan" TextStyle="TextStyle.Subtitle1" class="fw-bold text-warning mb-1" />
+                        <RadzenText Text="Formulate abatement and efficiency plans" TextStyle="TextStyle.Caption" class="text-muted" />
+                    </div>
+                </RadzenColumn>
+
+                <RadzenColumn Size="12" SizeMD="3">
+                    <RadzenCard Style="background: #10b981; border-radius: 12px; padding: 20px; color: white; border: none;" Class="text-center shadow-sm">
+                        <RadzenText Text="4. Net Zero" TextStyle="TextStyle.Subtitle1" class="fw-bold text-white mb-1" />
+                        <RadzenText Text="Driving business growth alongside sustainability" TextStyle="TextStyle.Caption" class="text-light" Style="opacity: 0.9;" />
+                    </RadzenCard>
+                </RadzenColumn>
+            </RadzenRow>
+        </div>
+    </div>
+</div>
+
+@code {
+    #region class field
+    private string loginPath = "/Account/Login";
+    private string externalFormUrl = "https://forms.gle/rdYeGGspQuEZu43X8";
+
+    class EmissionData
+    {
+        public string Scope { get; set; } = string.Empty;
+        public double Amount { get; set; }
+    }
+
+    private EmissionData[] emissions = new EmissionData[]
+    {
+        new EmissionData { Scope = "Scope 1 (Direct)", Amount = 120 },
+        new EmissionData { Scope = "Scope 2 (Indirect)", Amount = 85 },
+        new EmissionData { Scope = "Scope 3 (Other)", Amount = 150 }
+    };
+    #endregion
+
+    #region class methods
+    private void NavigateToLogin()
+    {
+        #region hide [2026-08-15]
+        NavigationManager.NavigateTo(loginPath, forceLoad: true);
+        #endregion
+    }
+
+    private async Task OpenRegisterForm()
+    {
+        #region hide [2026-08-15]
+        await JSRuntime.InvokeVoidAsync("open", externalFormUrl, "_blank");
+        #endregion
+    }
+    #endregion
+}

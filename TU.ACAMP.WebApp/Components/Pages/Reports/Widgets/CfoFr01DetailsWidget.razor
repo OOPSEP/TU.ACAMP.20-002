@@ -1,0 +1,224 @@
+@* [2026-09-16][Antigravity] Step 2 Fr-01 Organization Details Widget: Comprehensive editor for Fr-01 sheet cells with 2-tab product grid & multirow org info *@
+@* [2026-09-17][Claude] Product grids extracted to CfoProductGrid; photo upload validation & error feedback added *@
+@* [2026-09-24][Claude] Fr-01 photo: show current/default image, click image to pick a new file *@
+@using TU.ACAMP.WebApp.Services.Reports
+
+
+@* [2026-09-24][Claude] Layout v2: ลดความสูงหน้า — จัดเป็น 2 คอลัมน์บนจอ lg ขึ้นไป (จอเล็กเรียงลงเหมือนเดิม)
+   แถว 1: รูปองค์กร (ครึ่งหน้า) | Identification + Contact
+   แถว 2: Organization Information | Operational Activity Summaries (แยก Scope เป็นแท็บ)
+   แถว 3: Reporting Periods & Production (เต็มความกว้าง เพราะมีตาราง) *@
+<RadzenStack Gap="1rem" Class="pt-2">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-01: Organization Details</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Configure organizational profile, reporting periods, production parameters, and contact information for the official TGO AR5 report.
+        </RadzenText>
+    </div>
+
+    <!-- Row 1: Photo (left half) | Identification + Contact (right half) -->
+    <div class="row g-3">
+        <!-- Section: Organization Logo / Photo (Cell A8:D33) -->
+        <div class="col-12 col-lg-6">
+            <RadzenCard Class="p-3 shadow-none border rounded-3 h-100 d-flex flex-column">
+                <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-1">
+                    <RadzenIcon Icon="image" Class="me-1" /> Organization Logo / Photo (Cell A8:D33)
+                </RadzenText>
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-2">
+                    Click the image to choose a new photo or logo. (PNG, JPG, WEBP, max 5 MB).
+                </RadzenText>
+
+                @* [2026-09-24][Claude] ใช้ CfoImagePicker ร่วมกับ Fr-02 / Fr-03.1 *@
+                <CfoImagePicker ImageBase64="@OrgImageBase64" ImageBase64Changed="@OrgImageBase64Changed"
+                                DefaultImageUrl="images/default_org_facility.jpg" InputId="fr01FileInput"
+                                AltText="Organization Logo" Width="260" Height="220" />
+            </RadzenCard>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <RadzenStack Gap="1rem" Class="h-100">
+                <!-- Section: Identification & GHG Team -->
+                <RadzenCard Class="p-3 shadow-none border rounded-3">
+                    <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-3">
+                        <RadzenIcon Icon="badge" Class="me-1" /> Organization Identification & GHG Team
+                    </RadzenText>
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <RadzenFormField Text="Organization Name (Cell B6 & G3) *" Variant="Variant.Outlined" Style="width: 100%;">
+                                <RadzenTextBox Value="@OrgTitle" ValueChanged="@OrgTitleChanged" Style="width: 100%;" />
+                            </RadzenFormField>
+                        </div>
+                        <div class="col-12">
+                            <RadzenFormField Text="GHG Working Team (Cell G4) *" Variant="Variant.Outlined" Style="width: 100%;">
+                                <RadzenTextBox Value="@GhgTeam" ValueChanged="@GhgTeamChanged" Style="width: 100%;" />
+                            </RadzenFormField>
+                        </div>
+                    </div>
+                </RadzenCard>
+
+                <!-- Section: Contact Location (Row 32) -->
+                <RadzenCard Class="p-3 shadow-none border rounded-3 flex-grow-1">
+                    <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-3">
+                        <RadzenIcon Icon="contact_mail" Class="me-1" /> Contact Location & Address (Cell H32)
+                    </RadzenText>
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <RadzenFormField Text="Contact Location / Address (Cell H32) *" Variant="Variant.Outlined" Style="width: 100%;">
+                                <RadzenTextArea Rows="3" Cols="30" Value="@ContactAddress" ValueChanged="@ContactAddressChanged" Placeholder="Official postal address and contact point" Style="width: 100%;" />
+                            </RadzenFormField>
+                        </div>
+                    </div>
+                </RadzenCard>
+            </RadzenStack>
+        </div>
+    </div>
+
+    <!-- Row 2: Organization Information | Operational Activity Summaries -->
+    <div class="row g-3">
+        <!-- Section: Organization Background & Information (Rows 27..31) -->
+        <div class="col-12 col-lg-6">
+            <RadzenCard Class="p-3 shadow-none border rounded-3 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+                    <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-0">
+                        <RadzenIcon Icon="info" Class="me-1" /> Organization Information (Rows 27..31)
+                    </RadzenText>
+                    <RadzenButton Text="Insert Example Template" Icon="format_list_numbered" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall" Variant="Variant.Outlined"
+                                  Click="@InsertDefaultOrgInfoTemplate" Title="Populate 5 standard organization points" Style="border-radius: 6px;" />
+                </div>
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-2">
+                    5 lines, written into rows 27 through 31 on sheet Fr-01.
+                </RadzenText>
+
+                <RadzenFormField Text="Organization Information Notes (5 Items)" Variant="Variant.Outlined" Style="width: 100%;">
+                    <RadzenTextArea Value="@OrgInfoMultiLine" ValueChanged="@OrgInfoMultiLineChanged" Rows="7"
+                                    Placeholder="1. Head Office: Headquarters and operating sites&#10;2. Main Products & Services: Commercial products and operational activities&#10;3. Production Capacity & Workforce: Installed capacity and workforce headcount&#10;4. Operating Hours & Shifts: Work schedule and daily operational shifts&#10;5. Standards & Certifications: Quality and environmental management certifications"
+                                    Style="width: 100%; font-family: inherit;" />
+                </RadzenFormField>
+            </RadzenCard>
+        </div>
+
+        <!-- Section: Operational Activity Summaries (Fr-01 Rows) — read-only, Scope แยกแท็บ -->
+        <div class="col-12 col-lg-6">
+            <RadzenCard Class="p-3 shadow-none border rounded-3 h-100">
+                <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-1">
+                    <RadzenIcon Icon="view_list" Class="me-1" /> Operational Activity Summaries (Fr-01 Rows)
+                </RadzenText>
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-1">
+                    Auto-populated from active emissions data (TGO Standard Category names, ascending).
+                </RadzenText>
+
+                <RadzenTabs RenderMode="TabRenderMode.Client">
+                    <Tabs>
+                        <RadzenTabsItem Text="Scope 1 (H9..H17+)">
+                            <RadzenTextArea Value="@Scope1Summary" ReadOnly="true" Rows="6" Style="width: 100%; background-color: #f8fafc; font-family: monospace;" />
+                        </RadzenTabsItem>
+                        <RadzenTabsItem Text="Scope 2 (H18..H20+)">
+                            <RadzenTextArea Value="@Scope2Summary" ReadOnly="true" Rows="6" Style="width: 100%; background-color: #f8fafc; font-family: monospace;" />
+                        </RadzenTabsItem>
+                        <RadzenTabsItem Text="Scope 3 (H21+)">
+                            <RadzenTextArea Value="@Scope3Summary" ReadOnly="true" Rows="6" Style="width: 100%; background-color: #f8fafc; font-family: monospace;" />
+                        </RadzenTabsItem>
+                    </Tabs>
+                </RadzenTabs>
+            </RadzenCard>
+        </div>
+    </div>
+
+    <!-- Row 3: Reporting Periods & Production (Rows 22..25) — เต็มความกว้าง -->
+    <RadzenCard Class="p-3 shadow-none border rounded-3">
+        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-1">
+            <RadzenIcon Icon="date_range" Class="me-1" /> Reporting Periods & Production (Rows 22..25)
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-2">
+            Calculate Year and Base Year in separate tabs. Double-click any row to edit, and press Enter or click checkmark to update.
+        </RadzenText>
+
+        <RadzenTabs RenderMode="TabRenderMode.Client">
+            <Tabs>
+                <!-- Tab 1: Calculate Year -->
+                <RadzenTabsItem Text="Calculate Year">
+                    <RadzenStack Gap="1rem" Class="pt-2">
+                        <RadzenFormField Text="Calculate Reporting Period (Cell H22) *" Variant="Variant.Outlined" Style="width: 100%;">
+                            <RadzenTextBox Value="@CalculatePeriodText" ValueChanged="@CalculatePeriodTextChanged" Style="width: 100%;" />
+                        </RadzenFormField>
+
+                        <CfoProductGrid Title="Product Output Items (Cell H23 & J23)"
+                                        Items="@CalcProductItems"
+                                        ItemsChanged="@CalcProductItemsChanged"
+                                        DefaultUnit="Tonnes" />
+                    </RadzenStack>
+                </RadzenTabsItem>
+
+                <!-- Tab 2: Base Year -->
+                <RadzenTabsItem Text="Base Year">
+                    <RadzenStack Gap="1rem" Class="pt-2">
+                        <RadzenFormField Text="Base Year Reporting Period (Cell H24)" Variant="Variant.Outlined" Style="width: 100%;">
+                            <RadzenTextBox Value="@BasePeriodText" ValueChanged="@BasePeriodTextChanged" Style="width: 100%;" />
+                        </RadzenFormField>
+
+                        <CfoProductGrid Title="Base Year Product Output Items (Cell H25 & J25)"
+                                        Items="@BaseProductItems"
+                                        ItemsChanged="@BaseProductItemsChanged"
+                                        DefaultUnit="Tonnes" />
+                    </RadzenStack>
+                </RadzenTabsItem>
+            </Tabs>
+        </RadzenTabs>
+    </RadzenCard>
+
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        <strong>Diagrams notice:</strong> Worksheets <code>Fr-02</code> (Organization Diagram) and <code>Fr-03.1</code> (Organizational Structure) are configured in the next steps. If no image is selected there, the system default image is exported.
+    </RadzenAlert>
+</RadzenStack>
+
+@code {
+    // [2026-09-16][Antigravity] Parameters for Step 2 Fr-01 Organization Details Widget
+    [Parameter] public string OrgTitle { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> OrgTitleChanged { get; set; }
+
+    [Parameter] public string GhgTeam { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> GhgTeamChanged { get; set; }
+
+    [Parameter] public DateTime? PreparationDate { get; set; }
+    [Parameter] public EventCallback<DateTime?> PreparationDateChanged { get; set; }
+
+    [Parameter] public string? OrgImageBase64 { get; set; }
+    [Parameter] public EventCallback<string?> OrgImageBase64Changed { get; set; }
+
+    [Parameter] public string CalculatePeriodText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> CalculatePeriodTextChanged { get; set; }
+
+    [Parameter] public List<CfoReportService.CfoProductItemDto> CalcProductItems { get; set; } = new();
+    [Parameter] public EventCallback<List<CfoReportService.CfoProductItemDto>> CalcProductItemsChanged { get; set; }
+
+    [Parameter] public string BasePeriodText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> BasePeriodTextChanged { get; set; }
+
+    [Parameter] public List<CfoReportService.CfoProductItemDto> BaseProductItems { get; set; } = new();
+    [Parameter] public EventCallback<List<CfoReportService.CfoProductItemDto>> BaseProductItemsChanged { get; set; }
+
+    [Parameter] public string OrgInfoMultiLine { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> OrgInfoMultiLineChanged { get; set; }
+
+    [Parameter] public string ContactAddress { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ContactAddressChanged { get; set; }
+
+    [Parameter] public DateTime? RegistrationDate { get; set; }
+    [Parameter] public EventCallback<DateTime?> RegistrationDateChanged { get; set; }
+
+    [Parameter] public string Scope1Summary { get; set; } = "-";
+    [Parameter] public string Scope2Summary { get; set; } = "-";
+    [Parameter] public string Scope3Summary { get; set; } = "-";
+
+
+    private async Task InsertDefaultOrgInfoTemplate()
+    {
+        // [2026-09-24][Claude] ใส่เฉพาะหัวข้อ ไม่ใส่ค่าตัวอย่าง (เดิมมี "ISO 14064-1:2018 verified" ฯลฯ ซึ่งเสี่ยงหลุดลงรายงานจริงเป็นข้อความที่ไม่ได้ตรวจสอบ)
+        var template = "1. Head Office: \n" +
+                       "2. Main Products & Services: \n" +
+                       "3. Production Capacity & Workforce: \n" +
+                       "4. Operating Hours & Shifts: \n" +
+                       "5. Standards & Certifications: ";
+        await OrgInfoMultiLineChanged.InvokeAsync(template);
+    }
+}

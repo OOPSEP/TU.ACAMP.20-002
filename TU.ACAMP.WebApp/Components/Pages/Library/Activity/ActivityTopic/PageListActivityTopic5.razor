@@ -1,0 +1,2213 @@
+@page "/library/activity-topics"
+@page "/activities/topics"
+@page "/organization/facility/topics"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using System.Text.Json.Nodes
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Components.Common
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+
+@attribute [Authorize]
+@implements IAsyncDisposable
+
+@using TU.ACAMP.WebApp.Components.Pages.Library.Activity.ActivityTopic.Dialogs
+
+@inject ActivityTopicService ActivityTopicService
+@inject ActivityTopicExcelService ExcelService
+@inject ActivityGroupService ActivityGroupService
+@inject EmissionSourceService EmissionSourceService
+@inject FacilityService FacilityService
+@inject CompanyService CompanyService
+@inject CorporateService CorporateService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject GhgEventBusService GhgEventBus
+@inject IJSRuntime JSRuntime
+@inject ILogger<PageListActivityTopic5> Logger
+
+@*
+    ============================================================================
+    PageListActivityTopic5.razor  (v5 - 2026-09-13)
+    [2026-09-13: Antigravity]
+    เวอร์ชัน 5: ต่อยอดจาก v4 โดยเพิ่ม Advanced Filter:
+    - Month Start Dropdown (1-12) รองรับรอบปีปฏิทินและปีงบประมาณ (Fiscal Year Window)
+    - Toggle เปิด/ปิด การมองเห็น Child Topics (WTT Scope 3 & Biogenic CO2)
+    - Data Completeness Filter (All / Has Events / No Events)
+    - Status Filter (All / Active / Inactive)
+    - Emission Source Mapping Filter (All / Mapped / Unmapped & Unknown)
+    ============================================================================
+*@
+
+<PageTitle>@($"{GetParentTypeDisplayName()} Topics - ACAMP")</PageTitle>
+
+<style>
+    .acc-has-topics,
+    .acc-has-topics > .rz-accordion-header,
+    .acc-has-topics > .rz-accordion-header > a,
+    .acc-has-topics > .rz-accordion-content {
+        background-color: var(--rz-card-background-color) !important;
+        background-color: color-mix(in srgb, var(--rz-success, #4caf50) 14%, var(--rz-card-background-color, #fff)) !important;
+    }
+
+    /* Drag & Drop row reorder (v4) */
+    .topic-drop-target > td {
+        border-top: 2px solid var(--rz-primary, #0d6efd) !important;
+        background-color: color-mix(in srgb, var(--rz-primary, #0d6efd) 10%, transparent) !important;
+    }
+
+    /* [2026-09-13][Antigravity] Replaced local .topic-filter-bar style with global .acamp-filter-bar in site.css */
+
+    /* [2026-09-14] Header sub-row: คำอธิบาย + ชื่อ Parent (ซ้าย) และปุ่มคำสั่ง (ขวา) ต้องอยู่แถวเดียวกันเสมอ */
+    .topic-header-subrow {
+        flex-wrap: nowrap !important;
+    }
+
+    .topic-header-caption {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .topic-header-actions {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    /* จอแคบ: ย่อปุ่มลงเล็กน้อยแทนการดันตกบรรทัด */
+    @@media (max-width: 991.98px) {
+        .topic-header-actions .rz-button {
+            padding-left: 0.55rem;
+            padding-right: 0.55rem;
+            font-size: 0.8rem;
+        }
+    }
+</style>
+
+<div class="container-fluid py-2 px-4">
+    <!-- Header Section -->
+    @* [2026-09-14] Header layout: ชื่อ Parent ย้ายลงมาอยู่ใต้บรรทัดคำอธิบาย
+       และกลุ่มปุ่ม (Export/Import/Add Topic) ถูกล็อกให้อยู่แถวเดียวกับบรรทัดคำอธิบายเสมอ
+       (ใช้ flex-nowrap + flex-shrink-0 ฝั่งปุ่ม / min-width:0 ฝั่งข้อความ) *@
+    <div class="mb-4">
+        <div class="d-flex align-items-center mb-1">
+            <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                          Size="ButtonSize.Small" Click="@GoBack" Class="me-2" Style="border-radius: 6px;" />
+            <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                @($"{GetParentTypeDisplayName()} Topics")
+            </RadzenText>
+        </div>
+
+        <div class="topic-header-subrow d-flex align-items-start justify-content-between flex-nowrap gap-3 mt-1 ms-5">
+            <div class="topic-header-caption" style="min-width: 0;">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    Manage @GetParentTypeDisplayName().ToLower()-level activity calculations, greenhouse gas scopes, and emission sources.
+                </RadzenText>
+                @if (!string.IsNullOrWhiteSpace(_parentContextName))
+                {
+                    <div class="mt-2">
+                        <span style="display:inline-flex; align-items:center; gap:6px; background:var(--rz-primary-lighter,#e8f0fe); color:var(--rz-primary,#3d6af8); border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis;">
+                            <span class="rzi" style="font-size:0.9rem;">business</span>
+                            @_parentContextName
+                        </span>
+                    </div>
+                }
+            </div>
+
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"
+                         Class="topic-header-actions flex-wrap justify-content-end flex-shrink-0">
+                <RadzenButton Text="Export Excel" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                              Click="@ExportToExcelAsync" Style="border-radius: 8px; font-weight: 600;"
+                              Disabled="@(!CanExport)" Title="@(CanExport ? "Export topics to Excel" : "Export is restricted to users with edit permissions.")" />
+                <RadzenButton Text="Import Excel" Icon="file_upload" ButtonStyle="ButtonStyle.Success" Variant="Variant.Outlined"
+                              Click="@OpenImportDialogAsync" Style="border-radius: 8px; font-weight: 600;" Disabled="@_isAddDisabled" />
+                <RadzenButton Text="Add Topic" Icon="add_circle" ButtonStyle="ButtonStyle.Primary"
+                              Click="@NavigateToCreate" Style="border-radius: 8px; font-weight: 600;" Disabled="@_isAddDisabled" />
+            </RadzenStack>
+        </div>
+    </div>
+
+    <!-- Filters Card -->
+    <RadzenCard Class="mb-3 p-3 shadow-sm rounded-3" Style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color);">
+        <!-- [2026-09-13][Antigravity] Flex toolbar: search ยืดอัตโนมัติ (spring) ด้วย acamp-filter-bar และทุกคอนโทรลสูง 40px ชิดเส้นล่างเดียวกัน -->
+        <div class="acamp-filter-bar justify-content-between">
+            <div class="acamp-filter-search">
+                <RadzenFormField Text="Search Topics">
+                    <ChildContent>
+                        <RadzenTextBox @bind-Value="@SearchText"
+                                       Placeholder="Search by Title, Code, Remark, or Source..."
+                                       Style="width: 100%;" />
+                    </ChildContent>
+                    <Start>
+                        <RadzenIcon Icon="search" Style="font-size: 1.15rem; color: var(--rz-text-secondary-color);" />
+                    </Start>
+                </RadzenFormField>
+            </div>
+
+            <div class="d-flex align-items-end gap-2 flex-wrap ms-auto flex-shrink-0">
+                @if (_isAdmin || _subscriptionsList.Count > 1)
+                {
+                    <RadzenFormField Text="Subscription Workspace" Style="width: 220px;">
+                        <RadzenDropDown TValue="int?" Value="@_selectedSubscriptionId" Data="@_subscriptionsList"
+                                        TextProperty="Title" ValueProperty="Id" Placeholder="All Subscriptions"
+                                        AllowClear="true" Change="@OnSubscriptionChanged"
+                                        Style="width: 100%;" />
+                    </RadzenFormField>
+                }
+
+                <RadzenFormField Text="Reporting Year" Style="width: 160px;">
+                    <RadzenDropDown @bind-Value="@_selectedYear"
+                                    Data="@_yearOptions"
+                                    TextProperty="Text"
+                                    ValueProperty="Value"
+                                    Change="@(async _ => { ApplyInMemoryFilters(); await SyncBrowserUrlAsync(); })"
+                                    Style="width: 100%;" />
+                </RadzenFormField>
+
+                <!-- [2026-09-13][Antigravity] ปุ่ม Advanced/Less สูง 40px เท่ากับ input ด้วย .acamp-filter-bar -->
+                <div class="d-flex align-items-end position-relative">
+                    @* [2026-09-26][Claude] ใช้ปุ่มมาตรฐาน AdvancedFilterToggle *@
+                    <AdvancedFilterToggle IsExpanded="@_isAdvancedExpanded"
+                                          HasActive="@HasActiveAdvancedFilters"
+                                          OnToggle="@ToggleAdvancedFilter" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Filter Expanded Section -->
+        @if (_isAdvancedExpanded)
+        {
+            <div class="row g-3 align-items-center mt-2 pt-3 border-top" style="border-color: var(--rz-border-color) !important;">
+                <!-- 1. Month Start (Fiscal Year Period) -->
+                <div class="col-12 col-md-3">
+                    <RadzenFormField Text="Month Start (Fiscal Cycle)" Style="width: 100%;">
+                        <RadzenDropDown TValue="int"
+                                        Value="@_startMonth"
+                                        ValueChanged="@OnStartMonthChanged"
+                                        Data="@_monthsList"
+                                        TextProperty="Text"
+                                        ValueProperty="Value"
+                                        Style="width: 100%;">
+                            <Template Context="month">
+                                @if (month is MonthOption m)
+                                {
+                                    <div class="d-flex align-items-center justify-content-between" style="width: 100%;">
+                                        <span>@m.Text</span>
+                                        @if (!string.IsNullOrEmpty(m.Tag))
+                                        {
+                                            <span class="badge rounded-pill ms-2 px-2 py-1" style="font-size: 0.7rem; font-weight: 600; background-color: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7;">
+                                                @m.Tag
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                            </Template>
+                        </RadzenDropDown>
+                    </RadzenFormField>
+                </div>
+
+                <!-- 2. Show Child Topics Switch -->
+                <div class="col-12 col-md-3 d-flex align-items-center gap-2">
+                    <RadzenSwitch @bind-Value="@_showChildTopics" Change="@(async _ => { ApplyInMemoryFilters(); await SyncBrowserUrlAsync(); })" Style="--rz-switch-height: 22px;" />
+                    <RadzenLabel Text="Show Child Topics (WTT / Bio)" Class="fw-semibold text-dark mb-0 small" />
+                </div>
+
+                <!-- 3. Status Filter (All / Active / Inactive) -->
+                <div class="col-12 col-md-2">
+                    <RadzenFormField Text="Status" Style="width: 100%;">
+                        <RadzenDropDown TValue="string"
+                                        Value="@_statusFilter"
+                                        ValueChanged="@OnStatusFilterChanged"
+                                        Data="@_statusOptions"
+                                        TextProperty="Text"
+                                        ValueProperty="Value"
+                                        Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+
+                <!-- 4. Data Completeness (Events) -->
+                <div class="col-12 col-md-2">
+                    <RadzenFormField Text="Data Records" Style="width: 100%;">
+                        <RadzenDropDown TValue="string"
+                                        Value="@_dataEventFilter"
+                                        ValueChanged="@OnDataEventFilterChanged"
+                                        Data="@_dataEventOptions"
+                                        TextProperty="Text"
+                                        ValueProperty="Value"
+                                        Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+
+                <!-- 5. Source Mapping Filter -->
+                <div class="col-12 col-md-2">
+                    <RadzenFormField Text="Source Mapping" Style="width: 100%;">
+                        <RadzenDropDown TValue="string"
+                                        Value="@_sourceMappingFilter"
+                                        ValueChanged="@OnSourceMappingFilterChanged"
+                                        Data="@_sourceMappingOptions"
+                                        TextProperty="Text"
+                                        ValueProperty="Value"
+                                        Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+
+                <!-- Reset Advanced Filter Row -->
+                @if (HasActiveAdvancedFilters)
+                {
+                    <div class="col-12 d-flex justify-content-end pt-1">
+                        <RadzenButton Text="Reset Advanced Filters"
+                                      Icon="restart_alt"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Variant="Variant.Text"
+                                      Size="ButtonSize.Small"
+                                      Click="@ResetAdvancedFilters"
+                                      Style="font-size: 0.82rem;" />
+                    </div>
+                }
+            </div>
+        }
+    </RadzenCard>
+
+    <!-- Scope Tabs & Main Content -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading topics..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenTabs RenderMode="TabRenderMode.Client" SelectedIndex="@_activeTabIndex" Change="@OnTabChanged"
+                    Class="shadow-sm rounded-3 mb-4" Style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color);">
+            <Tabs>
+                <RadzenTabsItem Text="Scope 1 (Direct GHG)">
+                    <div class="p-3 bg-light rounded-3 mt-2">
+                        @RenderAccordionForScope(eTgoScopeNo.Scope1)
+                    </div>
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="Scope 2 (Indirect Energy)">
+                    <div class="p-3 bg-light rounded-3 mt-2">
+                        @RenderAccordionForScope(eTgoScopeNo.Scope2)
+                    </div>
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="Scope 3 (Other Indirect)">
+                    <div class="p-3 bg-light rounded-3 mt-2">
+                        @RenderAccordionForScope(eTgoScopeNo.Scope3)
+                    </div>
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="Separate Report (Biogenic CO₂)">
+                    <div class="p-3 bg-light rounded-3 mt-2">
+                        @RenderAccordionForScope(eTgoScopeNo.SeparateReport)
+                    </div>
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="All Scopes">
+                    <div class="p-3 bg-light rounded-3 mt-2">
+                        @{
+                            var allRows = GetAllTopicRows();
+                            var scopeMap = GetGroupScopeMap();
+                            var ungroupedRows = FilterUngroupedRows(allRows, scopeMap);
+
+                            // [2026-09-13: Antigravity] คำนวณยอด GHG รวมกระทบยอดแยกตาม Scope ให้ครบถ้วน 100% เสมอ ไม่ว่าสวิตช์ Child จะเปิดหรือปิด
+                            var allActiveChildItems = _filteredItems
+                                .SelectMany(t => t.Childs.Where(c => c.IsActive && !c.IsDeleted)
+                                    .Select(c => new TopicRowDisplayItem { Topic = t, Child = c, IsMaster = (c.Id == t.Childs.Where(x => x.IsActive && !x.IsDeleted).OrderBy(x => x.Id).First().Id), GroupCode = GetGroupCodeForChild(c) }))
+                                .ToList();
+
+                            var totalAllKg = allActiveChildItems.Sum(r => GetRowKgCO2e(r, false));
+                            var kgScope1 = allActiveChildItems.Where(r => TryGetScopeForChild(r.Child) == eTgoScopeNo.Scope1).Sum(r => GetRowKgCO2e(r, false));
+                            var kgScope2 = allActiveChildItems.Where(r => TryGetScopeForChild(r.Child) == eTgoScopeNo.Scope2).Sum(r => GetRowKgCO2e(r, false));
+                            var kgScope3 = allActiveChildItems.Where(r => TryGetScopeForChild(r.Child) == eTgoScopeNo.Scope3).Sum(r => GetRowKgCO2e(r, false));
+                            var kgSeparate = allActiveChildItems.Where(r => TryGetScopeForChild(r.Child) == eTgoScopeNo.SeparateReport).Sum(r => GetRowKgCO2e(r, false));
+                        }
+                        @if (!allRows.Any())
+                        {
+                            <div class="p-4 text-center text-muted border rounded bg-white">
+                                <RadzenIcon Icon="info" Style="font-size: 36px; opacity: 0.5;" Class="mb-2" />
+                                <div>No activity topics found for this reporting scope.</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- [2026-09-13: Antigravity] แถบกระทบยอด GHG รวม: แสดงยอดการปล่อยจริงครบถ้วนทุก Scope เสมอ -->
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-3 p-2 bg-white border rounded-3 small">
+                                <span class="fw-bold me-1">Total GHG Reconciliation:</span>
+                                <span class="badge bg-dark text-white px-2 py-1">Total @($"{totalAllKg:N2} kg")</span>
+                                <span class="text-muted">=</span>
+                                <span class="badge bg-primary text-white px-2 py-1">Scope 1: @($"{kgScope1:N2} kg")</span>
+                                <span class="text-muted">+</span>
+                                <span class="badge bg-success text-white px-2 py-1">Scope 2: @($"{kgScope2:N2} kg")</span>
+                                <span class="text-muted">+</span>
+                                <span class="badge bg-info text-white px-2 py-1">Scope 3: @($"{kgScope3:N2} kg")</span>
+                                <span class="text-muted">+</span>
+                                <span class="badge bg-secondary text-white px-2 py-1">Separate: @($"{kgSeparate:N2} kg")</span>
+                            </div>
+
+                            @if (ungroupedRows.Any())
+                            {
+                                <div class="alert alert-warning py-2 px-3 small mb-3" role="alert">
+                                    <RadzenIcon Icon="warning" Style="font-size: 16px;" Class="me-1" />
+                                    There are @ungroupedRows.Count topics not associated with a valid Activity Group.
+                                    They do not appear in Scopes 1-4 tabs until properly assigned.
+                                </div>
+                            }
+
+                            <RadzenCard Class="p-2 shadow-sm rounded-3 bg-white">
+                                @RenderGridForTopicRows(allRows, showScopeColumn: true)
+                            </RadzenCard>
+                        }
+                    </div>
+                </RadzenTabsItem>
+            </Tabs>
+        </RadzenTabs>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _isAddDisabled = false;
+    private string _searchText = string.Empty;
+    private int _activeTabIndex = 0;
+    private readonly Dictionary<int, int> _tabAccordionIndices = new() { [0] = 0, [1] = 0, [2] = 0, [3] = 0 };
+
+    #region helper records
+    public record MonthOption(string Text, int Value, string Tag);
+    public record FilterOption(string Text, string Value);
+    #endregion
+
+    private class YearOption
+    {
+        public int? Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private int? _selectedYear = null;
+    private List<YearOption> _yearOptions = new();
+
+    // Advanced Filter State
+    // [2026-09-13: Antigravity] Support fiscal start month, child visibility, status, event data, and mapping filters
+    private bool _isAdvancedExpanded = false;
+    private int _startMonth = 1;
+    private bool _showChildTopics = false;
+    private string _statusFilter = "all";
+    private string _dataEventFilter = "all";
+    private string _sourceMappingFilter = "all";
+
+    private bool HasActiveAdvancedFilters =>
+        _startMonth != 1 ||
+        _showChildTopics ||
+        _statusFilter != "all" ||
+        _dataEventFilter != "all" ||
+        _sourceMappingFilter != "all";
+
+    private readonly List<MonthOption> _monthsList = new()
+    {
+        new("January (01)", 1, "Calendar Default"),
+        new("February (02)", 2, ""),
+        new("March (03)", 3, ""),
+        new("April (04)", 4, "Japan FY"),
+        new("May (05)", 5, "Japan FY (Alt)"),
+        new("June (06)", 6, ""),
+        new("July (07)", 7, ""),
+        new("August (08)", 8, ""),
+        new("September (09)", 9, ""),
+        new("October (10)", 10, "Thai Gov FY"),
+        new("November (11)", 11, ""),
+        new("December (12)", 12, "")
+    };
+
+    private readonly List<FilterOption> _statusOptions = new()
+    {
+        new("All Status", "all"),
+        new("Active Only", "active"),
+        new("Inactive Only", "inactive")
+    };
+
+    private readonly List<FilterOption> _dataEventOptions = new()
+    {
+        new("All Records", "all"),
+        new("Has Events", "has_events"),
+        new("No Events", "no_events")
+    };
+
+    private readonly List<FilterOption> _sourceMappingOptions = new()
+    {
+        new("All Sources", "all"),
+        new("Mapped Only", "mapped"),
+        new("Unmapped / Unknown", "unmapped")
+    };
+
+    /// <summary>
+    /// แถวที่กำลังถูกลาก (Drag & Drop Reorder) — ใช้ชั่วคราวระหว่างการลาก-วางเท่านั้น
+    /// </summary>
+    private TopicRowDisplayItem? _draggedRow = null;
+
+    private int ScopeToTabIndex(eTgoScopeNo scope) => scope switch
+    {
+        eTgoScopeNo.Scope1 => 0,
+        eTgoScopeNo.Scope2 => 1,
+        eTgoScopeNo.Scope3 => 2,
+        eTgoScopeNo.SeparateReport => 3,
+        _ => 0
+    };
+
+    private int GetAccordionIndexForScope(eTgoScopeNo scope)
+    {
+        var tab = ScopeToTabIndex(scope);
+        return _tabAccordionIndices.TryGetValue(tab, out var idx) ? idx : 0;
+    }
+
+    private int GetAccordionIndexForTab(int tab)
+    {
+        return _tabAccordionIndices.TryGetValue(tab, out var idx) ? idx : 0;
+    }
+
+    private void SetAccordionIndexForTab(int tab, int index)
+    {
+        _tabAccordionIndices[tab] = index;
+    }
+
+    private int? _selectedCorporateId;
+    private int? _selectedCompanyId;
+    private int? _selectedFacilityId;
+    private int? _selectedSubscriptionId;
+    private string _parentContextName = string.Empty;
+
+    private List<TbSubscription> _subscriptionsList = new();
+    private List<TbActivityTopic> _allItems = new();
+    private List<TbActivityTopic> _filteredItems = new();
+    private List<TbActivityGroup> _allGroups = new();
+
+    private string _currentUserEmail = string.Empty;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private HashSet<int> _editableCorporateIds = new();
+    private HashSet<int> _editableCompanyIds = new();
+    private HashSet<int> _editableFacilityIds = new();
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "ptype")] public string? RawParentType { get; set; }
+    [SupplyParameterFromQuery(Name = "lvl")] public string? RawLevel { get; set; }
+    [SupplyParameterFromQuery(Name = "pid")] public string? SecurePid { get; set; }
+    [SupplyParameterFromQuery(Name = "sid")] public string? SecureSid { get; set; }
+    [SupplyParameterFromQuery(Name = "cid")] public string? SecureCid { get; set; }
+    [SupplyParameterFromQuery(Name = "comid")] public string? SecureComId { get; set; }
+    [SupplyParameterFromQuery(Name = "facid")] public string? SecureFacId { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? SecureTab { get; set; }
+    [SupplyParameterFromQuery(Name = "sac")] public string? SecureSac { get; set; }
+    [SupplyParameterFromQuery(Name = "yr")] public string? SecureYr { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? SecureSearchText { get; set; }
+    [SupplyParameterFromQuery(Name = "sm")] public int? QueryStartMonth { get; set; }
+    [SupplyParameterFromQuery(Name = "ch")] public bool? QueryShowChild { get; set; }
+    [SupplyParameterFromQuery(Name = "st")] public string? QueryStatus { get; set; }
+    [SupplyParameterFromQuery(Name = "ev")] public string? QueryDataEvent { get; set; }
+    [SupplyParameterFromQuery(Name = "mp")] public string? QuerySourceMapping { get; set; }
+
+    public eTopicLevel ParentLevel
+    {
+        get
+        {
+            var pType = !string.IsNullOrWhiteSpace(RawParentType) ? RawParentType : RawLevel;
+            if (string.Equals(pType, "Corporate", StringComparison.OrdinalIgnoreCase)) return eTopicLevel.Corporate;
+            if (string.Equals(pType, "Company", StringComparison.OrdinalIgnoreCase)) return eTopicLevel.Company;
+            if (string.Equals(pType, "Facility", StringComparison.OrdinalIgnoreCase)) return eTopicLevel.Facility;
+
+            if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0) return eTopicLevel.Facility;
+            if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0) return eTopicLevel.Company;
+            if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0) return eTopicLevel.Corporate;
+            return eTopicLevel.Facility;
+        }
+    }
+
+    private string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (_searchText != value)
+            {
+                _searchText = value;
+                ApplyInMemoryFilters();
+            }
+        }
+    }
+
+    private int ActiveTabIndex
+    {
+        get => _activeTabIndex;
+        set => _activeTabIndex = value;
+    }
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-18]
+        _isLoading = true;
+        try
+        {
+            GhgEventBus.OnEventIngested += HandleGhgEventIngestedAsync;
+            await InitializeUserSessionAsync();
+            RestoreStateParameters();
+            await ResolveParentContextNameAsync();
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing PageListActivityTopic.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load activity topics.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private async Task HandleGhgEventIngestedAsync(GhgEventIngestedNotification notif)
+    {
+        if (_selectedSubscriptionId.HasValue && notif.SubscriptionId != _selectedSubscriptionId.Value) return;
+
+        await InvokeAsync(async () =>
+        {
+            await LoadDataAsync();
+            NotificationService.Notify(NotificationSeverity.Info, "Live Event Ingested", $"Activity topic quantities updated in real-time ({notif.Quantity:N2}).");
+            StateHasChanged();
+        });
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-18]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+        }
+
+        _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(_currentUserEmail, _isAdmin);
+        _subscriptionsList = await SubscriptionService.GetSubscriptionsForUserAsync(_currentUserEmail, _isAdmin, includeInactive: false);
+        _editableCorporateIds = await CorporateService.GetEditableCorporateIdsAsync(_currentUserEmail, _isAdmin);
+        _editableCompanyIds = await CompanyService.GetEditableCompanyIdsAsync(_currentUserEmail, _isAdmin);
+        _editableFacilityIds = await FacilityService.GetEditableFacilityIdsAsync(_currentUserEmail, _isAdmin);
+
+        if (_subscriptionsList.Any() && !_selectedSubscriptionId.HasValue)
+        {
+            _selectedSubscriptionId = _subscriptionsList.First().Id;
+        }
+        #endregion
+    }
+
+    protected override void OnParametersSet()
+    {
+        RestoreStateParameters();
+    }
+
+    private void RestoreStateParameters()
+    {
+        #region hide [2026-08-18]
+        if (!string.IsNullOrWhiteSpace(SecureSid))
+            _selectedSubscriptionId = DataProtection.UnprotectInt(SecureSid);
+
+        if (!string.IsNullOrWhiteSpace(SecureCid))
+            _selectedCorporateId = DataProtection.UnprotectInt(SecureCid);
+
+        if (!string.IsNullOrWhiteSpace(SecureComId))
+            _selectedCompanyId = DataProtection.UnprotectInt(SecureComId);
+
+        if (!string.IsNullOrWhiteSpace(SecureFacId))
+            _selectedFacilityId = DataProtection.UnprotectInt(SecureFacId);
+
+        if (!string.IsNullOrWhiteSpace(SecurePid))
+        {
+            var pId = DataProtection.UnprotectInt(SecurePid);
+            if (pId.HasValue)
+            {
+                if (ParentLevel == eTopicLevel.Corporate) _selectedCorporateId = pId.Value;
+                else if (ParentLevel == eTopicLevel.Company) _selectedCompanyId = pId.Value;
+                else if (ParentLevel == eTopicLevel.Facility) _selectedFacilityId = pId.Value;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureTab))
+        {
+            var tabVal = DataProtection.UnprotectInt(SecureTab) ?? (int.TryParse(SecureTab, out var t) ? t : 0);
+            _activeTabIndex = Math.Clamp(tabVal, 0, 4);
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureSac))
+        {
+            var sacVal = DataProtection.UnprotectInt(SecureSac) ?? (int.TryParse(SecureSac, out var s) ? s : -1);
+            SetAccordionIndexForTab(_activeTabIndex, sacVal);
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureYr))
+        {
+            if (int.TryParse(SecureYr, out var yr) && yr > 0)
+            {
+                _selectedYear = yr;
+            }
+            else if (SecureYr.Equals("all", StringComparison.OrdinalIgnoreCase) || SecureYr == "0")
+            {
+                _selectedYear = null;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureSearchText))
+            _searchText = SecureSearchText;
+
+        // [2026-09-13: Antigravity] Restore Advanced Filter parameters
+        if (QueryStartMonth.HasValue && QueryStartMonth.Value >= 1 && QueryStartMonth.Value <= 12)
+        {
+            _startMonth = QueryStartMonth.Value;
+        }
+
+        if (QueryShowChild.HasValue)
+        {
+            _showChildTopics = QueryShowChild.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QueryStatus))
+        {
+            _statusFilter = QueryStatus;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QueryDataEvent))
+        {
+            _dataEventFilter = QueryDataEvent;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QuerySourceMapping))
+        {
+            _sourceMappingFilter = QuerySourceMapping;
+        }
+
+        if (HasActiveAdvancedFilters)
+        {
+            _isAdvancedExpanded = true;
+        }
+        #endregion
+    }
+
+    private async Task ResolveParentContextNameAsync()
+    {
+        #region hide [2026-08-18]
+        if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+        {
+            var fac = await FacilityService.GetByIdAsync(_selectedFacilityId.Value);
+            if (fac != null)
+            {
+                _parentContextName = $"Facility: {fac.Title}";
+                if (!_selectedSubscriptionId.HasValue && fac.Company?.Corporate != null)
+                {
+                    _selectedSubscriptionId = fac.Company.Corporate.SubscriptionId;
+                }
+            }
+        }
+        else if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+        {
+            var com = await CompanyService.GetByIdAsync(_selectedCompanyId.Value);
+            if (com != null)
+            {
+                _parentContextName = $"Company: {com.Title}";
+                if (!_selectedSubscriptionId.HasValue && com.Corporate != null)
+                {
+                    _selectedSubscriptionId = com.Corporate.SubscriptionId;
+                }
+            }
+        }
+        else if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+        {
+            var corp = await CorporateService.GetByIdAsync(_selectedCorporateId.Value);
+            if (corp != null)
+            {
+                _parentContextName = $"Corporate: {corp.Title}";
+                if (!_selectedSubscriptionId.HasValue)
+                {
+                    _selectedSubscriptionId = corp.SubscriptionId;
+                }
+            }
+        }
+        else if (_selectedSubscriptionId.HasValue)
+        {
+            // Default context fallback when navigating directly without query parameters
+            var facilities = await FacilityService.GetByContextAsync(subscriptionId: _selectedSubscriptionId.Value);
+            var firstFac = facilities.FirstOrDefault();
+            if (firstFac != null)
+            {
+                _selectedFacilityId = firstFac.Id;
+                _parentContextName = $"Facility: {firstFac.Title}";
+            }
+            else
+            {
+                var corporates = await CorporateService.GetBySubscriptionIdAsync(subscriptionId: _selectedSubscriptionId.Value);
+                var firstCorp = corporates.FirstOrDefault();
+                if (firstCorp != null)
+                {
+                    _selectedCorporateId = firstCorp.Id;
+                    _parentContextName = $"Corporate: {firstCorp.Title}";
+                }
+            }
+        }
+        #endregion
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-18]
+        _allGroups = await ActivityGroupService.GetAllAsync();
+
+        eTopicLevel? level = null;
+        int? targetId = null;
+
+        if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+        {
+            level = eTopicLevel.Facility;
+            targetId = _selectedFacilityId.Value;
+        }
+        else if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+        {
+            level = eTopicLevel.Company;
+            targetId = _selectedCompanyId.Value;
+        }
+        else if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+        {
+            level = eTopicLevel.Corporate;
+            targetId = _selectedCorporateId.Value;
+        }
+
+        _allItems = await ActivityTopicService.GetByContextAsync(
+            subscriptionId: _selectedSubscriptionId,
+            level: level,
+            targetId: targetId,
+            includeRelations: true,
+            includeInactive: true);
+
+        UpdateYearOptions();
+        ApplyInMemoryFilters();
+        _isAddDisabled = !CanEditCurrentContext();
+        #endregion
+    }
+
+    private void UpdateYearOptions()
+    {
+        // [2026-09-13: Antigravity] คำนวณปีตาม StartMonth (Fiscal Year Cycle)
+        var yearsSet = new HashSet<int>();
+        var currentYear = DateTime.UtcNow.Year;
+        yearsSet.Add(currentYear);
+        yearsSet.Add(currentYear - 1);
+        yearsSet.Add(currentYear - 2);
+
+        if (_allItems != null)
+        {
+            foreach (var t in _allItems)
+            {
+                foreach (var ev in t.Events)
+                {
+                    if (!ev.IsDeleted && ev.TimeStamp.Year > 2000)
+                    {
+                        var fy = _startMonth == 1 ? ev.TimeStamp.Year : (ev.TimeStamp.Month >= _startMonth ? ev.TimeStamp.Year : ev.TimeStamp.Year - 1);
+                        yearsSet.Add(fy);
+                    }
+                }
+            }
+        }
+
+        _yearOptions = new List<YearOption>
+        {
+            new YearOption { Value = null, Text = "All Years" }
+        };
+
+        string startMonthAbbr = new DateTime(2000, _startMonth >= 1 && _startMonth <= 12 ? _startMonth : 1, 1).ToString("MMM", System.Globalization.CultureInfo.InvariantCulture);
+        int endMonth = (((_startMonth >= 1 && _startMonth <= 12 ? _startMonth : 1) + 10) % 12) + 1;
+        string endMonthAbbr = new DateTime(2000, endMonth, 1).ToString("MMM", System.Globalization.CultureInfo.InvariantCulture);
+
+        foreach (var y in yearsSet.OrderByDescending(y => y))
+        {
+            var label = $"{y} ({startMonthAbbr}-{endMonthAbbr})";
+            _yearOptions.Add(new YearOption { Value = y, Text = label });
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        #region hide [2026-08-24]
+        GhgEventBus.OnEventIngested -= HandleGhgEventIngestedAsync;
+        return ValueTask.CompletedTask;
+        #endregion
+    }
+
+    private void ApplyInMemoryFilters()
+    {
+        #region hide [2026-08-18]
+        var items = (IEnumerable<TbActivityTopic>)_allItems;
+
+        // 1. Search Text
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim().ToLowerInvariant();
+            items = items.Where(t =>
+                t.Title.ToLowerInvariant().Contains(term) ||
+                t.Remark.ToLowerInvariant().Contains(term) ||
+                t.Childs.Any(c => (c.Source != null && c.Source.Title.ToLowerInvariant().Contains(term)) ||
+                                  (c.ActivityGroup != null && c.ActivityGroup.Title.ToLowerInvariant().Contains(term))));
+        }
+
+        // 2. Status Filter
+        // [2026-09-13: Antigravity] กรองตาม IsActive ของ Topic
+        if (_statusFilter == "active")
+        {
+            items = items.Where(t => t.IsActive);
+        }
+        else if (_statusFilter == "inactive")
+        {
+            items = items.Where(t => !t.IsActive);
+        }
+
+        // 3. Data Completeness (Events) Filter
+        // [2026-09-13: Antigravity] กรองตามการมีอยู่ของ Events ในช่วงเวลาที่เลือก
+        if (_dataEventFilter == "has_events")
+        {
+            items = items.Where(t => t.Events.Any(e => !e.IsDeleted && IsEventInReportingPeriod(e)));
+        }
+        else if (_dataEventFilter == "no_events")
+        {
+            items = items.Where(t => !t.Events.Any(e => !e.IsDeleted && IsEventInReportingPeriod(e)));
+        }
+
+        // 4. Source Mapping Filter
+        // [2026-09-13: Antigravity] กรองตามสถานะการผูก Emission Source (Mapped vs Unmapped/Unknown)
+        if (_sourceMappingFilter == "mapped")
+        {
+            items = items.Where(t => t.Childs.Any(c => c.IsActive && !c.IsDeleted && c.Source != null && c.Source.Id > 0 && c.Source.Title != "Unknown"));
+        }
+        else if (_sourceMappingFilter == "unmapped")
+        {
+            items = items.Where(t => !t.Childs.Any(c => c.IsActive && !c.IsDeleted && c.Source != null && c.Source.Id > 0 && c.Source.Title != "Unknown"));
+        }
+
+        _filteredItems = items.ToList();
+        #endregion
+    }
+
+    /// <summary>
+    /// [2026-09-13: Antigravity] ตรวจสอบว่า Event อยู่ใน Reporting Period (ตามปีและ StartMonth ที่เลือก) หรือไม่
+    /// </summary>
+    private bool IsEventInReportingPeriod(TbActivityEvent ev)
+    {
+        if (ev.IsDeleted) return false;
+        if (!_selectedYear.HasValue) return true;
+
+        if (_startMonth == 1)
+        {
+            return ev.TimeStamp.Year == _selectedYear.Value;
+        }
+
+        var start = new DateTime(_selectedYear.Value, _startMonth, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = start.AddMonths(12);
+        return ev.TimeStamp >= start && ev.TimeStamp < end;
+    }
+
+    private void ToggleAdvancedFilter()
+    {
+        _isAdvancedExpanded = !_isAdvancedExpanded;
+    }
+
+    private async Task OnStartMonthChanged(int month)
+    {
+        _startMonth = month;
+        UpdateYearOptions();
+        ApplyInMemoryFilters();
+        await SyncBrowserUrlAsync();
+    }
+
+    private async Task OnStatusFilterChanged(string val)
+    {
+        _statusFilter = val;
+        ApplyInMemoryFilters();
+        await SyncBrowserUrlAsync();
+    }
+
+    private async Task OnDataEventFilterChanged(string val)
+    {
+        _dataEventFilter = val;
+        ApplyInMemoryFilters();
+        await SyncBrowserUrlAsync();
+    }
+
+    private async Task OnSourceMappingFilterChanged(string val)
+    {
+        _sourceMappingFilter = val;
+        ApplyInMemoryFilters();
+        await SyncBrowserUrlAsync();
+    }
+
+    private async Task ResetAdvancedFilters()
+    {
+        _startMonth = 1;
+        _showChildTopics = false;
+        _statusFilter = "all";
+        _dataEventFilter = "all";
+        _sourceMappingFilter = "all";
+        UpdateYearOptions();
+        ApplyInMemoryFilters();
+        await SyncBrowserUrlAsync();
+    }
+
+    public class TopicRowDisplayItem
+    {
+        public TbActivityTopic Topic { get; set; } = null!;
+        public TbActivityTopicChild Child { get; set; } = null!;
+        public bool IsMaster { get; set; }
+        public string GroupCode { get; set; } = string.Empty;
+    }
+
+    private eTgoScopeNo GetScopeForChild(TbActivityTopic topic, TbActivityTopicChild child)
+    {
+        return child.ActivityGroup?.TgoScopeNo
+            ?? _allGroups.FirstOrDefault(g => g.Id == child.ActivityGroupId)?.TgoScopeNo
+            ?? child.Source?.Group?.TgoScopeNo
+            ?? topic.EmissionGroup?.TgoScopeNo
+            ?? eTgoScopeNo.Scope1;
+    }
+
+    private string GetGroupCodeForChild(TbActivityTopicChild child)
+    {
+        return child.ActivityGroup?.Code
+            ?? _allGroups.FirstOrDefault(g => g.Id == child.ActivityGroupId)?.Code
+            ?? string.Empty;
+    }
+
+    private string GetChildDisplayTitle(TbActivityTopic topic, TbActivityTopicChild child, bool isMaster)
+    {
+        if (isMaster) return topic.Title;
+        var scope = GetScopeForChild(topic, child);
+        if (scope == eTgoScopeNo.SeparateReport)
+        {
+            return $"[Biogenic] {topic.Title}";
+        }
+        if (scope == eTgoScopeNo.Scope3)
+        {
+            return $"[การได้มา] {topic.Title}";
+        }
+        return topic.Title;
+    }
+
+    // =====================================================================
+    // [2026-09-13][Antigravity] GHG Calculation & Row Population Logic
+    // 1. GetRowKgCO2e: คำนวณยอด kgCO2e ตามบริบท
+    //    - ใน Scope Tabs หรือ All Scopes เมื่อ _showChildTopics = true: คำนวณเฉพาะ Child ในแถวนั้น
+    //    - ใน All Scopes เมื่อ _showChildTopics = false: รวมยอด Child ทั้งหมดของ Topic นั้น (Master + Child WTT/Bio)
+    // 2. GetGroupTopicRows: ทุก Scope Tab จะต้องแสดงรายการ Emission ทั้งหมดของ Group นั้นเสมอ
+    //    ไม่ถูกตัดหรือทำให้ Scope 3 / Bio ว่างเปล่าเพียงเพราะผู้ใช้ปิดการขยาย Child ใน All Scopes
+    // 3. Invariant: ผลรวม GHG ทั้งระบบจะต้องสมบูรณ์ ครบถ้วน 100% เสมอในทุกโหมด
+    // =====================================================================
+
+    /// <summary>
+    /// [2026-09-13][Antigravity] คำนวณ kgCO2e สำหรับแถวที่กำหนด
+    /// ถ้า isAllScopesTab = true และ _showChildTopics = false จะรวมยอดการปล่อยของทุก Active Child ใน Topic นั้น
+    /// </summary>
+    private decimal GetRowKgCO2e(TopicRowDisplayItem item, bool isAllScopesTab = false)
+    {
+        if (item.Topic == null) return 0m;
+
+        if (isAllScopesTab && !_showChildTopics)
+        {
+            // Rollup ยอด Active Child ทุกตัวของ Topic นี้
+            return item.Topic.Childs
+                .Where(c => c.IsActive && !c.IsDeleted && c.Source != null)
+                .Sum(c =>
+                {
+                    var qty = item.Topic.Events.Where(e => IsEventInReportingPeriod(e)).Sum(e => e.Quantity);
+                    return EmissionCalculator.CalculateKgCO2e(qty, c);
+                });
+        }
+
+        if (item.Child?.Source == null) return 0m;
+        var q = item.Topic.Events.Where(e => IsEventInReportingPeriod(e)).Sum(e => e.Quantity);
+        return EmissionCalculator.CalculateKgCO2e(q, item.Child);
+    }
+
+    /// <summary>
+    /// [2026-09-13][Antigravity] ดึง Active Children ทั้งหมดของ Topic ที่ผ่านตัวกรอง
+    /// </summary>
+    private List<TopicRowDisplayItem> BuildAllActiveDisplayRows()
+    {
+        var rows = new List<TopicRowDisplayItem>();
+
+        foreach (var t in _filteredItems)
+        {
+            var activeChildren = t.Childs
+                .Where(c => c.IsActive && !c.IsDeleted)
+                .OrderBy(c => c.Id)
+                .ToList();
+
+            if (activeChildren.Count == 0)
+            {
+                rows.Add(new TopicRowDisplayItem
+                {
+                    Topic = t,
+                    Child = new TbActivityTopicChild { Topic = t, TopicId = t.Id },
+                    IsMaster = true,
+                    GroupCode = string.Empty
+                });
+                continue;
+            }
+
+            var masterChild = activeChildren[0];
+            foreach (var c in activeChildren)
+            {
+                rows.Add(new TopicRowDisplayItem
+                {
+                    Topic = t,
+                    Child = c,
+                    IsMaster = (c.Id == masterChild.Id),
+                    GroupCode = GetGroupCodeForChild(c)
+                });
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// [2026-09-13][Antigravity] สร้างแถวสำหรับแท็บ All Scopes
+    /// เมื่อ _showChildTopics = false จะแสดง 1 แถวต่อ Topic (Master row)
+    /// </summary>
+    private List<TopicRowDisplayItem> BuildAllScopesDisplayRows()
+    {
+        var rows = new List<TopicRowDisplayItem>();
+
+        foreach (var t in _filteredItems)
+        {
+            var activeChildren = t.Childs
+                .Where(c => c.IsActive && !c.IsDeleted)
+                .OrderBy(c => c.Id)
+                .ToList();
+
+            if (activeChildren.Count == 0)
+            {
+                rows.Add(new TopicRowDisplayItem
+                {
+                    Topic = t,
+                    Child = new TbActivityTopicChild { Topic = t, TopicId = t.Id },
+                    IsMaster = true,
+                    GroupCode = string.Empty
+                });
+                continue;
+            }
+
+            var masterChild = activeChildren[0];
+            var visibleChildren = _showChildTopics
+                ? activeChildren
+                : new List<TbActivityTopicChild> { masterChild };
+
+            foreach (var c in visibleChildren)
+            {
+                rows.Add(new TopicRowDisplayItem
+                {
+                    Topic = t,
+                    Child = c,
+                    IsMaster = (c.Id == masterChild.Id),
+                    GroupCode = GetGroupCodeForChild(c)
+                });
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>ลำดับการแสดงผลมาตรฐานของแถว (ใช้ร่วมกันทุก Tab)</summary>
+    private static List<TopicRowDisplayItem> SortDisplayRows(IEnumerable<TopicRowDisplayItem> rows)
+    {
+        return rows
+            .OrderBy(r => string.IsNullOrWhiteSpace(r.GroupCode) ? 1 : 0)
+            .ThenBy(r => r.GroupCode)
+            .ThenBy(r => r.Topic.OrderId)
+            .ThenBy(r => r.Topic.Id)
+            .ToList();
+    }
+
+    /// <summary>แผนที่ ActivityGroupId -> Scope เฉพาะ Group ที่มีอยู่จริงใน _allGroups</summary>
+    private Dictionary<int, eTgoScopeNo> GetGroupScopeMap()
+    {
+        return _allGroups
+            .GroupBy(g => g.Id)
+            .ToDictionary(g => g.Key, g => g.First().TgoScopeNo);
+    }
+
+    /// <summary>นับจำนวนแถวที่ตกอยู่ใน Scope ที่ระบุ (รวมทุก Group ใน Scope นั้น)</summary>
+    private static int CountRowsInScope(List<TopicRowDisplayItem> rows, Dictionary<int, eTgoScopeNo> scopeMap, eTgoScopeNo scope)
+    {
+        return rows.Count(r => scopeMap.TryGetValue(r.Child.ActivityGroupId, out var s) && s == scope);
+    }
+
+    /// <summary>
+    /// แถวที่ไม่ผูกกับ Group ที่มีอยู่จริง (Group ถูกลบ/ปิด หรือ Topic ไม่มี Active Child)
+    /// แถวกลุ่มนี้จะไม่ปรากฏใน Scope Tab ใดเลย จึงต้องแสดงให้เห็นชัดใน All Scopes
+    /// </summary>
+    private static List<TopicRowDisplayItem> FilterUngroupedRows(List<TopicRowDisplayItem> rows, Dictionary<int, eTgoScopeNo> scopeMap)
+    {
+        return rows.Where(r => !scopeMap.ContainsKey(r.Child.ActivityGroupId)).ToList();
+    }
+
+    /// <summary>
+    /// คืน Scope จาก Group ที่ผูกอยู่จริงเท่านั้น ถ้าไม่พบจะคืน null
+    /// (ไม่ fallback เป็น Scope1 เพราะทำให้ badge ไม่ตรงกับ Tab ที่แถวนั้นอยู่จริง)
+    /// </summary>
+    private eTgoScopeNo? TryGetScopeForChild(TbActivityTopicChild child)
+    {
+        return _allGroups.FirstOrDefault(g => g.Id == child.ActivityGroupId)?.TgoScopeNo;
+    }
+
+    /// <summary>
+    /// [2026-09-13][Antigravity] แถวของ Tab "All Scopes" — ยึดตามการตั้งค่าการกาง/พับ _showChildTopics
+    /// </summary>
+    private List<TopicRowDisplayItem> GetAllTopicRows()
+    {
+        return SortDisplayRows(BuildAllScopesDisplayRows());
+    }
+
+    /// <summary>
+    /// [2026-09-13][Antigravity] แถวของ Group หนึ่ง ๆ ใน Scope Tab
+    /// ต้องแสดง Active Children ทั้งหมดของ Group นั้นเสมอ โดยไม่สูญหายเมื่อพับ Child ใน All Scopes
+    /// </summary>
+    private List<TopicRowDisplayItem> GetGroupTopicRows(int groupId)
+    {
+        return SortDisplayRows(BuildAllActiveDisplayRows().Where(r => r.Child.ActivityGroupId == groupId));
+    }
+
+    private RenderFragment RenderAccordionForScope(eTgoScopeNo scope) => @<text>
+        @{
+            var groupsInScope = _allGroups.Where(g => g.TgoScopeNo == scope).OrderBy(g => g.Code).ToList();
+            var activeAccIdx = GetAccordionIndexForScope(scope);
+        }
+        @if (!groupsInScope.Any())
+        {
+            <div class="p-4 text-center text-muted bg-white rounded-3 border">
+                No activity groups configured under this scope.
+            </div>
+        }
+        else
+        {
+            <RadzenAccordion Multiple="false">
+                <Items>
+                    @foreach (var group in groupsInScope)
+                    {
+                        var currentGroup = group;
+                        var groupId = currentGroup.Id;
+                        var currentGroupIdx = groupsInScope.IndexOf(currentGroup);
+                        var isSelected = (currentGroupIdx == activeAccIdx);
+                        var groupRows = GetGroupTopicRows(groupId);
+                        var hasTopics = groupRows.Any();
+                        var totalKg = groupRows.Sum(r => GetRowKgCO2e(r, false));
+
+                        <RadzenAccordionItem Text="@($"{currentGroup.Code} - {currentGroup.Title}")" Icon="folder"
+                                             Class="@(hasTopics ? "acc-has-topics shadow-sm mb-2" : "shadow-sm mb-2")"
+                                             Selected="@isSelected"
+                                             SelectedChanged="@(val => OnAccordionItemSelectChanged(scope, currentGroupIdx, val))">
+                            <Template>
+                                <div class="d-flex justify-content-between align-items-center w-100 pe-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="fw-bold">@($"{currentGroup.Code} - {currentGroup.Title}")</span>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        @if (hasTopics)
+                                        {
+                                            <span class="badge bg-success-subtle text-success-emphasis border fw-bold px-2 py-1">
+                                                @($"{groupRows.Count} Items")
+                                            </span>
+                                            <span class="badge bg-light text-dark border px-2 py-1">
+                                                @($"{totalKg:N2} kgCO2e")
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary border px-2 py-1">
+                                                Empty
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            </Template>
+                            <ChildContent>
+                                <div class="p-2 bg-white rounded-bottom">
+                                    @RenderGridForTopicRows(groupRows, showScopeColumn: false)
+                                </div>
+                            </ChildContent>
+                        </RadzenAccordionItem>
+                    }
+                </Items>
+            </RadzenAccordion>
+        }
+    </text>;
+
+    private RenderFragment RenderGridForTopicRows(List<TopicRowDisplayItem> rows, bool showScopeColumn) => @<text>
+        @if (!rows.Any())
+        {
+            <div class="p-3 text-center text-muted">
+                No activity topics in this group.
+            </div>
+        }
+        else
+        {
+            // [2026-09-24][Claude] ช่วงค่า kgCO2e ของแถวในตารางนี้ คำนวณครั้งเดียวต่อการ render ใช้ไล่สีคอลัมน์ kgCO2e
+            var kgRange = GhgHeatScale.GetRange(rows.Select(r => GetRowKgCO2e(r, showScopeColumn)));
+            <RadzenDataGrid Data="@rows" TItem="TopicRowDisplayItem" AllowPaging="false" AllowSorting="true"
+                            AllowColumnResize="true" Density="Density.Compact" Style="@GridStyles.Default"
+                            RowRender="@OnTopicRowRender">
+                <Columns>
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="#" Width="45px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @(rows.IndexOf(item) + 1)
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    @if (showScopeColumn)
+                    {
+                        <RadzenDataGridColumn TItem="TopicRowDisplayItem" Property="GroupCode" Title="Scope & Group" MinWidth="180px">
+                            <Template Context="item">
+                                @{
+                                    // [2026-09-13][Claude] ใช้ Scope จาก Group ที่มีอยู่จริงเท่านั้น
+                                    // ถ้าหา Group ไม่เจอให้แสดง "Unassigned" แทนการ fallback เป็น Scope 1
+                                    // (ของเดิม badge บอก Scope 1 แต่กดเข้า Tab Scope 1 ไม่เจอแถวนั้น)
+                                    var rowScope = TryGetScopeForChild(item.Child);
+                                    var badgeColor = rowScope switch
+                                    {
+                                        eTgoScopeNo.Scope1 => "bg-primary text-white",
+                                        eTgoScopeNo.Scope2 => "bg-success text-white",
+                                        eTgoScopeNo.Scope3 => "bg-info text-white",
+                                        eTgoScopeNo.SeparateReport => "bg-secondary text-white",
+                                        _ => "bg-danger text-white"
+                                    };
+                                    var scopeText = rowScope switch
+                                    {
+                                        eTgoScopeNo.Scope1 => "Scope 1",
+                                        eTgoScopeNo.Scope2 => "Scope 2",
+                                        eTgoScopeNo.Scope3 => "Scope 3",
+                                        eTgoScopeNo.SeparateReport => "Separate Report",
+                                        _ => "Unassigned"
+                                    };
+                                    var groupTitle = _allGroups.FirstOrDefault(g => g.Id == item.Child.ActivityGroupId)?.Title 
+                                                  ?? item.Child.ActivityGroup?.Title 
+                                                  ?? "-";
+                                }
+                                <div class="d-flex align-items-center gap-1">
+                                    <span class="badge @badgeColor" style="font-size: 0.72rem; font-weight: 600; border-radius: 4px; padding: 2px 6px;">
+                                        @scopeText
+                                    </span>
+                                    <span class="small fw-semibold text-secondary">
+                                        @groupTitle
+                                    </span>
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+                    }
+
+                    @* [2026-09-21][Gemini] ขยาย Width=450px และ MinWidth=360px ให้คอลัมน์ Title กว้างพอรองรับชื่อ Topic ยาวๆ พร้อมปรับ word-break และ line-height *@
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Property="Topic.Title" Title="Title / Topic Name" Width="450px" MinWidth="360px">
+                        <Template Context="item">
+                            <div style="word-break: break-word; line-height: 1.45;">
+                                @if (!item.IsMaster)
+                                {
+                                    <span class="badge bg-warning text-dark me-1" style="font-size: 0.7rem; font-weight: bold; border-radius: 4px; padding: 2px 5px; vertical-align: middle;">Child</span>
+                                }
+                                <a href="javascript:void(0)" class="fw-bold text-decoration-none" style="vertical-align: middle;"
+                                   @onclick="@(() => NavigateToEdit(item.Topic))" title="Edit Topic">
+                                    @GetChildDisplayTitle(item.Topic, item.Child, item.IsMaster)
+                                </a>
+                                @if (showScopeColumn && !_showChildTopics)
+                                {
+                                    var activeChildCount = item.Topic.Childs.Count(c => c.IsActive && !c.IsDeleted);
+                                    if (activeChildCount > 1)
+                                    {
+                                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle ms-1"
+                                              style="font-size: 0.72rem; font-weight: 600; border-radius: 4px; padding: 2px 6px; vertical-align: middle;"
+                                              title="@($"Includes {activeChildCount - 1} child emission source(s) (WTT / Biogenic) rolled up")">
+                                            +@(activeChildCount - 1) Child
+                                        </span>
+                                    }
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(item.Topic.Remark))
+                            {
+                                <div class="text-muted small text-truncate mt-1" title="@item.Topic.Remark">@item.Topic.Remark</div>
+                            }
+                        </Template>
+                        <FooterTemplate>
+                            <div class="fw-bold text-dark">
+                                Total (@(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years"))
+                            </div>
+                        </FooterTemplate>
+                    </RadzenDataGridColumn>
+
+                    @* [2026-09-24][Claude] ปรับความกว้างคอลัมน์ให้พอดีกับเนื้อหาจริง (ตัวเลขหลักล้าน, ปุ่มไม่ชิดขอบเซลล์) *@
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="Source" Width="260px" MinWidth="200px">
+                        <Template Context="item">
+                            @if (item.Child.Source != null)
+                            {
+                                var isUnknownSource = item.Child.Source.Id == -1;
+                                <a href="javascript:void(0)" class="@(isUnknownSource ? "fw-bold text-decoration-none text-warning" : "fw-bold text-decoration-none")"
+                                   @onclick="@(() => NavigateToEmissionSource(item.Child.Source, item.Topic))"
+                                   title="@(isUnknownSource ? "Emission Source is not identified" : (CanEditEmissionSource(item.Child.Source) ? "Edit Emission Source" : "View Emission Source"))">
+                                    @item.Child.Source.Title
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="Quantity" Width="145px" TextAlign="TextAlign.Right">
+                        <Template Context="item">
+                            @{
+                                var qty = item.Topic.Events.Where(e => IsEventInReportingPeriod(e)).Sum(e => e.Quantity);
+                            }
+                            <span class="fw-bold text-dark font-monospace pe-2">@($"{qty:N2}")</span>
+                        </Template>
+              
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="Unit" Width="90px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @{
+                                var unitTitle = item.Child.ActivityUnit?.Title ?? item.Child.Source?.Unit?.Title ?? "Unit";
+                            }
+                            <span class="text-secondary fw-medium">@unitTitle</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="EF" Width="115px" TextAlign="TextAlign.Right">
+                        <Template Context="item">
+                            @{
+                                var rawEf = item.Child.Source?.EF ?? 0m;
+                                var ratio = item.Child.UnitConversionRatio ?? 1m;
+                                var ef = rawEf * ratio;
+                            }
+                            <span class="fw-semibold text-dark font-monospace">@($"{ef:N4}")</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="kgCO2e" Width="160px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @{
+                                var kg = GetRowKgCO2e(item, showScopeColumn);
+                                var hasRolledUpChildren = showScopeColumn && !_showChildTopics && item.Topic.Childs.Count(c => c.IsActive && !c.IsDeleted) > 1;
+                                // [2026-09-24][Claude] ปุ่มกว้างเท่ากัน + สีตามความหนักเบาเทียบกับแถวอื่นในตารางเดียวกัน (เบาสุด = เขียว, หนักสุด = แดง, ไม่มีข้อมูล = เทา)
+                                var kgIntensity = GhgHeatScale.GetIntensity(kg, kgRange);
+                                var kgLevelText = GhgHeatScale.Describe(kgIntensity, "rows");
+                            }
+                            <RadzenButton Text="@($"{kg:N2}")"
+                                          ButtonStyle="@(kg > 0 ? ButtonStyle.Success : ButtonStyle.Light)"
+                                          Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(_ => NavigateToLciBreakdown(item.Topic))"
+                                          Style="@(GhgHeatScale.BuildStyle("width: 135px; justify-content: center; border-radius: 6px; font-weight: 600; height: 32px; font-variant-numeric: tabular-nums;", kgIntensity))"
+                                          Title="@(hasRolledUpChildren
+                                              ? $"Total {kg:N2} kgCO2e for {item.Topic.Title} including all child sources ({(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years")}) - {kgLevelText}"
+                                              : $"View LCI & GHG breakdown calculations for {item.Topic.Title} ({(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years")}) - {kgLevelText}")" />
+                        </Template>
+                        <FooterTemplate>
+                            @{
+                                var totalKg = rows.Sum(r => GetRowKgCO2e(r, showScopeColumn));
+                            }
+                            <div class="fw-bold text-center text-success font-monospace" style="font-size: 0.88rem;">
+                                @($"{totalKg:N2} kg")
+                            </div>
+                        </FooterTemplate>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="Events" Width="130px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @{
+                                var count = item.Topic.Events.Count(e => IsEventInReportingPeriod(e));
+                            }
+                            <RadzenButton Icon="calendar_month" Text="@($"{count} Events")"
+                                          ButtonStyle="@(count > 0 ? ButtonStyle.Primary : ButtonStyle.Light)"
+                                          Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(_ => NavigateToEvents(item.Topic))"
+                                          Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;"
+                                          Title="@($"Manage Monthly Events ({count} events logged)")" />
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="Files" Width="120px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @{
+                                var fileCount = TbFileEntity.DeserializeListFromJson(item.Topic.JsonDataFiles?.ToJsonString(null) ?? "[]")?.Count ?? 0;
+                            }
+                            <RadzenButton Icon="attach_file" Text="@($"{fileCount} Files")"
+                                          ButtonStyle="@(fileCount > 0 ? ButtonStyle.Info : ButtonStyle.Light)"
+                                          Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(_ => NavigateToFiles(item.Topic))"
+                                          Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;"
+                                          Title="Manage Attached Files & References" />
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="API Spec" Width="125px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <RadzenButton Text="API Spec" Icon="code" Size="ButtonSize.Small"
+                                          ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                                          Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;"
+                                          Click="@(_ => NavigateToApiSpec(item.Topic))" Title="View API Specification" />
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TopicRowDisplayItem" Title="Actions" Width="130px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <RadzenSplitButton Icon="edit" Text="Edit" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Primary"
+                                               Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;"
+                                               Click="@(args => OnSplitActionClick(args, item))">
+                                <ChildContent>
+                                    <RadzenSplitButtonItem Text="API Specification" Value="apispec" Icon="code" />
+                                    <RadzenSplitButtonItem Text="Manage Events" Value="events" Icon="calendar_month" />
+                                    <RadzenSplitButtonItem Text="LCI & GHG Detailing" Value="detailing" Icon="analytics" />
+                                    <RadzenSplitButtonItem Text="Attach Files" Value="attachments" Icon="attach_file" />
+                                    <RadzenSplitButtonItem Visible="false" Text="Move Up" Value="moveup" Icon="arrow_upward" />
+                                    <RadzenSplitButtonItem Visible="false" Text="Move Down" Value="movedown" Icon="arrow_downward" />
+                                    <RadzenSplitButtonItem Text="Duplicate" Value="duplicate" Icon="content_copy" />
+                                    <RadzenSplitButtonItem Text="Clear Events" Value="clearevents" Icon="delete_sweep" />
+                                    <RadzenSplitButtonItem Text="Delete" Value="delete" Icon="delete" />
+                                </ChildContent>
+                            </RadzenSplitButton>
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        }
+    </text>;
+
+    private string GetParentTypeDisplayName()
+    {
+        return ParentLevel switch
+        {
+            eTopicLevel.Corporate => "Corporate",
+            eTopicLevel.Company => "Company",
+            _ => "Facility"
+        };
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncBrowserUrlAsync();
+        }
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var parentId = ParentLevel switch
+            {
+                eTopicLevel.Corporate => _selectedCorporateId ?? 0,
+                eTopicLevel.Company => _selectedCompanyId ?? 0,
+                _ => _selectedFacilityId ?? 0
+            };
+
+            var curAcc = GetAccordionIndexForTab(_activeTabIndex);
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["ptype"] = ParentLevel.ToString(),
+                ["pid"] = parentId > 0 ? DataProtection.Protect(parentId) : null,
+                ["sid"] = _selectedSubscriptionId.HasValue ? DataProtection.Protect(_selectedSubscriptionId.Value) : null,
+                ["tab"] = _activeTabIndex.ToString(),
+                ["sac"] = curAcc >= 0 ? curAcc.ToString() : null,
+                ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+                ["q"] = !string.IsNullOrWhiteSpace(_searchText) ? _searchText : null,
+                ["sm"] = _startMonth != 1 ? _startMonth.ToString() : null,
+                ["ch"] = _showChildTopics ? "true" : null,
+                ["st"] = _statusFilter != "all" ? _statusFilter : null,
+                ["ev"] = _dataEventFilter != "all" ? _dataEventFilter : null,
+                ["mp"] = _sourceMappingFilter != "all" ? _sourceMappingFilter : null
+            };
+
+            var uri = NavigationManager.GetUriWithQueryParameters("/library/activity-topics", queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // Ignore during prerender or if JS interop is not yet connected
+        }
+    }
+
+    private void OnTabChanged(int index)
+    {
+        _activeTabIndex = Math.Clamp(index, 0, 4);
+        _ = SyncBrowserUrlAsync();
+    }
+
+    private void OnAccordionItemSelectChanged(eTgoScopeNo scope, int groupIndex, bool isSelected)
+    {
+        var tab = ScopeToTabIndex(scope);
+        SetAccordionIndexForTab(tab, isSelected ? groupIndex : -1);
+        _ = SyncBrowserUrlAsync();
+    }
+
+    private async Task OnSubscriptionChanged(object? value)
+    {
+        #region hide [2026-08-18]
+        if (value is int sid)
+        {
+            _selectedSubscriptionId = sid;
+        }
+        else
+        {
+            _selectedSubscriptionId = null;
+        }
+        await ResolveParentContextNameAsync();
+        await LoadDataAsync();
+        await SyncBrowserUrlAsync();
+        #endregion
+    }
+
+    private string SyncTopicStateAndGetReturnUrl(TbActivityTopic? item = null)
+    {
+        #region hide [2026-08-28]
+        if (item != null && _activeTabIndex != 4)
+        {
+            // [2026-09-13][Claude] ใช้กฎ master เดียวกับ BuildDisplayRows() (นับเฉพาะ Child ที่ Active)
+            // ของเดิมหยิบ Child ที่ถูกปิด/ลบมาเป็น master ทำให้เด้งไป Tab ผิด Scope
+            var masterChild = item.Childs.Where(c => c.IsActive && !c.IsDeleted).OrderBy(c => c.Id).FirstOrDefault();
+            if (masterChild != null)
+            {
+                var scope = GetScopeForChild(item, masterChild);
+                _activeTabIndex = ScopeToTabIndex(scope);
+
+                var groupsInScope = _allGroups.Where(g => g.TgoScopeNo == scope).OrderBy(g => g.Code).ToList();
+                var groupIdx = groupsInScope.FindIndex(g => g.Id == masterChild.ActivityGroupId);
+                if (groupIdx >= 0)
+                {
+                    SetAccordionIndexForTab(_activeTabIndex, groupIdx);
+                }
+            }
+        }
+
+        var parentId = ParentLevel switch
+        {
+            eTopicLevel.Corporate => _selectedCorporateId ?? 0,
+            eTopicLevel.Company => _selectedCompanyId ?? 0,
+            _ => _selectedFacilityId ?? 0
+        };
+
+        var curAcc = GetAccordionIndexForTab(_activeTabIndex);
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["ptype"] = ParentLevel.ToString(),
+            ["pid"] = parentId > 0 ? DataProtection.Protect(parentId) : null,
+            ["sid"] = _selectedSubscriptionId.HasValue ? DataProtection.Protect(_selectedSubscriptionId.Value) : null,
+            ["tab"] = _activeTabIndex.ToString(),
+            ["sac"] = curAcc >= 0 ? curAcc.ToString() : null,
+            ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+            ["q"] = !string.IsNullOrWhiteSpace(_searchText) ? _searchText : null
+        };
+
+        var uri = NavigationManager.GetUriWithQueryParameters("/library/activity-topics", queryParams);
+        return "/" + NavigationManager.ToBaseRelativePath(NavigationManager.ToAbsoluteUri(uri).AbsoluteUri);
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-18]
+        if (ParentLevel == eTopicLevel.Corporate)
+        {
+            NavigationManager.NavigateTo("/organization/corporate");
+        }
+        else if (ParentLevel == eTopicLevel.Company)
+        {
+            NavigationManager.NavigateTo("/organization/company");
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/organization/facility");
+        }
+        #endregion
+    }
+
+    private void NavigateToCreate()
+    {
+        #region hide [2026-08-18]
+        var parentId = ParentLevel switch
+        {
+            eTopicLevel.Corporate => _selectedCorporateId ?? 0,
+            eTopicLevel.Company => _selectedCompanyId ?? 0,
+            _ => _selectedFacilityId ?? 0
+        };
+
+        var returnUrl = SyncTopicStateAndGetReturnUrl();
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["ptype"] = ParentLevel.ToString(),
+            ["pid"] = parentId > 0 ? DataProtection.Protect(parentId) : null,
+            ["sid"] = _selectedSubscriptionId.HasValue ? DataProtection.Protect(_selectedSubscriptionId.Value) : null,
+            ["tab"] = _activeTabIndex.ToString(),
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics/add", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToEdit(TbActivityTopic item)
+    {
+        #region hide [2026-08-18]
+        var secureId = DataProtection.Protect(item.Id);
+        var returnUrl = SyncTopicStateAndGetReturnUrl(item);
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["id"] = secureId,
+            ["ptype"] = item.Level.ToString(),
+            ["pid"] = item.TargetId > 0 ? DataProtection.Protect(item.TargetId) : null,
+            ["sid"] = DataProtection.Protect(item.SubscriptionId),
+            ["tab"] = _activeTabIndex.ToString(),
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics/edit", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToEvents(TbActivityTopic item)
+    {
+        #region hide [2026-08-20]
+        var secureId = DataProtection.Protect(item.Id);
+        var returnUrl = SyncTopicStateAndGetReturnUrl(item);
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["id"] = secureId,
+            ["sid"] = DataProtection.Protect(item.SubscriptionId),
+            ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics/events", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToLciBreakdown(TbActivityTopic item)
+    {
+        #region hide [2026-08-28]
+        var secureId = DataProtection.Protect(item.Id);
+        var returnUrl = SyncTopicStateAndGetReturnUrl(item);
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["id"] = secureId,
+            ["sid"] = DataProtection.Protect(item.SubscriptionId),
+            ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics/lci-breakdown", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToFiles(TbActivityTopic item)
+    {
+        #region hide [2026-08-28]
+        var secureId = DataProtection.Protect(item.Id);
+        var returnUrl = SyncTopicStateAndGetReturnUrl(item);
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["id"] = secureId,
+            ["sid"] = DataProtection.Protect(item.SubscriptionId),
+            ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics/files", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private bool CanEditEmissionSource(TbEmissionSource? item)
+    {
+        if (item == null) return false;
+        bool isSystem = item.SourceType == eSourceType.Default;
+        return _isAdmin || (!isSystem && !item.IsReadOnly && item.SubscriptionId.HasValue && _editableSubscriptionIds.Contains(item.SubscriptionId.Value));
+    }
+
+    private void NavigateToEmissionSource(TbEmissionSource item, TbActivityTopic? topic = null)
+    {
+        #region hide [2026-08-30]
+        if (item == null) return;
+        var secureId = DataProtection.Protect(item.Id);
+        var returnUrl = SyncTopicStateAndGetReturnUrl(topic);
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["sid"] = item.SubscriptionId.HasValue ? DataProtection.Protect(item.SubscriptionId.Value) : (_selectedSubscriptionId.HasValue ? DataProtection.Protect(_selectedSubscriptionId.Value) : null),
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var actionPath = CanEditEmissionSource(item) ? "edit" : "view";
+        var url = NavigationManager.GetUriWithQueryParameters($"/library/emission-sources/{actionPath}/{Uri.EscapeDataString(secureId)}", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private async Task OnSplitActionClick(RadzenSplitButtonItem? args, TopicRowDisplayItem row)
+    {
+        #region hide [2026-08-18]
+        var item = row.Topic;
+        if (args == null || string.IsNullOrWhiteSpace(args.Value?.ToString()))
+        {
+            NavigateToEdit(item);
+            return;
+        }
+
+        var action = args.Value.ToString();
+        if (action == "apispec")
+        {
+            await NavigateToApiSpec(item);
+        }
+        else if (action == "events")
+        {
+            NavigateToEvents(item);
+        }
+        else if (action == "detailing" || action == "lci-breakdown")
+        {
+            NavigateToLciBreakdown(item);
+        }
+        else if (action == "attachments")
+        {
+            NavigateToFiles(item);
+        }
+        else if (action == "moveup")
+        {
+            await MoveTopicUpAsync(row);
+        }
+        else if (action == "movedown")
+        {
+            await MoveTopicDownAsync(row);
+        }
+        else if (action == "duplicate")
+        {
+            await DuplicateTopic(item);
+        }
+        else if (action == "clearevents")
+        {
+            await ClearEventsFromTopic(item);
+        }
+        else if (action == "delete")
+        {
+            await DeleteTopic(item);
+        }
+        #endregion
+    }
+
+    private async Task DuplicateTopic(TbActivityTopic item)
+    {
+        #region hide [2026-08-18]
+        try
+        {
+            var dup = await ActivityTopicService.DuplicateAsync(item.Id);
+            NotificationService.Notify(NotificationSeverity.Success, "Duplicated", $"Topic duplicated as '{dup.Title}'.");
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error duplicating topic ID: {Id}", item.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Duplicate Error", ex.Message);
+        }
+        #endregion
+    }
+
+    private async Task ClearEventsFromTopic(TbActivityTopic item)
+    {
+        #region hide [2026-09-11]
+        var eventCount = item.Events.Count(e => !e.IsDeleted);
+        if (eventCount == 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "No Events", "There are no events to clear for this topic.");
+            return;
+        }
+
+        var confirm = await DialogService.Confirm(
+            "Are you sure you want to clear events from this topic?",
+            "Clear Events",
+            new ConfirmOptions { OkButtonText = "Clear Events", CancelButtonText = "Cancel" });
+
+        if (confirm == true)
+        {
+            try
+            {
+                var count = await ActivityTopicService.ClearEventsAsync(item.Id);
+                NotificationService.Notify(NotificationSeverity.Success, "Events Cleared", $"{count} event(s) cleared successfully.");
+                await LoadDataAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error clearing events for topic ID: {Id}", item.Id);
+                NotificationService.Notify(NotificationSeverity.Error, "Clear Error", ex.Message);
+            }
+        }
+        #endregion
+    }
+
+    private async Task DeleteTopic(TbActivityTopic item)
+    {
+        #region hide [2026-08-18]
+        var confirm = await DialogService.Confirm(
+            "Are you sure you want to delete this topic?",
+            "Delete Topic",
+            new ConfirmOptions { OkButtonText = "Delete", CancelButtonText = "Cancel" });
+
+        if (confirm == true)
+        {
+            try
+            {
+                await ActivityTopicService.DeleteAsync(item.Id);
+                NotificationService.Notify(NotificationSeverity.Success, "Deleted", "Topic deleted successfully.");
+                await LoadDataAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error deleting topic ID: {Id}", item.Id);
+                NotificationService.Notify(NotificationSeverity.Error, "Delete Error", ex.Message);
+            }
+        }
+        #endregion
+    }
+
+    private bool CanExport => CanEditCurrentContext();
+
+    private bool CanEditCurrentContext()
+    {
+        if (_isAdmin) return true;
+        if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+            return _editableFacilityIds.Contains(_selectedFacilityId.Value);
+        if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+            return _editableCompanyIds.Contains(_selectedCompanyId.Value);
+        if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+            return _editableCorporateIds.Contains(_selectedCorporateId.Value);
+        if (_selectedSubscriptionId.HasValue && _selectedSubscriptionId.Value > 0)
+            return _editableSubscriptionIds.Contains(_selectedSubscriptionId.Value);
+
+        return _editableSubscriptionIds.Count > 0 || _editableCorporateIds.Count > 0 || _editableCompanyIds.Count > 0 || _editableFacilityIds.Count > 0;
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        #region hide [2026-08-28]
+        // [2026-09-19][Antigravity] Enforce edit permission check for exporting activity topics
+        if (!CanExport)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Access Denied", "Only users with edit permissions can export data.");
+            return;
+        }
+
+        try
+        {
+            // [2026-09-21][Gemini] V2: Export only Master Topics without [Topic Type] column (1 row = 1 Topic in App)
+            var bytes = await ExcelService.ExportTopicsToExcelV2Async(_filteredItems, _selectedYear, _parentContextName);
+            var base64 = Convert.ToBase64String(bytes);
+
+            // [2026-09-21][Gemini] Format export filename: topics_{name}_{date}_{time}.xlsx
+            var fileName = ExportFileNameHelper.Generate("topics", _parentContextName, fallback: "facility");
+
+            await JSRuntime.InvokeVoidAsync("saveAsFile", fileName, base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Export Successful", $"Exported {_filteredItems.Count} topics to Excel.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to export activity topics to Excel.");
+            NotificationService.Notify(NotificationSeverity.Error, "Export Failed", "Failed to generate Excel file.");
+        }
+        #endregion
+    }
+
+
+    private async Task OpenImportDialogAsync()
+    {
+        #region hide [2026-08-28]
+        int targetId = 0;
+        eTopicLevel level = ParentLevel;
+
+        if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0)
+        {
+            level = eTopicLevel.Facility;
+            targetId = _selectedFacilityId.Value;
+        }
+        else if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0)
+        {
+            level = eTopicLevel.Company;
+            targetId = _selectedCompanyId.Value;
+        }
+        else if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+        {
+            level = eTopicLevel.Corporate;
+            targetId = _selectedCorporateId.Value;
+        }
+
+        var parameters = new Dictionary<string, object>
+        {
+            { "SubscriptionId", _selectedSubscriptionId ?? _subscriptionsList.FirstOrDefault()?.Id ?? 1 },
+            { "Level", level },
+            { "TargetId", targetId }
+        };
+
+        var options = new DialogOptions
+        {
+            Width = "1200px",
+            Height = "auto",
+            Resizable = true,
+            Draggable = true
+        };
+
+        // [2026-09-21][Gemini] V4: Open ImportActivityTopicDialogV4 to correctly distinguish Master and Child topics
+        var result = await DialogService.OpenAsync<ImportActivityTopicDialogV4>("Import Topics", parameters, options);
+        if (result == true)
+        {
+            await LoadDataAsync();
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private async Task NavigateToApiSpec(TbActivityTopic item)
+    {
+        #region hide [2026-08-24]
+        var secureId = DataProtection.Protect(item.Id);
+        var returnUrl = SyncTopicStateAndGetReturnUrl(item);
+
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["id"] = secureId,
+            ["tkey"] = PublicKeyCodec.Encode(PublicKeyCodec.TopicPrefix, item.Id),
+            ["ptype"] = item.Level.ToString(),
+            ["pid"] = item.TargetId > 0 ? DataProtection.Protect(item.TargetId) : null,
+            ["sid"] = DataProtection.Protect(item.SubscriptionId),
+            ["tab"] = _activeTabIndex.ToString(),
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics/api-spec", queryParams);
+        await JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        #endregion
+    }
+
+    /// <summary>
+    /// คืนค่า Group Code ของแถวที่แสดงผล (ใช้เป็นขอบเขตการจัดลำดับ)
+    /// </summary>
+    private string GetRowGroupCode(TopicRowDisplayItem row)
+    {
+        return string.IsNullOrWhiteSpace(row.GroupCode)
+            ? GetGroupCodeForChild(row.Child)
+            : row.GroupCode;
+    }
+
+    /// <summary>
+    /// คืนรายการ Topic ที่อยู่ใน Group Code เดียวกัน เรียงตามลำดับที่แสดงผลจริง
+    /// (ใช้เป็นขอบเขตของการ Move Up/Down เพื่อไม่ให้สลับข้าม Group Code)
+    /// </summary>
+    private List<TbActivityTopic> GetTopicPeersInGroup(string groupCode)
+    {
+        #region hide [2026-09-11]
+        var peers = _filteredItems.Where(t =>
+        {
+            var codes = t.Childs
+                .Where(c => c.IsActive && !c.IsDeleted)
+                .Select(c => GetGroupCodeForChild(c))
+                .ToList();
+
+            if (string.IsNullOrWhiteSpace(groupCode))
+            {
+                // กลุ่ม "ไม่ระบุ Group" = Topic ที่ไม่มี Child ที่ผูก Group ใดเลย
+                return !codes.Any(c => !string.IsNullOrWhiteSpace(c));
+            }
+
+            return codes.Any(c => string.Equals(c, groupCode, StringComparison.OrdinalIgnoreCase));
+        });
+
+        return peers
+            .OrderBy(t => t.OrderId)
+            .ThenBy(t => t.Id)
+            .ToList();
+        #endregion
+    }
+
+    private async Task MoveTopicUpAsync(TopicRowDisplayItem row)
+    {
+        #region hide [2026-09-11]
+        try
+        {
+            var groupCode = GetRowGroupCode(row);
+            var peers = GetTopicPeersInGroup(groupCode);
+            var idx = peers.FindIndex(t => t.Id == row.Topic.Id);
+            if (idx < 0) return;
+            if (idx == 0)
+            {
+                NotificationService.Notify(NotificationSeverity.Info, "Information", "Topic is already at the top of this group.");
+                return;
+            }
+
+            var prevItem = peers[idx - 1];
+            await ActivityTopicService.SwapTopicOrderAsync(row.Topic.Id, prevItem.Id, _currentUserEmail);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to move topic up: ID {Id}", row.Topic.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Reorder Error", "Failed to move item up.");
+        }
+        #endregion
+    }
+
+    private async Task MoveTopicDownAsync(TopicRowDisplayItem row)
+    {
+        #region hide [2026-09-11]
+        try
+        {
+            var groupCode = GetRowGroupCode(row);
+            var peers = GetTopicPeersInGroup(groupCode);
+            var idx = peers.FindIndex(t => t.Id == row.Topic.Id);
+            if (idx < 0) return;
+            if (idx >= peers.Count - 1)
+            {
+                NotificationService.Notify(NotificationSeverity.Info, "Information", "Topic is already at the bottom of this group.");
+                return;
+            }
+
+            var nextItem = peers[idx + 1];
+            await ActivityTopicService.SwapTopicOrderAsync(row.Topic.Id, nextItem.Id, _currentUserEmail);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to move topic down: ID {Id}", row.Topic.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Reorder Error", "Failed to move item down.");
+        }
+        #endregion
+    }
+
+    /// <summary>
+    /// ผูก HTML5 Drag Events ให้กับแถวของตาราง (ลากได้เฉพาะแถวหลัก)
+    /// </summary>
+    private void OnTopicRowRender(RowRenderEventArgs<TopicRowDisplayItem> args)
+    {
+        #region hide [2026-09-11]
+        var row = args.Data;
+        if (row == null || row.Topic == null) return;
+
+        // OrderId ผูกที่ระดับ Topic จึงอนุญาตให้ลากเฉพาะแถวหลักเท่านั้น
+        if (!row.IsMaster)
+        {
+            args.Attributes.Add("title", "Child rows always follow their parent topic.");
+            return;
+        }
+
+        args.Attributes.Add("draggable", "true");
+        args.Attributes.Add("style", "cursor: grab;");
+        args.Attributes.Add("title", "Drag to reorder within this group code.");
+
+        args.Attributes.Add("ondragstart", EventCallback.Factory.Create<DragEventArgs>(this, () => _draggedRow = row));
+
+        args.Attributes.Add("ondragover",
+            "event.preventDefault();var r=event.target.closest('.rz-data-row');if(r){document.querySelectorAll('.topic-drop-target').forEach(function(e){e.classList.remove('topic-drop-target');});r.classList.add('topic-drop-target');}");
+
+        args.Attributes.Add("ondragleave",
+            "var r=event.target.closest('.rz-data-row');if(r){r.classList.remove('topic-drop-target');}");
+
+        args.Attributes.Add("ondragend",
+            "document.querySelectorAll('.topic-drop-target').forEach(function(e){e.classList.remove('topic-drop-target');});");
+
+        args.Attributes.Add("ondrop", EventCallback.Factory.Create<DragEventArgs>(this, async () => await OnTopicRowDropAsync(row)));
+        #endregion
+    }
+
+    /// <summary>
+    /// จัดลำดับใหม่เมื่อวางแถว โดยอนุญาตเฉพาะการวางภายใน Group Code เดียวกัน
+    /// </summary>
+    private async Task OnTopicRowDropAsync(TopicRowDisplayItem targetRow)
+    {
+        #region hide [2026-09-11]
+        var sourceRow = _draggedRow;
+        _draggedRow = null;
+
+        try
+        {
+            await ClearDropHighlightAsync();
+
+            if (sourceRow == null || targetRow == null) return;
+            if (sourceRow.Topic.Id == targetRow.Topic.Id) return;
+
+            var sourceGroup = GetRowGroupCode(sourceRow);
+            var targetGroup = GetRowGroupCode(targetRow);
+            if (!string.Equals(sourceGroup, targetGroup, StringComparison.OrdinalIgnoreCase))
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Reorder Blocked",
+                    "Topics can be reordered only within the same group code.");
+                return;
+            }
+
+            var peers = GetTopicPeersInGroup(sourceGroup);
+            var fromIdx = peers.FindIndex(t => t.Id == sourceRow.Topic.Id);
+            var toIdx = peers.FindIndex(t => t.Id == targetRow.Topic.Id);
+            if (fromIdx < 0 || toIdx < 0 || fromIdx == toIdx) return;
+
+            var moving = peers[fromIdx];
+            peers.RemoveAt(fromIdx);
+
+            var insertAt = peers.FindIndex(t => t.Id == targetRow.Topic.Id);
+            if (insertAt < 0) return;
+            if (fromIdx < toIdx) insertAt += 1; // ลากลง = วางต่อท้ายแถวเป้าหมาย
+            peers.Insert(insertAt, moving);
+
+            await ActivityTopicService.ReorderTopicsInGroupAsync(peers.Select(t => t.Id).ToList(), _currentUserEmail);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reorder topics by drag and drop");
+            NotificationService.Notify(NotificationSeverity.Error, "Reorder Error", "Failed to reorder items.");
+        }
+        #endregion
+    }
+
+    private async Task ClearDropHighlightAsync()
+    {
+        #region hide [2026-09-11]
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("eval",
+                "document.querySelectorAll('.topic-drop-target').forEach(function(e){e.classList.remove('topic-drop-target');});");
+        }
+        catch
+        {
+            // ไม่ถือเป็นข้อผิดพลาดร้ายแรง หากล้าง Highlight ไม่สำเร็จ
+        }
+        #endregion
+    }
+    #endregion
+}

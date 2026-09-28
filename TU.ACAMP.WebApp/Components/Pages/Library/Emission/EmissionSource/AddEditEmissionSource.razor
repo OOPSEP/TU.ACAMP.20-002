@@ -1,0 +1,829 @@
+@page "/library/emission-sources/add"
+@page "/library/emission-sources/create"
+@page "/library/emission-sources/edit/{SecureId?}"
+@page "/library/emission-sources/edit"
+@page "/library/emission-sources/view/{SecureId?}"
+@page "/library/emission-sources/view"
+@page "/emission-sources/add"
+@page "/emission-sources/create"
+@page "/emission-sources/edit/{SecureId?}"
+@page "/emission-sources/edit"
+@page "/emission-sources/view/{SecureId?}"
+@page "/emission-sources/view"
+@page "/emissions/sources/add"
+@page "/emissions/sources/edit/{SecureId?}"
+@page "/emissions/sources/view/{SecureId?}"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Components.Common
+@using TU.ACAMP.WebApp.Components.Pages.Library.Emission.EmissionSource.Widgets
+
+@attribute [Authorize]
+
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@inject AuthenticationStateProvider AuthStateProvider
+@inject EmissionSourceService EmissionSourceService
+@inject EmissionGroupService EmissionGroupService
+@inject EmissionUnitService EmissionUnitService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject ILogger<AddEditEmissionSource> Logger
+
+<PageTitle>@(_isReadOnlyForm ? "View Emission Source" : (_model.Id == 0 ? "Add Emission Source" : "Edit Emission Source")) - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToBack" Class="me-2" Style="border-radius: 6px;" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isReadOnlyForm
+                        ? "View Emission Source"
+                        : (_model.Id == 0 ? "Add Emission Source" : "Edit Emission Source"))
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-1 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    Manage emission source classification framework based on TGO Scopes and ISO 14064-1 Standards.
+                </RadzenText>
+                @if (_selectedSubscriptionId.HasValue && !_isAdmin)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:var(--rz-primary-lighter,#e8f0fe); color:var(--rz-primary,#3d6af8); border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">business</span>
+                        @(!string.IsNullOrWhiteSpace(_selectedSubscriptionName) ? _selectedSubscriptionName : "Subscription Workspace")
+                    </span>
+                }
+                else if (_isAdmin && _selectedSubscriptionId == null)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:#fff3cd; color:#856404; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">admin_panel_settings</span>
+                        System Admin (Master Mode)
+                    </span>
+                }
+                else if (_isAdmin && _selectedSubscriptionId.HasValue)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:#d1ecf1; color:#0c5460; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">manage_accounts</span>
+                        @(!string.IsNullOrWhiteSpace(_selectedSubscriptionName) ? _selectedSubscriptionName : "Subscription")
+                    </span>
+                }
+            </div>
+        </div>
+
+        @if (_hasChanges && !_isReadOnlyForm)
+        {
+            <div class="d-flex align-items-center">
+                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Unsaved Changes" IsPill="true" Class="px-3 py-2 shadow-sm" Style="font-size: 0.8rem; font-weight: 600;" />
+            </div>
+        }
+    </div>
+
+    <!-- Loading State -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading emission source form..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenTemplateForm TItem="TbEmissionSource" Data="@_model" Submit="@OnSubmit">
+            <RadzenCard Class="shadow-sm p-4" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <RadzenStack Gap="1rem">
+                    <!-- Title -->
+                    <RadzenRow>
+                        <RadzenColumn Size="12">
+                            <RadzenFormField Text="Emission Source Title / Factor Name" Style="width: 100%;">
+                                <RadzenTextBox Name="Title" @bind-Value="@_model.Title" @oninput="@(args => OnTitleInput(args.Value?.ToString()))" Change="@HandleModelChanged" Style="width: 100%;" Disabled="@_isReadOnlyForm" />
+                                <RadzenRequiredValidator Component="Title" Text="Emission source title is required." />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Scope & Group Selection -->
+                    <RadzenRow Class="g-3">
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenFormField Text="GHG Scope" Style="width: 100%;">
+                                <RadzenDropDown TValue="eTgoScopeNo" Name="TgoScopeNo"
+                                                Value="@_selectedTgoScope"
+                                                Change="@(args => OnTgoScopeChanged((eTgoScopeNo)args))"
+                                                Data="@_tgoScopeList"
+                                                TextProperty="Text" ValueProperty="Value"
+                                                Style="width: 100%;"
+                                                Disabled="@_isReadOnlyForm">
+                                    <Template Context="item">
+                                        @{
+                                            var option = (ScopeDropdownOption)item;
+                                        }
+                                        <span><b>@option.Label</b> <span class="text-muted">@option.Description</span></span>
+                                    </Template>
+                                </RadzenDropDown>
+                                <RadzenRequiredValidator Component="TgoScopeNo" Text="GHG Scope is required." />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenFormField Text="Emission Group" Style="width: 100%;">
+                                <RadzenDropDown TValue="int" Name="GroupId"
+                                                @bind-Value="@_model.GroupId"
+                                                Change="@HandleModelChanged"
+                                                Data="@_filteredGroups"
+                                                TextProperty="Title" ValueProperty="Id"
+                                                Placeholder="Select Group..."
+                                                Style="width: 100%;"
+                                                Disabled="@_isReadOnlyForm"
+                                                AllowFiltering="true"
+                                                AllowClear="false"
+                                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                                    <Template Context="grp">
+                                        @{
+                                            var g = (TbEmissionGroup)grp;
+                                        }
+                                        <span><span class="badge bg-light text-dark border me-1">@g.Code</span> @g.Title</span>
+                                    </Template>
+                                </RadzenDropDown>
+                                <RadzenNumericRangeValidator Component="GroupId" Min="1" Text="Please select a valid Emission Group." />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Factor & Unit -->
+                    <RadzenRow Class="g-3">
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenFormField Text="Calculated Emission Factor (kgCO2e/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" Value="@_model.EF" Disabled="true" Format="N6" Class="w-100 fw-bold text-success" />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenFormField Text="Unit" Style="width: 100%;">
+                                <RadzenDropDown TValue="int" Name="UnitId"
+                                                @bind-Value="@_model.UnitId"
+                                                Change="@HandleModelChanged"
+                                                Data="@_allUnits"
+                                                TextProperty="Title" ValueProperty="Id"
+                                                Placeholder="Select Unit..."
+                                                Style="width: 100%;"
+                                                Disabled="@_isReadOnlyForm"
+                                                AllowClear="false"
+                                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                                AllowFiltering="true">
+                                </RadzenDropDown>
+                                <RadzenNumericRangeValidator Component="UnitId" Min="1" Text="Please select a valid Unit." />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Gas Breakdowns & GWP Values Widget -->
+                    <RadzenRow>
+                        <RadzenColumn Size="12">
+                            <EmissionFactorWidget Model="@_model" OnModelChanged="@HandleModelChanged" />
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Data Source Origins Widget -->
+                    <RadzenRow>
+                        <RadzenColumn Size="12">
+                            <EmissionSourceTypeWidget Model="@_model" OnModelChanged="@HandleModelChanged" />
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Reference Code / Literature -->
+                    <RadzenRow>
+                        <RadzenColumn Size="12">
+                            <RadzenFormField Text="Reference (e.g. IPCC 2006, TGO LCI Database, URL)" Style="width: 100%;">
+                                <RadzenTextArea Rows="2" Name="Ref" @bind-Value="@_model.Ref" @oninput="@(args => OnRefInput(args.Value?.ToString()))" Change="@HandleModelChanged" Style="width: 100%;" Disabled="@_isReadOnlyForm" />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Attached Evidence Files & Links Section with Expand/Collapse -->
+                    <RadzenRow>
+                        <RadzenColumn Size="12">
+                            <RadzenCard Class="p-3 my-1 shadow-none" Style="border: 1px dashed var(--rz-border-color); border-radius: 8px; background: var(--rz-base-50);">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center gap-2" style="cursor: pointer; user-select: none;" @onclick="ToggleFilesSection">
+                                        <RadzenIcon Icon="attach_file" Style="color: var(--rz-primary); font-size: 1.25rem;" />
+                                        <RadzenText Text="File References & Attached Evidences" TextStyle="TextStyle.Subtitle2" Class="m-0 fw-bold" />
+                                        @if (_attachedFilesCount > 0)
+                                        {
+                                            <RadzenBadge Text="@($"{_attachedFilesCount} attached")" BadgeStyle="BadgeStyle.Info" IsPill="true" Class="ms-2" />
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small ms-2">(No attachments)</span>
+                                        }
+                                    </div>
+                                    <RadzenButton ButtonType="ButtonType.Button"
+                                                  Icon="@(_showFilesSection ? "expand_less" : "expand_more")"
+                                                  Text="@(_showFilesSection ? "Hide Attachments" : "Manage Attachments")"
+                                                  Variant="Variant.Outlined"
+                                                  ButtonStyle="ButtonStyle.Secondary"
+                                                  Size="ButtonSize.Small"
+                                                  Click="@ToggleFilesSection"
+                                                  Style="border-radius: 6px;" />
+                                </div>
+
+                                @if (_showFilesSection)
+                                {
+                                    <div class="mt-3 pt-3 border-top">
+                                        <AttachedFilesWidget @bind-JsonDataFiles="@_model.JsonDataFiles"
+                                                             TagOptions="@_docTypes"
+                                                             SubscriptionId="@_model.SubscriptionId"
+                                                             OnModelChanged="@HandleFilesChanged"
+                                                             IsReadOnly="@_isReadOnlyForm" />
+                                    </div>
+                                }
+                            </RadzenCard>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Dates Approved / Expire -->
+                    <RadzenRow Class="g-3">
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenFormField Text="Date Approved" Style="width: 100%;">
+                                <RadzenDatePicker @bind-Value="@_model.DateApproved" Change="@HandleModelChanged" DateFormat="yyyy-MM-dd" Style="width: 100%;" Disabled="@_isReadOnlyForm" />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenFormField Text="Date Expire" Style="width: 100%;">
+                                <RadzenDatePicker @bind-Value="@_model.DateExpire" Change="@HandleModelChanged" DateFormat="yyyy-MM-dd" Style="width: 100%;" Disabled="@_isReadOnlyForm" />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Remark / Memo -->
+                    <RadzenRow>
+                        <RadzenColumn Size="12">
+                            <RadzenFormField Text="Remark / Memo" Style="width: 100%;">
+                                <RadzenTextArea Rows="2" Name="Remark" @bind-Value="@_model.Remark" @oninput="@(args => OnRemarkInput(args.Value?.ToString()))" Change="@HandleModelChanged" Style="width: 100%;" Disabled="@_isReadOnlyForm" />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Action Buttons -->
+                    <RadzenRow Class="mt-3">
+                        <RadzenColumn Size="12" Class="d-flex justify-content-end gap-2">
+                            <RadzenButton ButtonType="ButtonType.Button" Text="Cancel" ButtonStyle="ButtonStyle.Light"
+                                          Click="@NavigateToBack" Style="min-width: 100px; border-radius: 8px;" />
+                            @if (!_isReadOnlyForm)
+                            {
+                                <RadzenButton ButtonType="ButtonType.Submit" Text="Save" ButtonStyle="ButtonStyle.Primary"
+                                              Icon="save" Disabled="@(_isReadOnlyForm || _isSaving || (!_hasChanges && _model.Id > 0))" Style="min-width: 100px; border-radius: 8px; font-weight: 600;" />
+                            }
+                        </RadzenColumn>
+                    </RadzenRow>
+                </RadzenStack>
+            </RadzenCard>
+        </RadzenTemplateForm>
+    }
+</div>
+
+@code {
+    #region class field
+    private readonly List<dynamic> _docTypes = new()
+    {
+        new { Text = "Calculation Sheet / Evidence", Value = "Evidence" },
+        new { Text = "Factor Certificate / Report", Value = "Certificate" },
+        new { Text = "Standard Reference Document", Value = "Standard" },
+        new { Text = "Other Reference", Value = "Other" }
+    };
+
+    private class ScopeDropdownOption
+    {
+        public eTgoScopeNo Value { get; set; }
+        public string Label { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private List<TbEmissionGroup> _allGroups = new();
+    private List<TbEmissionGroup> _filteredGroups = new();
+    private List<TbEmissionUnit> _allUnits = new();
+    private eTgoScopeNo _selectedTgoScope = eTgoScopeNo.Scope1;
+    private List<ScopeDropdownOption> _tgoScopeList = new()
+    {
+        new() { Value = eTgoScopeNo.Scope1, Label = "Scope 1", Description = "(Direct GHG)", Text = "Scope 1 (Direct GHG)" },
+        new() { Value = eTgoScopeNo.Scope2, Label = "Scope 2", Description = "(Indirect Energy)", Text = "Scope 2 (Indirect Energy)" },
+        new() { Value = eTgoScopeNo.Scope3, Label = "Scope 3", Description = "(Other Indirect)", Text = "Scope 3 (Other Indirect)" },
+        new() { Value = eTgoScopeNo.SeparateReport, Label = "Separate Report", Description = "(Biogenic CO₂)", Text = "Separate Report (Biogenic CO₂)" }
+    };
+
+    private bool _hasLoaded = false;
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _canCreate = false;
+    private bool _isSaving = false;
+    private bool _isReadOnlyForm = false;
+    private bool _showFilesSection = false;
+    private int _attachedFilesCount = 0;
+    private bool _hasChanges = false;
+    private string _originalSnapshot = string.Empty;
+
+    private int _activeTabIndex = 0;
+    private int _activeGridPageIndex = 0;
+    private int _activeAccordionIndex = 0;
+    private string _searchText = string.Empty;
+
+    private string _currentUserEmail = string.Empty;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private List<TbSubscription> _subscriptionsList = new();
+    private int? _selectedSubscriptionId;
+    private int? _lastBoundSubscriptionId;
+    private string _selectedSubscriptionName = string.Empty;
+
+    private TbEmissionSource _model = new();
+    #endregion
+
+    #region class properties
+    [Parameter]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string SecureSid { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "pid")]
+    public string SecurePid { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string SecureTab { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "gpage")]
+    public string SecureGpage { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "sac")]
+    public string SecureSac { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string SecureSearchText { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-17]
+        _isLoading = true;
+        try
+        {
+            await InitializeUserSessionAsync();
+            RestoreStateParameters();
+
+            // Load Units
+            var unitsResult = await EmissionUnitService.GetAllAsync();
+            if (unitsResult != null) _allUnits = unitsResult.OrderBy(u => u.Title).ToList();
+
+            // Check if viewing/editing an existing record
+            var targetId = ResolveEmissionSourceId();
+            if (targetId.HasValue && targetId.Value > 0)
+            {
+                var existingItem = await EmissionSourceService.GetByIdAsync(targetId.Value);
+                if (existingItem != null)
+                {
+                    _model = existingItem;
+                }
+            }
+            else
+            {
+                _model = new TbEmissionSource
+                {
+                    SourceType = eSourceType.Custom,
+                    IsReadOnly = false,
+                    GroupId = 1,
+                    UnitId = 1,
+                    gwpCO2 = 1m,
+                    gwpFossilCH4 = 30m,
+                    gwpCH4 = 28m,
+                    gwpN2O = 265m,
+                    gwpSF6 = 23500m,
+                    gwpNF3 = 16100m,
+                    gwpHFCs = 1m,
+                    gwpPFCs = 1m,
+                    SubscriptionId = _selectedSubscriptionId
+                };
+            }
+
+            if (_model.Group != null)
+            {
+                _selectedTgoScope = _model.Group.TgoScopeNo;
+            }
+            else
+            {
+                _selectedTgoScope = eTgoScopeNo.Scope1;
+            }
+
+            await LoadGroupsAsync();
+            EvaluateFormPermissions();
+            UpdateFilesCount();
+
+            _originalSnapshot = SerializeForCheck(_model);
+            _hasChanges = _model.Id == 0;
+
+            _lastBoundSubscriptionId = _selectedSubscriptionId;
+            _hasLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Critical crash in AddEditEmissionSource initialization.");
+            NotificationService.Notify(NotificationSeverity.Error, "Initialization Error", "Failed to load emission source.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-17]
+        if (!_hasLoaded)
+        {
+            await base.OnParametersSetAsync();
+            return;
+        }
+
+        RestoreStateParameters();
+        if (_selectedSubscriptionId != _lastBoundSubscriptionId)
+        {
+            _lastBoundSubscriptionId = _selectedSubscriptionId;
+            await LoadGroupsAsync();
+            EvaluateFormPermissions();
+            _originalSnapshot = SerializeForCheck(_model);
+            _hasChanges = false;
+        }
+        UpdateFilesCount();
+
+        await base.OnParametersSetAsync();
+        #endregion
+    }
+
+    private int? ResolveEmissionSourceId()
+    {
+        #region hide [2026-08-17]
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            var decrypted = DataProtection.UnprotectInt(SecureId);
+            if (decrypted.HasValue) return decrypted.Value;
+        }
+        if (!string.IsNullOrWhiteSpace(SecurePid))
+        {
+            var decrypted = DataProtection.UnprotectInt(SecurePid);
+            if (decrypted.HasValue) return decrypted.Value;
+        }
+        return null;
+        #endregion
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-17]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+        }
+
+        _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(_currentUserEmail, _isAdmin);
+        _subscriptionsList = await SubscriptionService.GetSubscriptionsForUserAsync(_currentUserEmail, _isAdmin, includeInactive: false);
+        #endregion
+    }
+
+    private void RestoreStateParameters()
+    {
+        #region hide [2026-08-17]
+        var decryptedSid = DataProtection.UnprotectInt(SecureSid);
+        if (decryptedSid.HasValue)
+        {
+            _selectedSubscriptionId = decryptedSid.Value;
+        }
+
+        var decryptedTab = DataProtection.UnprotectInt(SecureTab);
+        if (decryptedTab.HasValue)
+        {
+            _activeTabIndex = decryptedTab.Value;
+        }
+
+        var decryptedGpage = DataProtection.UnprotectInt(SecureGpage);
+        if (decryptedGpage.HasValue)
+        {
+            _activeGridPageIndex = decryptedGpage.Value;
+        }
+
+        var decryptedSac = DataProtection.UnprotectInt(SecureSac);
+        if (decryptedSac.HasValue)
+        {
+            _activeAccordionIndex = decryptedSac.Value;
+        }
+
+        var decryptedQ = DataProtection.Unprotect(SecureSearchText);
+        if (!string.IsNullOrEmpty(decryptedQ))
+        {
+            _searchText = decryptedQ;
+        }
+        #endregion
+    }
+
+    private async Task LoadGroupsAsync()
+    {
+        #region hide [2026-08-17]
+        _allGroups = await EmissionGroupService.GetBySubscriptionIdAsync(_selectedSubscriptionId, includeDefault: true);
+
+        if (_selectedSubscriptionId.HasValue)
+        {
+            var activeSub = _subscriptionsList.FirstOrDefault(s => s.Id == _selectedSubscriptionId.Value);
+            _selectedSubscriptionName = activeSub?.Title ?? string.Empty;
+        }
+        else
+        {
+            _selectedSubscriptionName = string.Empty;
+        }
+
+        _filteredGroups = _allGroups
+            .Where(g => g.TgoScopeNo == _selectedTgoScope)
+            .OrderBy(g => g.Code)
+            .ToList();
+        #endregion
+    }
+
+    private void EvaluateFormPermissions()
+    {
+        #region hide [2026-08-17]
+        var currentUri = NavigationManager.Uri;
+        if (currentUri.Contains("/view", StringComparison.OrdinalIgnoreCase))
+        {
+            _isReadOnlyForm = true;
+            return;
+        }
+
+        if (_isAdmin)
+        {
+            _canCreate = true;
+            _isReadOnlyForm = false;
+            return;
+        }
+
+        if (_model.Id == 0)
+        {
+            if (!_selectedSubscriptionId.HasValue || !_editableSubscriptionIds.Contains(_selectedSubscriptionId.Value))
+            {
+                _canCreate = false;
+                _isReadOnlyForm = true;
+            }
+            else
+            {
+                _canCreate = true;
+                _isReadOnlyForm = false;
+            }
+            return;
+        }
+
+        if (_model.Id > 0)
+        {
+            if (_model.SourceType == eSourceType.Default || _model.IsReadOnly || !_model.SubscriptionId.HasValue)
+            {
+                _isReadOnlyForm = true;
+            }
+            else if (!_editableSubscriptionIds.Contains(_model.SubscriptionId.Value))
+            {
+                _isReadOnlyForm = true;
+            }
+            else
+            {
+                _isReadOnlyForm = false;
+            }
+        }
+        #endregion
+    }
+
+    private void OnTgoScopeChanged(eTgoScopeNo scope)
+    {
+        #region hide [2026-08-17]
+        _selectedTgoScope = scope;
+        _filteredGroups = _allGroups
+            .Where(g => g.TgoScopeNo == scope)
+            .OrderBy(g => g.Code)
+            .ToList();
+
+        if (_model.Group != null && _model.Group.TgoScopeNo != scope)
+        {
+            _model.GroupId = 0;
+            _model.Group = null;
+        }
+        #endregion
+    }
+
+    private void ToggleFilesSection()
+    {
+        _showFilesSection = !_showFilesSection;
+    }
+
+    private void UpdateFilesCount()
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            var json = _model.JsonDataFiles?.ToJsonString(null) ?? "[]";
+            _attachedFilesCount = TbFileEntity.DeserializeListFromJson(json).Count;
+        }
+        catch
+        {
+            _attachedFilesCount = 0;
+        }
+        #endregion
+    }
+
+    private void HandleFilesChanged()
+    {
+        #region hide [2026-08-17]
+        UpdateFilesCount();
+        HandleModelChanged();
+        #endregion
+    }
+
+    private void OnTitleInput(string? val)
+    {
+        _model.Title = val ?? string.Empty;
+        HandleModelChanged();
+    }
+
+    private void OnRefInput(string? val)
+    {
+        _model.Ref = val ?? string.Empty;
+        HandleModelChanged();
+    }
+
+    private void OnRemarkInput(string? val)
+    {
+        _model.Remark = val ?? string.Empty;
+        HandleModelChanged();
+    }
+
+    private void HandleModelChanged()
+    {
+        #region hide [2026-08-17]
+        var current = SerializeForCheck(_model);
+        _hasChanges = _model.Id == 0 || (current != _originalSnapshot);
+        StateHasChanged();
+        #endregion
+    }
+
+    private string SerializeForCheck(TbEmissionSource model)
+    {
+        #region hide [2026-08-17]
+        if (model == null) return string.Empty;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            model.Title,
+            model.GroupId,
+            model.UnitId,
+            model.CO2,
+            model.FossilCH4,
+            model.CH4,
+            model.N2O,
+            model.SF6,
+            model.NF3,
+            model.HFCs,
+            model.PFCs,
+            model.gwpCO2,
+            model.gwpFossilCH4,
+            model.gwpCH4,
+            model.gwpN2O,
+            model.gwpSF6,
+            model.gwpNF3,
+            model.gwpHFCs,
+            model.gwpPFCs,
+            model.GwpVersion,
+            model.SelfCollect,
+            model.Supplier,
+            model.THLCIDB,
+            model.TGOEF,
+            model.ThaiRes,
+            model.IntDB,
+            model.Other,
+            model.Substitute,
+            model.Ref,
+            model.Remark,
+            model.DateApproved,
+            model.DateExpire,
+            JsonDataFiles = model.JsonDataFiles?.ToJsonString(null) ?? "[]"
+        });
+        #endregion
+    }
+
+    private void NavigateToBack()
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(SecureRet))
+            {
+                var returnUrl = DataProtection.Unprotect(SecureRet);
+                if (!string.IsNullOrWhiteSpace(returnUrl))
+                {
+                    NavigationManager.NavigateTo(returnUrl);
+                    return;
+                }
+            }
+
+            var queryParams = new Dictionary<string, object?>();
+
+            if (_selectedSubscriptionId.HasValue)
+                queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+            if (_activeTabIndex > 0)
+                queryParams["tab"] = DataProtection.Protect(_activeTabIndex);
+
+            if (_activeGridPageIndex > 0)
+                queryParams["gpage"] = DataProtection.Protect(_activeGridPageIndex);
+
+            if (_activeAccordionIndex > 0)
+                queryParams["sac"] = DataProtection.Protect(_activeAccordionIndex);
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                queryParams["q"] = DataProtection.Protect(_searchText);
+
+            var url = NavigationManager.GetUriWithQueryParameters("/library/emission-sources", queryParams);
+            NavigationManager.NavigateTo(url, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error navigating back from AddEditEmissionSource.");
+            NavigationManager.NavigateTo("/library/emission-sources");
+        }
+        #endregion
+    }
+
+    private async Task OnSubmit(TbEmissionSource model)
+    {
+        #region hide [2026-08-17]
+        if (_isReadOnlyForm)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Denied", "You do not have write access to submit this form.");
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            if (model.Id == 0)
+            {
+                if (!_canCreate && !_isAdmin)
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "Denied", "You do not have permission to create records.");
+                    return;
+                }
+
+                if (!_selectedSubscriptionId.HasValue)
+                {
+                    NotificationService.Notify(NotificationSeverity.Warning, "Incomplete Data", "Please select a Subscription context.");
+                    return;
+                }
+
+                model.SubscriptionId = _selectedSubscriptionId.Value;
+                model.SourceType = eSourceType.Custom;
+                model.IsReadOnly = false;
+
+                await EmissionSourceService.CreateAsync(model);
+                NotificationService.Notify(NotificationSeverity.Success, "Created", "Emission source created successfully.");
+            }
+            else
+            {
+                await EmissionSourceService.UpdateAsync(model);
+                NotificationService.Notify(NotificationSeverity.Success, "Updated", "Emission source updated successfully.");
+            }
+
+            NavigateToBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving emission source ID: {Id}", model.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Save Error", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+    #endregion
+}

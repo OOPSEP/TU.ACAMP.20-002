@@ -1,0 +1,42 @@
+@* [2026-09-17][Claude] Step 4 Fr-03.1 Organizational Structure Widget: อัปโหลดรูป "แผนภาพโครงสร้างองค์กรและหน้าที่ความรับผิดชอบ" ลงพื้นที่ merge A7:M25 ของชีต Fr-03.1 *@
+@* [2026-09-24][Claude] รูปแผนภาพใช้ CfoImagePicker (แสดงรูปที่เลือก/รูป default, คลิกที่รูปเพื่อเลือกไฟล์) *@
+
+<RadzenStack Gap="1.5rem" Class="pt-2">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-03.1: Organizational Structure (แผนภาพโครงสร้างองค์กรและหน้าที่ความรับผิดชอบ)</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Upload the organizational structure chart to embed into the merged area A7:M25 of sheet Fr-03.1. The organization name (G3), preparer (G4) and "จัดทำโดย" (B26) are linked to Fr-01 by formula and cannot be edited here.
+        </RadzenText>
+    </div>
+
+    <!-- Organizational Structure Chart (Cell A7:M25) -->
+    <RadzenCard Class="p-3 shadow-none border rounded-3">
+        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-2">
+            <RadzenIcon Icon="schema" Class="me-1" /> Organizational Structure Chart (Cell A7:M25)
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-3">
+            Click the image to choose the organization chart showing the GHG working team and its responsibilities (PNG, JPG or WEBP, max 5 MB). It is scaled to fit the merged canvas without being enlarged beyond its original size.
+        </RadzenText>
+
+        @* [2026-09-24][Claude] แสดงรูปที่เลือกของรายงาน หรือรูป default / คลิกที่รูปเพื่อเลือกไฟล์ใหม่ (A7:M25 ~ 780x360) *@
+        <CfoImagePicker ImageBase64="@StructureImageBase64" ImageBase64Changed="@StructureImageBase64Changed"
+                        DefaultImageUrl="images/default_org_structure.png" InputId="fr031FileInput"
+                        AltText="Organizational Structure Chart" Width="520" Height="240" />
+    </RadzenCard>
+
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        <strong>Optional step:</strong> If no chart is selected, the system default chart shown above is exported to sheet <code>Fr-03.1</code>.
+    </RadzenAlert>
+</RadzenStack>
+
+@code {
+    // [2026-09-17][Claude] Parameters for Step 4 Fr-03.1 Organizational Structure Widget
+    [Parameter] public string? StructureImageBase64 { get; set; }
+    [Parameter] public EventCallback<string?> StructureImageBase64Changed { get; set; }
+
+    [Parameter] public DateTime? DiagramDate { get; set; }
+    [Parameter] public EventCallback<DateTime?> DiagramDateChanged { get; set; }
+
+    [Parameter] public DateTime? CompletionDate { get; set; }
+    [Parameter] public EventCallback<DateTime?> CompletionDateChanged { get; set; }
+}

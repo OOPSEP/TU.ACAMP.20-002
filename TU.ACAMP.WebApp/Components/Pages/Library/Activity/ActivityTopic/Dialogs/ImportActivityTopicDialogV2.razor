@@ -1,0 +1,817 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject ActivityTopicExcelService ExcelService
+@inject ActivityTopicService TopicService
+@inject SubscriptionService SubscriptionService
+@inject ActivityGroupService ActivityGroupService
+@inject EmissionGroupService EmissionGroupService
+@inject EmissionSourceService EmissionSourceService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IJSRuntime JSRuntime
+@inject ILogger<ImportActivityTopicDialogV2> Logger
+
+<RadzenStack Gap="1.5rem" Style="padding: 0.5rem;">
+    <!-- Top Bar & Template Download -->
+    <RadzenCard Class="p-3 bg-light" Style="border-radius: 8px; border: 1px solid var(--rz-border-color);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <RadzenText Text="Import Activity Topics (.xlsx)" TextStyle="TextStyle.Subtitle1" class="fw-bold mb-1" />
+                <RadzenText Text="Upload an Excel file containing Master Activity Topics and Emission Sources. Scope 3 (WTT) and Biogenic components will be automatically mapped." TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+            </div>
+            <RadzenButton Text="Download Template" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@DownloadTemplateAsync" />
+        </div>
+    </RadzenCard>
+
+    <!-- File Upload Section -->
+    <div>
+        <label class="form-label fw-semibold small text-muted">Select Excel File (.xlsx):</label>
+        <InputFile OnChange="@OnInputFileChange" accept=".xlsx" class="form-control form-control-sm" />
+    </div>
+
+    @if (_isParsing)
+    {
+        <div class="py-4 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Parsing Excel file and mapping child topics..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_parsedItems != null)
+    {
+        <!-- Validation Summary Badges -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2">
+                Total Rows: <b>@_parsedItems.Count</b>
+            </span>
+            <span class="badge bg-primary-subtle text-primary-emphasis border px-3 py-2">
+                Master Topics: <b>@_parsedItems.Count(i => !i.IsChildTopic && i.IsValid)</b>
+            </span>
+            @if (_parsedItems.Any(i => i.IsChildTopic && i.IsValid))
+            {
+                <span class="badge bg-info-subtle text-info-emphasis border px-3 py-2">
+                    Auto-Mapped Childs: <b>@_parsedItems.Count(i => i.IsChildTopic && i.IsValid)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => i.MappingState == eImportMappingState.NeedsMapping))
+            {
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2">
+                    Needs Mapping: <b>@_parsedItems.Count(i => i.MappingState == eImportMappingState.NeedsMapping)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => i.IsExistingMasterMatched && i.IsValid))
+            {
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2">
+                    Existing Topics (Append): <b>@_parsedItems.Count(i => i.IsExistingMasterMatched && i.IsValid)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => !i.IsValid && i.MappingState != eImportMappingState.NeedsMapping))
+            {
+                <span class="badge bg-danger-subtle text-danger-emphasis border px-3 py-2">
+                    Invalid: <b>@_parsedItems.Count(i => !i.IsValid && i.MappingState != eImportMappingState.NeedsMapping)</b>
+                </span>
+            }
+        </div>
+
+        <!-- Preview DataGrid -->
+        <div style="max-height: 480px; overflow-y: auto; border: 1px solid var(--rz-border-color); border-radius: 8px;">
+            <RadzenDataGrid Data="@_parsedItems" TItem="ActivityTopicImportItemDto" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="#" Width="45px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @item.RowNumber
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Type" Width="110px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (!item.IsChildTopic)
+                            {
+                                <span class="badge bg-primary text-white px-2 py-1" style="font-size: 0.75rem;">Master</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-info text-dark px-2 py-1" style="font-size: 0.75rem;">Child (Auto)</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Topic / Master Name" MinWidth="180px" Property="TopicTitle">
+                        <Template Context="item">
+                            <div>
+                                @if (item.IsChildTopic)
+                                {
+                                    <div class="d-flex align-items-center gap-1 text-secondary small">
+                                        <i class="bi bi-arrow-return-right"></i>
+                                        <span>Child of: <b>@item.MasterTopicTitle</b></span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="fw-bold text-dark">@item.TopicTitle</span>
+                                }
+                                @if (!string.IsNullOrEmpty(item.Remark))
+                                {
+                                    <div class="text-muted small text-truncate">@item.Remark</div>
+                                }
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Emission Mapping" MinWidth="420px" Property="SourceName">
+                        <Template Context="item">
+                            @if (item.IsChildTopic)
+                            {
+                                <div class="d-flex align-items-center gap-1 flex-wrap">
+                                    <span class="badge bg-info text-white" style="font-size: 0.7rem; padding: 2px 5px; border-radius: 4px;">
+                                        @(item.Scope == eTgoScopeNo.SeparateReport ? "Separate" : "Scope 3")
+                                    </span>
+                                    <span class="fw-semibold">@item.MatchedSourceName</span>
+                                    @if (!string.IsNullOrEmpty(item.ActivityGroupTitle))
+                                    {
+                                        <span class="text-muted small">(@item.ActivityGroupTitle)</span>
+                                    }
+                                </div>
+                            }
+                            else if (item.MappingState == eImportMappingState.Resolved && !_editingRows.Contains(item.RowNumber))
+                            {
+                                <div class="d-flex align-items-center justify-content-between gap-1">
+                                    <div class="d-flex align-items-center gap-1 flex-wrap">
+                                        @{
+                                            var scopeBadge = item.Scope switch
+                                            {
+                                                eTgoScopeNo.Scope1 => "bg-primary text-white",
+                                                eTgoScopeNo.Scope2 => "bg-success text-white",
+                                                eTgoScopeNo.Scope3 => "bg-info text-white",
+                                                _ => "bg-secondary text-white"
+                                            };
+                                            var scopeName = item.Scope switch
+                                            {
+                                                eTgoScopeNo.Scope1 => "Scope 1",
+                                                eTgoScopeNo.Scope2 => "Scope 2",
+                                                eTgoScopeNo.Scope3 => "Scope 3",
+                                                _ => "Separate"
+                                            };
+                                        }
+                                        <span class="badge @scopeBadge" style="font-size: 0.7rem; padding: 2px 5px; border-radius: 4px;">
+                                            @scopeName
+                                        </span>
+                                        <span class="fw-semibold">
+                                            @(string.IsNullOrEmpty(item.MatchedSourceName) ? item.SourceName : item.MatchedSourceName)
+                                        </span>
+                                        @if (!string.IsNullOrEmpty(item.ActivityGroupTitle))
+                                        {
+                                            <span class="text-muted small">(@item.ActivityGroupTitle)</span>
+                                        }
+                                    </div>
+                                    <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall" Variant="Variant.Flat"
+                                                  title="Change Emission Mapping"
+                                                  Click="@(() => EnableRowEditing(item))" />
+                                </div>
+                            }
+                            else
+                            {
+                                var state = GetRowSelection(item);
+                                <div class="d-flex flex-column gap-1 p-1" style="background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;">
+                                    <div class="d-flex gap-1">
+                                        <div style="flex: 1;">
+                                            <RadzenDropDown TValue="eTgoScopeNo?"
+                                                            Data="@_scopeOptions"
+                                                            TextProperty="Text"
+                                                            ValueProperty="Value"
+                                                            Value="@state.SelectedScope"
+                                                            Change="@((object val) => OnScopeChanged(item, state, (eTgoScopeNo?)val))"
+                                                            Placeholder="Scope..."
+                                                            AllowClear="true"
+                                                            Class="w-100"
+                                                            Style="font-size: 0.75rem;" />
+                                        </div>
+                                        <div style="flex: 1;">
+                                            <RadzenDropDown TValue="int?"
+                                                            Data="@GetActivityGroups(state)"
+                                                            TextProperty="Title"
+                                                            ValueProperty="Id"
+                                                            Value="@state.SelectedActivityGroupId"
+                                                            Change="@((object val) => OnActivityGroupChanged(item, state, (int?)val))"
+                                                            Placeholder="Activity Group..."
+                                                            AllowClear="true"
+                                                            Class="w-100"
+                                                            Style="font-size: 0.75rem;" />
+                                        </div>
+                                    </div>
+                                    <div class="d-flex gap-1">
+                                        <div style="flex: 1;">
+                                            <RadzenDropDown TValue="int?"
+                                                            Data="@GetEmissionGroups(state)"
+                                                            TextProperty="Title"
+                                                            ValueProperty="Id"
+                                                            Value="@state.SelectedEmissionGroupId"
+                                                            Change="@((object val) => OnEmissionGroupChanged(item, state, (int?)val))"
+                                                            Placeholder="Emission Group..."
+                                                            AllowClear="true"
+                                                            Class="w-100"
+                                                            Style="font-size: 0.75rem;" />
+                                        </div>
+                                        <div style="flex: 1;">
+                                            <RadzenDropDownDataGrid TValue="int?"
+                                                                    Data="@GetSources(state)"
+                                                                    TextProperty="Title"
+                                                                    ValueProperty="Id"
+                                                                    Value="@state.SelectedSourceId"
+                                                                    Change="@((object val) => OnSourceChanged(item, state, (int?)val))"
+                                                                    Placeholder="@(state.SelectedActivityGroupId.HasValue ? "Source (search)..." : "Select Act Grp first")"
+                                                                    Disabled="@(!state.SelectedActivityGroupId.HasValue)"
+                                                                    AllowFiltering="true"
+                                                                    FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                                                    Class="w-100"
+                                                                    Style="font-size: 0.75rem;">
+                                                <Columns>
+                                                    <RadzenDropDownDataGridColumn Property="Title" Title="Source" Width="180px" />
+                                                    <RadzenDropDownDataGridColumn Property="EF" Title="EF" Width="70px" />
+                                                    <RadzenDropDownDataGridColumn Property="Unit.Title" Title="Unit" Width="60px" />
+                                                </Columns>
+                                            </RadzenDropDownDataGrid>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Unit" Width="85px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <span class="text-secondary fw-medium">@(string.IsNullOrEmpty(item.MatchedUnit) ? (string.IsNullOrEmpty(item.Unit) ? "-" : item.Unit) : item.MatchedUnit)</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="EF" Width="95px" TextAlign="TextAlign.Right">
+                        <Template Context="item">
+                            <span class="font-monospace fw-semibold">@item.MatchedEF.ToString("N4")</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Share %" Width="80px" TextAlign="TextAlign.Right">
+                        <Template Context="item">
+                            <span class="fw-semibold @(item.EmissionSharePercent < 100 ? "text-primary" : "text-dark")">@item.EmissionSharePercent.ToString("0.#")%</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Status" Width="130px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (!item.IsValid && item.MappingState != eImportMappingState.NeedsMapping)
+                            {
+                                var errText = string.Join("; ", item.ValidationErrors);
+                                <RadzenBadge Text="Invalid" BadgeStyle="BadgeStyle.Danger" IsPill="true" title="@errText" />
+                            }
+                            else if (item.MappingState == eImportMappingState.NeedsMapping)
+                            {
+                                <RadzenBadge Text="Needs Mapping" BadgeStyle="BadgeStyle.Warning" IsPill="true"
+                                             title="Emission source could not be resolved from the Excel file. Please select it in this row." />
+                            }
+                            else if (item.IsExistingMasterMatched)
+                            {
+                                <RadzenBadge Text="Append Child" BadgeStyle="BadgeStyle.Warning" IsPill="true" title="Will append as child to existing topic in system" />
+                            }
+                            else
+                            {
+                                <RadzenBadge Text="Valid" BadgeStyle="BadgeStyle.Success" IsPill="true" />
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </div>
+    }
+
+    <!-- Action Buttons -->
+    <RadzenStack Orientation="Orientation.Vertical" AlignItems="AlignItems.End" Gap="0.25rem" Class="mt-3">
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.75rem">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close(false))" />
+            <RadzenButton Text="@($"Import ({ReadyCount} Ready)")"
+                          Icon="file_upload"
+                          ButtonStyle="ButtonStyle.Success"
+                          Disabled="@(ReadyCount == 0 || _isSaving)"
+                          Click="@ExecuteImportAsync" />
+        </RadzenStack>
+        @if (_parsedItems != null && _parsedItems.Any(i => i.MappingState == eImportMappingState.NeedsMapping))
+        {
+            <div class="text-warning small mt-1">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                @($"{_parsedItems.Count(i => i.MappingState == eImportMappingState.NeedsMapping)} row(s) still need mapping and will be skipped during import.")
+            </div>
+        }
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    #region component parameters
+    [Parameter] public int SubscriptionId { get; set; }
+    [Parameter] public eTopicLevel Level { get; set; }
+    [Parameter] public int TargetId { get; set; }
+    #endregion
+
+    #region component state
+    private bool _isParsing = false;
+    private bool _isSaving = false;
+    private List<ActivityTopicImportItemDto>? _parsedItems;
+
+    private List<TbActivityGroup> _allActivityGroups = new();
+    private List<TbEmissionGroup> _allEmissionGroups = new();
+    private List<TbEmissionSource> _allSources = new();
+
+    private readonly HashSet<int> _editingRows = new();
+    private readonly Dictionary<int, RowSelectionState> _rowSelections = new();
+
+    private bool IsReady(ActivityTopicImportItemDto i)
+        => i.IsValid && i.MappingState == eImportMappingState.Resolved;
+
+    private int ReadyCount => _parsedItems?.Count(IsReady) ?? 0;
+
+    private class ScopeOption
+    {
+        public string Text { get; set; } = string.Empty;
+        public eTgoScopeNo? Value { get; set; }
+    }
+
+    private static readonly List<ScopeOption> _scopeOptions = new()
+    {
+        new() { Text = "Scope 1", Value = eTgoScopeNo.Scope1 },
+        new() { Text = "Scope 2", Value = eTgoScopeNo.Scope2 },
+        new() { Text = "Scope 3", Value = eTgoScopeNo.Scope3 },
+        new() { Text = "Separate Report", Value = eTgoScopeNo.SeparateReport }
+    };
+
+    private class RowSelectionState
+    {
+        public eTgoScopeNo? SelectedScope { get; set; }
+        public int? SelectedActivityGroupId { get; set; }
+        public int? SelectedEmissionGroupId { get; set; }
+        public int? SelectedSourceId { get; set; }
+    }
+    #endregion
+
+    #region in-row mapping logic
+    private void EnableRowEditing(ActivityTopicImportItemDto item)
+    {
+        #region hide [2026-09-07]
+        _editingRows.Add(item.RowNumber);
+        GetRowSelection(item);
+        StateHasChanged();
+        #endregion
+    }
+
+    private RowSelectionState GetRowSelection(ActivityTopicImportItemDto item)
+    {
+        #region hide [2026-09-07]
+        if (!_rowSelections.TryGetValue(item.RowNumber, out var state))
+        {
+            state = new RowSelectionState
+            {
+                SelectedScope = item.MappingState == eImportMappingState.NeedsMapping && item.EmissionSourceId == -1 ? null : item.Scope,
+                SelectedActivityGroupId = item.ActivityGroupId,
+                SelectedEmissionGroupId = item.EmissionGroupId,
+                SelectedSourceId = item.EmissionSourceId > 0 ? item.EmissionSourceId : null
+            };
+            _rowSelections[item.RowNumber] = state;
+        }
+        return state;
+        #endregion
+    }
+
+    private IEnumerable<TbActivityGroup> GetActivityGroups(RowSelectionState state)
+    {
+        if (state.SelectedScope.HasValue)
+        {
+            return _allActivityGroups.Where(g => g.TgoScopeNo == state.SelectedScope.Value);
+        }
+        return _allActivityGroups;
+    }
+
+    private IEnumerable<TbEmissionGroup> GetEmissionGroups(RowSelectionState state)
+    {
+        if (state.SelectedScope.HasValue)
+        {
+            return _allEmissionGroups.Where(eg => eg.TgoScopeNo == state.SelectedScope.Value);
+        }
+        return _allEmissionGroups;
+    }
+
+    private IEnumerable<TbEmissionSource> GetSources(RowSelectionState state)
+    {
+        if (state.SelectedEmissionGroupId.HasValue)
+        {
+            return _allSources.Where(s => s.GroupId == state.SelectedEmissionGroupId.Value);
+        }
+        if (state.SelectedScope.HasValue)
+        {
+            return _allSources.Where(s => (s.Group?.TgoScopeNo ?? s.TgoScopeNo) == state.SelectedScope.Value);
+        }
+        return _allSources;
+    }
+
+    private void OnScopeChanged(ActivityTopicImportItemDto item, RowSelectionState state, eTgoScopeNo? newScope)
+    {
+        #region hide [2026-09-07]
+        state.SelectedScope = newScope;
+
+        if (state.SelectedActivityGroupId.HasValue && newScope.HasValue)
+        {
+            if (!_allActivityGroups.Any(g => g.Id == state.SelectedActivityGroupId.Value && g.TgoScopeNo == newScope.Value))
+            {
+                state.SelectedActivityGroupId = null;
+                item.ActivityGroupId = null;
+                item.ActivityGroupCode = string.Empty;
+                item.ActivityGroupTitle = string.Empty;
+            }
+        }
+
+        if (state.SelectedEmissionGroupId.HasValue && newScope.HasValue)
+        {
+            if (!_allEmissionGroups.Any(eg => eg.Id == state.SelectedEmissionGroupId.Value && eg.TgoScopeNo == newScope.Value))
+            {
+                state.SelectedEmissionGroupId = null;
+                item.EmissionGroupId = null;
+                item.EmissionGroupTitle = string.Empty;
+                state.SelectedSourceId = null;
+                item.EmissionSourceId = null;
+                item.MatchedSourceName = string.Empty;
+            }
+        }
+
+        if (state.SelectedSourceId.HasValue && newScope.HasValue)
+        {
+            if (!_allSources.Any(s => s.Id == state.SelectedSourceId.Value && (s.Group?.TgoScopeNo ?? s.TgoScopeNo) == newScope.Value))
+            {
+                state.SelectedSourceId = null;
+                item.EmissionSourceId = null;
+                item.MatchedSourceName = string.Empty;
+            }
+        }
+
+        if (!state.SelectedSourceId.HasValue)
+        {
+            item.MappingState = eImportMappingState.NeedsMapping;
+            item.IsValid = false;
+        }
+
+        StateHasChanged();
+        #endregion
+    }
+
+    private void OnActivityGroupChanged(ActivityTopicImportItemDto item, RowSelectionState state, int? newActGroupId)
+    {
+        #region hide [2026-09-07]
+        state.SelectedActivityGroupId = newActGroupId;
+        if (newActGroupId.HasValue)
+        {
+            var act = _allActivityGroups.FirstOrDefault(g => g.Id == newActGroupId.Value);
+            if (act != null)
+            {
+                item.ActivityGroupId = act.Id;
+                item.ActivityGroupCode = act.Code;
+                item.ActivityGroupTitle = act.Title;
+                item.Scope = act.TgoScopeNo;
+                state.SelectedScope = act.TgoScopeNo;
+
+                if (state.SelectedSourceId.HasValue)
+                {
+                    var src = _allSources.FirstOrDefault(s => s.Id == state.SelectedSourceId.Value);
+                    if (src != null)
+                    {
+                        ExcelService.ApplyManualSource(item, src, act);
+                        _editingRows.Remove(item.RowNumber);
+                    }
+                }
+            }
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    private void OnEmissionGroupChanged(ActivityTopicImportItemDto item, RowSelectionState state, int? newEmGroupId)
+    {
+        #region hide [2026-09-07]
+        state.SelectedEmissionGroupId = newEmGroupId;
+        if (newEmGroupId.HasValue)
+        {
+            var eg = _allEmissionGroups.FirstOrDefault(g => g.Id == newEmGroupId.Value);
+            if (eg != null && !state.SelectedScope.HasValue)
+            {
+                state.SelectedScope = eg.TgoScopeNo;
+                item.Scope = eg.TgoScopeNo;
+            }
+
+            if (state.SelectedSourceId.HasValue)
+            {
+                if (!_allSources.Any(s => s.Id == state.SelectedSourceId.Value && s.GroupId == newEmGroupId.Value))
+                {
+                    state.SelectedSourceId = null;
+                    item.EmissionSourceId = null;
+                    item.MatchedSourceName = string.Empty;
+                    item.MappingState = eImportMappingState.NeedsMapping;
+                    item.IsValid = false;
+                }
+            }
+        }
+        else
+        {
+            state.SelectedSourceId = null;
+            item.EmissionSourceId = null;
+            item.MatchedSourceName = string.Empty;
+            item.MappingState = eImportMappingState.NeedsMapping;
+            item.IsValid = false;
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    private void OnSourceChanged(ActivityTopicImportItemDto item, RowSelectionState state, int? newSourceId)
+    {
+        #region hide [2026-09-07]
+        state.SelectedSourceId = newSourceId;
+        if (newSourceId.HasValue)
+        {
+            var src = _allSources.FirstOrDefault(s => s.Id == newSourceId.Value);
+            if (src != null)
+            {
+                state.SelectedEmissionGroupId = src.GroupId;
+                if (!state.SelectedScope.HasValue && src.Group != null)
+                {
+                    state.SelectedScope = src.Group.TgoScopeNo;
+                }
+
+                var act = state.SelectedActivityGroupId.HasValue
+                    ? _allActivityGroups.FirstOrDefault(g => g.Id == state.SelectedActivityGroupId.Value)
+                    : null;
+
+                if (act != null)
+                {
+                    ExcelService.ApplyManualSource(item, src, act);
+                    _editingRows.Remove(item.RowNumber);
+                }
+            }
+        }
+        else
+        {
+            item.MappingState = eImportMappingState.NeedsMapping;
+            item.IsValid = false;
+        }
+        StateHasChanged();
+        #endregion
+    }
+    #endregion
+
+    #region template download and upload handlers
+    private async Task DownloadTemplateAsync()
+    {
+        #region hide [2026-08-29]
+        try
+        {
+            var bytes = await ExcelService.GenerateTemplateExcelAsync();
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("saveAsFile", "Template_Topics.xlsx", base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Template Downloaded", "Import template (Version 2) saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate Excel import template.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to download template.");
+        }
+        #endregion
+    }
+
+    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    {
+        #region hide [2026-09-07]
+        var file = e.File;
+        if (file == null) return;
+
+        _isParsing = true;
+        StateHasChanged();
+
+        try
+        {
+            var sub = SubscriptionId > 0 ? await SubscriptionService.GetByIdAsync(SubscriptionId) : null;
+            var maxBytes = FileConstants.GetMaxUploadSizeBytes(sub?.AllowDataUploadCount);
+
+            if (file.Size > maxBytes)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "File Too Large", $"{file.Name} ({FileConstants.FormatFileSize(file.Size)}) exceeds maximum allowed upload limit of {FileConstants.FormatFileSize(maxBytes)}.");
+                _isParsing = false;
+                StateHasChanged();
+                return;
+            }
+
+            using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            _parsedItems = await ExcelService.ParseImportExcelAsync(ms, SubscriptionId, Level, TargetId);
+
+            if (SubscriptionId <= 0)
+            {
+                using var context = await DbFactory.CreateDbContextAsync();
+                var firstSub = await context.Subscriptions.Where(s => !s.IsDeleted && s.IsActive).FirstOrDefaultAsync();
+                if (firstSub != null) SubscriptionId = firstSub.Id;
+            }
+
+            // Load master lists once for in-row mapping
+            _allActivityGroups = await ActivityGroupService.GetAllAsync();
+            _allEmissionGroups = await EmissionGroupService.GetBySubscriptionIdAsync(SubscriptionId);
+            _allSources = (await EmissionSourceService.GetBySubscriptionIdAsync(SubscriptionId))
+                .Where(s => s.Id != -1)
+                .ToList();
+
+            _editingRows.Clear();
+            _rowSelections.Clear();
+
+            NotificationService.Notify(NotificationSeverity.Info, "Excel Parsed", $"Parsed {_parsedItems.Count} rows (Version 2: Master & Child support).");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to parse uploaded Excel file.");
+            NotificationService.Notify(NotificationSeverity.Error, "Parsing Error", "Failed to parse Excel file. Please ensure it is a valid .xlsx file.");
+            _parsedItems = null;
+        }
+        finally
+        {
+            _isParsing = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private async Task ExecuteImportAsync()
+    {
+        #region hide [2026-09-07]
+        if (_parsedItems == null || !_parsedItems.Any(IsReady)) return;
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            int importedTopicsCount = 0;
+            int importedChildsCount = 0;
+            int skippedChildsCount = 0;
+            int skippedNeedsMapping = _parsedItems.Count(i => i.MappingState == eImportMappingState.NeedsMapping);
+            var readyItems = _parsedItems.Where(IsReady).ToList();
+
+            using var context = await DbFactory.CreateDbContextAsync();
+
+            if (SubscriptionId <= 0)
+            {
+                var firstSub = await context.Subscriptions.Where(s => !s.IsDeleted && s.IsActive).FirstOrDefaultAsync();
+                if (firstSub != null) SubscriptionId = firstSub.Id;
+            }
+
+            // Group ready items by MasterTopicTitle
+            var topicGroups = readyItems.GroupBy(i => i.MasterTopicTitle, StringComparer.OrdinalIgnoreCase).ToList();
+
+            foreach (var group in topicGroups)
+            {
+                var masterTitle = group.Key;
+                var firstItem = group.First();
+
+                // Check if master topic already exists in the system for this scope
+                var existingTopic = await context.Topics
+                    .Include(t => t.Childs.Where(c => !c.IsDeleted))
+                    .FirstOrDefaultAsync(t => t.SubscriptionId == SubscriptionId &&
+                                              t.Level == Level &&
+                                              t.TargetId == TargetId &&
+                                              t.Title == masterTitle &&
+                                              !t.IsDeleted);
+
+                // Prepare child entities
+                var newChildEntities = new List<TbActivityTopicChild>();
+                var childKeys = new HashSet<(int, int)>();
+
+                foreach (var item in group)
+                {
+                    // Handle on-the-fly custom emission source creation if needed
+                    if (item.IsCustomSourceNeeded && (!item.EmissionSourceId.HasValue || item.EmissionSourceId.Value <= 0))
+                    {
+                        var cleanTitle = item.SourceName.Replace(" [Custom]", "").Trim();
+                        var existingCustom = await context.EmissionSources
+                            .FirstOrDefaultAsync(s => s.Title == cleanTitle && s.SubscriptionId == SubscriptionId && !s.IsDeleted);
+
+                        if (existingCustom != null)
+                        {
+                            item.EmissionSourceId = existingCustom.Id;
+                        }
+                        else
+                        {
+                            var newCustomSrc = new TbEmissionSource
+                            {
+                                Title = cleanTitle,
+                                Remark = "Auto-registered from Activity Topic Excel Import",
+                                SubscriptionId = SubscriptionId > 0 ? SubscriptionId : (int?)null,
+                                SourceType = eSourceType.Custom,
+                                UnitId = item.MatchedUnitId ?? 1,
+                                CO2 = item.MatchedEF,
+                                gwpCO2 = 1,
+                                GroupId = item.EmissionGroupId ?? 1,
+                                IsActive = true
+                            };
+                            context.EmissionSources.Add(newCustomSrc);
+                            await context.SaveChangesAsync();
+                            item.EmissionSourceId = newCustomSrc.Id;
+                        }
+                    }
+
+                    if (item.ActivityGroupId.HasValue && item.EmissionSourceId.HasValue)
+                    {
+                        if (!childKeys.Add((item.ActivityGroupId.Value, item.EmissionSourceId.Value)))
+                        {
+                            skippedChildsCount++;
+                            continue;
+                        }
+
+                        newChildEntities.Add(new TbActivityTopicChild
+                        {
+                            ActivityGroupId = item.ActivityGroupId.Value,
+                            SourceId = item.EmissionSourceId.Value,
+                            ActivityUnitId = item.MatchedUnitId,
+                            UnitConversionRatio = item.UnitConversionRatio,
+                            EmissionSharePercent = item.EmissionSharePercent,
+                            IsActive = true
+                        });
+                    }
+                }
+
+                if (existingTopic != null)
+                {
+                    // Append new child topics to existing master topic
+                    if (newChildEntities.Any())
+                    {
+                        var appended = await TopicService.AppendChildsToTopicAsync(existingTopic.Id, newChildEntities);
+                        importedChildsCount += appended.Count;
+                        skippedChildsCount += newChildEntities.Count - appended.Count;
+                    }
+                }
+                else
+                {
+                    // Create new Master Topic along with all its childs
+                    var topic = new TbActivityTopic
+                    {
+                        SubscriptionId = SubscriptionId,
+                        Level = Level,
+                        TargetId = TargetId,
+                        EmissionGroupId = firstItem.EmissionGroupId ?? 1,
+                        Title = masterTitle,
+                        Remark = firstItem.Remark,
+                        IsActive = true
+                    };
+
+                    await TopicService.SaveTopicWithChildsAsync(topic, newChildEntities);
+                    importedTopicsCount++;
+                    importedChildsCount += newChildEntities.Count;
+                }
+            }
+
+            var msg = importedTopicsCount > 0
+                ? $"Successfully imported {importedTopicsCount} topics with {importedChildsCount} emission sources."
+                : (importedChildsCount > 0
+                    ? $"Successfully appended {importedChildsCount} child emission sources to existing topics."
+                    : "No new emission source was added — every entry already exists in the target topics.");
+
+            if (skippedChildsCount > 0)
+            {
+                msg += $" Skipped {skippedChildsCount} duplicated emission sources.";
+            }
+
+            if (skippedNeedsMapping > 0)
+            {
+                msg += $" (Skipped {skippedNeedsMapping} unmapped row(s)).";
+            }
+
+            bool anyChange = importedTopicsCount > 0 || importedChildsCount > 0;
+            NotificationService.Notify(
+                anyChange ? NotificationSeverity.Success : NotificationSeverity.Warning,
+                anyChange ? "Import Successful" : "Nothing Imported",
+                msg);
+            DialogService.Close(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save imported activity topics.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save imported activity topics.");
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+    #endregion
+}

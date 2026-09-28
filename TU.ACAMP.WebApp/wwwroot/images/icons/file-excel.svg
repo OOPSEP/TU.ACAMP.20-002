@@ -1,0 +1,7 @@
+<!-- [2026-09-24][Claude] ไอคอนไฟล์ Excel (generic file-type icon) ใช้ในหน้า CFO Verification Report Ledger -->
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
+  <path d="M6 1.5h9.2L20.5 6.8V20.5A2 2 0 0 1 18.5 22.5H6A2 2 0 0 1 4 20.5V3.5A2 2 0 0 1 6 1.5z" fill="#ffffff" stroke="#1d6f42" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M15.2 1.5v5.3h5.3" fill="#e8f5ee" stroke="#1d6f42" stroke-width="1.4" stroke-linejoin="round"/>
+  <rect x="1.5" y="10.5" width="16" height="8.5" rx="1.6" fill="#1d6f42"/>
+  <text x="9.5" y="17" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6.4" font-weight="700" fill="#ffffff">XLS</text>
+</svg>

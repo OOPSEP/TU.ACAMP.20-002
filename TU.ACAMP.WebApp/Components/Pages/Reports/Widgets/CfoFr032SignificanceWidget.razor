@@ -1,0 +1,401 @@
+@* [2026-09-17][Claude] Step 5 Fr-03.2 Scope 3 Significance Widget: ให้คะแนนระดับ 1-5 ตามเกณฑ์ Fr032Rubric แล้วคำนวณคะแนนถ่วงน้ำหนักทันที *@
+@using TU.ACAMP.WebApp.Services.Reports
+@using Microsoft.AspNetCore.Components.Forms
+@inject CfoFr032ExcelService Fr032Excel
+@inject IJSRuntime JSRuntime
+@inject NotificationService NotificationService
+
+<RadzenStack Gap="1.5rem" Class="pt-2">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-03.2: Scope 3 Significance Assessment</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Score all 15 Scope 3 categories on a fixed 1-5 scale. Magnitude is scored automatically from the activity data; the weighted total decides whether a category is significant.
+        </RadzenText>
+        @* [2026-09-18][Claude] เซลล์ E/F/H ของเทมเพลต อบก. เป็นรูปแบบ % จึงกำกับ % ไว้ทุกที่ที่แสดงระดับคะแนน *@
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Columns Influence (E), Risk (F), and Sector (H) are recorded as % of full score (Level 1 = 20%, 2 = 40%, 3 = 60%, 4 = 80%, 5 = 100%). Column Magnitude (D) reflects actual Scope 3 emission share %.
+        </RadzenText>
+    </div>
+
+    <!-- Section 1: Scoring Grid -->
+    <RadzenCard Class="p-3 shadow-none border rounded-3">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-0">
+                <RadzenIcon Icon="rule" Class="me-1" /> Weighted Scoring (Rows 19..33)
+            </RadzenText>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <RadzenBadge BadgeStyle="BadgeStyle.Info" IsPill="true" Text="@($"Significance threshold T = {MaterialityThreshold:0.##}%")" Class="px-2" Style="font-size: 0.72rem;" />
+                @if (!ReadOnly)
+                {
+                    <RadzenButton Text="Auto score" Icon="auto_fix_high" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.ExtraSmall" Variant="Variant.Outlined"
+                                  Click="@AutoScore" Title="Apply standard rubric default scores to unselected criteria" Style="border-radius: 6px;" />
+                    <RadzenButton Text="Score all as 3" Icon="looks_3" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall" Variant="Variant.Outlined"
+                                  Click="@(() => SetAllScores(3))" Title="Set every criterion of every category with a source to level 3" Style="border-radius: 6px;" />
+                    <RadzenButton Text="Clear all" Icon="clear_all" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall" Variant="Variant.Outlined"
+                                  Click="@ClearAll" Style="border-radius: 6px;" />
+                }
+                <span class="@(!ReadOnly ? "border-start ps-2 " : "")d-flex align-items-center gap-2">
+                    <RadzenButton Text="Export Excel" Icon="download" ButtonStyle="ButtonStyle.Info" Size="ButtonSize.ExtraSmall" Variant="Variant.Outlined"
+                                  Click="@ExportExcelAsync" Disabled="@_isBusy" Title="Export 15 categories scoring matrix to Excel template" Style="border-radius: 6px;" />
+                    @if (!ReadOnly)
+                    {
+                        <RadzenButton Text="Import Excel" Icon="upload" ButtonStyle="ButtonStyle.Info" Size="ButtonSize.ExtraSmall" Variant="Variant.Outlined"
+                                      Click="@OpenImportPickerAsync" Disabled="@_isBusy" Title="Import Has source, scores (1-5), and Remarks from exported Excel" Style="border-radius: 6px;" />
+                        <InputFile @key="_importInputKey" id="fr032ImportInput" OnChange="@OnImportFileSelectedAsync" accept=".xlsx" class="d-none" />
+                    }
+                </span>
+            </div>
+        </div>
+
+        <RadzenDataGrid Data="@Categories" TItem="CfoReportService.CfoFr032CategoryDto" AllowPaging="false"
+                        GridLines="DataGridGridLines.Both" Density="Density.Compact" Style="width: 100%;">
+            <Columns>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Property="CategoryNo" Title="No" Width="50px" TextAlign="TextAlign.Center" />
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Property="CategoryTitle" Title="Category (B)" Width="210px" />
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Has source (C)" Width="95px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            <RadzenCheckBox Value="@row.HasSource" TValue="bool" Disabled="true" />
+                        }
+                        else
+                        {
+                            <RadzenCheckBox @bind-Value="@row.HasSource" TValue="bool" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Magnitude (D) 30%" Width="130px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (row.MagnitudePercent > 0m)
+                        {
+                            <div class="d-flex flex-column align-items-center">
+                                <span class="fw-semibold">@row.MagnitudePercent.ToString("N2")%</span>
+                                <RadzenBadge BadgeStyle="BadgeStyle.Secondary" IsPill="true" Class="px-2 mt-1" Style="font-size: 0.68rem;"
+                                             Text="@($"level {CfoReportService.Fr032Rubric.GetMagnitudeScore(row.MagnitudePercent, MaterialityThreshold)}")" />
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="text-muted">&mdash;</span>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Influence (E) 20%" Width="115px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            @if (row.InfluenceScore.HasValue)
+                            {
+                                <span class="badge bg-light text-dark border">@row.InfluenceScore (@(row.InfluenceScore.Value * 20)%)</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">&mdash;</span>
+                            }
+                        }
+                        else
+                        {
+                            <RadzenDropDown @bind-Value="@row.InfluenceScore" Data="@ScoreOptions" TValue="int?" TextProperty="Text" ValueProperty="Level"
+                                            AllowClear="true" Placeholder="-" Disabled="@(!row.HasSource)" Style="width: 100%;" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Risk (F) 20%" Width="115px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            @if (row.RiskScore.HasValue)
+                            {
+                                <span class="badge bg-light text-dark border">@row.RiskScore (@(row.RiskScore.Value * 20)%)</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">&mdash;</span>
+                            }
+                        }
+                        else
+                        {
+                            <RadzenDropDown @bind-Value="@row.RiskScore" Data="@ScoreOptions" TValue="int?" TextProperty="Text" ValueProperty="Level"
+                                            AllowClear="true" Placeholder="-" Disabled="@(!row.HasSource)" Style="width: 100%;" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Sector (H) 15%" Width="115px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            @if (row.SectorGuidanceScore.HasValue)
+                            {
+                                <span class="badge bg-light text-dark border">@row.SectorGuidanceScore (@(row.SectorGuidanceScore.Value * 20)%)</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">&mdash;</span>
+                            }
+                        }
+                        else
+                        {
+                            <RadzenDropDown @bind-Value="@row.SectorGuidanceScore" Data="@ScoreOptions" TValue="int?" TextProperty="Text" ValueProperty="Level"
+                                            AllowClear="true" Placeholder="-" Disabled="@(!row.HasSource)" Style="width: 100%;" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Outsourcing (K) 10%" Width="120px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            @if (row.OutsourcingScore.HasValue)
+                            {
+                                <span class="badge bg-light text-dark border">@row.OutsourcingScore @(row.OutsourcingScore.Value >= 4 ? "(✓)" : "")</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">&mdash;</span>
+                            }
+                        }
+                        else
+                        {
+                            <RadzenDropDown @bind-Value="@row.OutsourcingScore" Data="@ScoreOptions" TValue="int?" TextProperty="Text" ValueProperty="Level"
+                                            AllowClear="true" Placeholder="-" Disabled="@(!row.HasSource)" Style="width: 100%;" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Engagement (N) 5%" Width="115px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            @if (row.EngagementScore.HasValue)
+                            {
+                                <span class="badge bg-light text-dark border">@row.EngagementScore @(row.EngagementScore.Value >= 4 ? "(✓)" : "")</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">&mdash;</span>
+                            }
+                        }
+                        else
+                        {
+                            <RadzenDropDown @bind-Value="@row.EngagementScore" Data="@ScoreOptions" TValue="int?" TextProperty="Text" ValueProperty="Level"
+                                            AllowClear="true" Placeholder="-" Disabled="@(!row.HasSource)" Style="width: 100%;" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Weighted score" Width="150px" TextAlign="TextAlign.Center" Sortable="false">
+                    <Template Context="row">
+                        @{
+                            var eval = CfoReportService.Fr032Rubric.Evaluate(row, MaterialityThreshold);
+                        }
+                        @if (!eval.IsAssessed)
+                        {
+                            <span class="text-muted">N/A</span>
+                        }
+                        else
+                        {
+                            <div class="d-flex flex-column align-items-center">
+                                <span class="fw-bold">@CfoReportService.Fr032Rubric.WeightedScoreToPercent(eval.WeightedScore).ToString("0")% <span class="text-muted fw-normal">(@eval.WeightedScore.ToString("0.00")/5.00)</span></span>
+                                <RadzenBadge BadgeStyle="@(eval.IsSignificant ? BadgeStyle.Primary : BadgeStyle.Light)" IsPill="true" Class="px-2 mt-1"
+                                             Style="font-size: 0.68rem;" Text="@(eval.IsSignificant ? "Significant" : "Not significant")" />
+                                @if (!eval.IsComplete)
+                                {
+                                    <span class="text-warning small mt-1">Incomplete</span>
+                                }
+                            </div>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn TItem="CfoReportService.CfoFr032CategoryDto" Title="Remark (O)" Width="170px" Sortable="false">
+                    <Template Context="row">
+                        @if (ReadOnly)
+                        {
+                            <span class="small text-secondary">@(string.IsNullOrWhiteSpace(row.Remark) ? "-" : row.Remark)</span>
+                        }
+                        else
+                        {
+                            <RadzenTextBox @bind-Value="@row.Remark" Placeholder="auto" Style="width: 100%;" />
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+    </RadzenCard>
+
+    <!-- Section 2: Rubric Matrix (เขียนลงใต้ช่อง A35 ของชีตเป็นตารางเดียวกันนี้) -->
+    <RadzenCard Class="p-3 shadow-none border rounded-3">
+        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-2">
+            <RadzenIcon Icon="grid_on" Class="me-1" /> Scoring Matrix (written into the sheet under cell A35)
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-2">
+            @CfoReportService.Fr032Rubric.GetRubricHeadline(MaterialityThreshold)
+        </RadzenText>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0" style="font-size: 0.78rem; vertical-align: top;">
+                <thead class="table-light">
+                    <tr>
+                        <th style="min-width: 190px;">เกณฑ์ (คอลัมน์ในฟอร์ม)</th>
+                        <th class="text-center" style="width: 72px;">น้ำหนัก</th>
+                        @for (var lv = 1; lv <= 5; lv++)
+                        {
+                            <th style="min-width: 130px;">@CfoReportService.Fr032Rubric.GetScoreLabel(lv)</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in CfoReportService.Fr032Rubric.GetRubricMatrix(MaterialityThreshold))
+                    {
+                        <tr>
+                            <td class="fw-semibold">@row.Criterion <span class="text-muted">[@row.Column]</span></td>
+                            <td class="text-center fw-semibold">@row.Weight.ToString("P0")</td>
+                            @for (var lv = 0; lv < 5; lv++)
+                            {
+                                <td>@row.Levels[lv]</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <ul class="mb-0 mt-2 ps-3 text-muted" style="font-size: 0.76rem; line-height: 1.55;">
+            @foreach (var line in CfoReportService.Fr032Rubric.GetRubricFooterLines(MaterialityThreshold))
+            {
+                <li>@line</li>
+            }
+        </ul>
+    </RadzenCard>
+
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        This rubric and its weights are ACAMP's internal method, not a TGO-published formula — the TCFO_R_01 form lists the criteria but sets no weights or cut-off. The rubric text is written into the sheet so a verifier can see how each decision was made.
+    </RadzenAlert>
+</RadzenStack>
+
+@code {
+    // [2026-09-17][Claude] รายการ 15 หมวดถูกสร้างและถือครองโดยหน้า Wizard (แก้ไขในตำแหน่งเดิมผ่าน binding)
+    [Parameter] public List<CfoReportService.CfoFr032CategoryDto> Categories { get; set; } = new();
+
+    /// <summary>เกณฑ์นัยสำคัญ (T) จากหน้า Setup ใช้แปลง Magnitude เป็นระดับคะแนน</summary>
+    [Parameter] public decimal MaterialityThreshold { get; set; } = 5.0m;
+
+    // บังคับเลือกจากระดับ 1..5 เท่านั้น ไม่ให้พิมพ์ตัวเลขอิสระ
+    // [2026-09-18][Claude] แสดง % กำกับให้ตรงกับค่าที่จะถูกบันทึกลงคอลัมน์ E/F/H ของฟอร์ม
+    private record ScoreOption(int? Level, string Text);
+
+    private static readonly ScoreOption[] ScoreOptions =
+        Enumerable.Range(1, 5)
+                  .Select(lv => new ScoreOption(lv, CfoReportService.Fr032Rubric.GetScoreLabel(lv)))
+                  .ToArray();
+
+    // [2026-09-18][Claude] เติมคะแนนเริ่มต้นของระบบเฉพาะช่องที่ยังว่าง (ตรรกะเดียวกับตอนเขียนไฟล์ Excel)
+    private void AutoScore()
+    {
+        CfoReportService.Fr032Rubric.ApplyAutoScores(Categories, MaterialityThreshold);
+    }
+
+    private void SetAllScores(int score)
+    {
+        foreach (var row in Categories.Where(c => c.HasSource))
+        {
+            row.InfluenceScore = score;
+            row.RiskScore = score;
+            row.SectorGuidanceScore = score;
+            row.OutsourcingScore = score;
+            row.EngagementScore = score;
+            row.IsAutoScored = false;   // ผู้ใช้สั่งเองทั้งตาราง ไม่ใช่ค่าเริ่มต้นของระบบ
+        }
+    }
+
+    #region Excel import / export [2026-09-24][Claude]
+    /// <summary>ชื่อองค์กร ใช้ตั้งชื่อไฟล์ Export</summary>
+    [Parameter] public string? OrganizationTitle { get; set; }
+
+    // [2026-09-25][Gemini] โหมดแสดงผลแบบอ่านอย่างเดียว สำหรับแสดงในหน้า View Report
+    [Parameter] public bool ReadOnly { get; set; } = false;
+
+    private const long MaxImportBytes = 5 * 1024 * 1024;
+    private bool _isBusy;
+    private Guid _importInputKey = Guid.NewGuid();
+
+    private async Task ExportExcelAsync()
+    {
+        try
+        {
+            _isBusy = true;
+            var bytes = Fr032Excel.Export(Categories, MaterialityThreshold, OrganizationTitle);
+            var fileName = TU.ACAMP.Domain.Tools.ExportFileNameHelper.Generate("cfo_fr032_significance", OrganizationTitle, fallback: "org");
+            await JSRuntime.InvokeVoidAsync("saveAsFile", fileName, Convert.ToBase64String(bytes));
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Export failed", ex.Message, 8000);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task OpenImportPickerAsync()
+    {
+        await JSRuntime.InvokeVoidAsync("fileUtils.clickElement", "fr032ImportInput");
+    }
+
+    private async Task OnImportFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            _isBusy = true;
+            var file = e.File;
+            if (file == null) return;
+            if (file.Size > MaxImportBytes)
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Import Excel", "ไฟล์ใหญ่เกิน 5 MB", 8000);
+                return;
+            }
+
+            // ClosedXML ต้องการ stream ที่ seek ได้ จึงคัดลอกลง MemoryStream ก่อน
+            using var ms = new MemoryStream();
+            await using (var input = file.OpenReadStream(MaxImportBytes))
+            {
+                await input.CopyToAsync(ms);
+            }
+            ms.Position = 0;
+
+            var parsed = Fr032Excel.Parse(ms);
+            if (!parsed.IsValid)
+            {
+                var detail = string.Join(" | ", parsed.Errors.Take(5)) + (parsed.Errors.Count > 5 ? $" | และอีก {parsed.Errors.Count - 5} รายการ" : string.Empty);
+                NotificationService.Notify(NotificationSeverity.Error, "Import Excel: ไม่ได้นำเข้า (ไฟล์มีข้อผิดพลาด)", detail, 15000);
+                return;
+            }
+
+            var applied = Fr032Excel.Apply(Categories, parsed);
+            NotificationService.Notify(NotificationSeverity.Success, "Import Excel", $"นำเข้าคะแนน {applied} หมวดเรียบร้อย — โปรดตรวจสอบก่อนไปขั้นถัดไป", 6000);
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Import failed", ex.Message, 8000);
+        }
+        finally
+        {
+            _isBusy = false;
+            _importInputKey = Guid.NewGuid(); // รีเซ็ต InputFile ให้เลือกไฟล์เดิมซ้ำได้
+            StateHasChanged();
+        }
+    }
+    #endregion
+
+    private void ClearAll()
+    {
+        foreach (var row in Categories)
+        {
+            row.HasSource = false;
+            row.InfluenceScore = null;
+            row.RiskScore = null;
+            row.SectorGuidanceScore = null;
+            row.OutsourcingScore = null;
+            row.EngagementScore = null;
+            row.Remark = null;
+            row.IsAutoScored = false;
+        }
+    }
+}

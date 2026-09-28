@@ -1,0 +1,990 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject EmissionSourceExcelService ExcelService
+@inject EmissionSourceService EmissionSourceService
+@inject EmissionGroupService EmissionGroupService
+@inject EmissionUnitService EmissionUnitService
+@inject SubscriptionService SubscriptionService
+@inject IJSRuntime JSRuntime
+@inject ILogger<ImportEmissionSourceDialog> Logger
+
+<RadzenStack Gap="1.5rem" Style="padding: 0.5rem;">
+    <!-- Top Bar & Template Download -->
+    <RadzenCard Class="p-3 bg-light" Style="border-radius: 8px; border: 1px solid var(--rz-border-color);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <RadzenText Text="Import Emission Sources (.xlsx)" TextStyle="TextStyle.Subtitle1" class="fw-bold mb-1" />
+                <RadzenText Text="Upload an Excel file containing Title and EF. Group, Scope and Unit can be left out of the file and picked below instead." TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+            </div>
+            <RadzenButton Text="Download Template" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@DownloadTemplateAsync" />
+        </div>
+    </RadzenCard>
+
+    <!-- File Upload Section -->
+    <div>
+        <label class="form-label fw-semibold small text-muted">Select Excel File (.xlsx):</label>
+        <InputFile OnChange="@OnInputFileChange" accept=".xlsx" class="form-control form-control-sm" />
+    </div>
+
+    @if (_isParsing)
+    {
+        <div class="py-4 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Parsing Excel file and matching groups / units..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_parsedItems != null)
+    {
+        <!-- Validation Summary Badges -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2">
+                Total Rows: <b>@_parsedItems.Count</b>
+            </span>
+            <span class="badge bg-primary-subtle text-primary-emphasis border px-3 py-2">
+                Ready to Import: <b>@ReadyCount</b>
+            </span>
+            @if (_parsedItems.Any(i => i.IsExistingMatched))
+            {
+                var existingCount = _parsedItems.Count(i => i.IsExistingMatched);
+                var overwriteCount = _parsedItems.Count(i => i.IsExistingMatched && i.ExistingAction == eExistingSourceAction.Overwrite);
+                var asNewCount = _parsedItems.Count(i => i.IsExistingMatched && i.ExistingAction == eExistingSourceAction.ImportAsNew);
+                var skipCount = _parsedItems.Count(i => i.IsExistingMatched && i.ExistingAction == eExistingSourceAction.Skip);
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2" title="@($"Overwrite: {overwriteCount}, Import as New: {asNewCount}, Skip: {skipCount}")">
+                    Already Exists: <b>@existingCount</b>
+                    @if (overwriteCount > 0 || asNewCount > 0)
+                    {
+                        <span class="ms-1 fw-normal">(@(overwriteCount > 0 ? $"{overwriteCount} overwrite" : "")@(overwriteCount > 0 && asNewCount > 0 ? ", " : "")@(asNewCount > 0 ? $"{asNewCount} as new" : ""))</span>
+                    }
+                </span>
+            }
+            @if (_parsedItems.Any(i => i.IsDuplicated))
+            {
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2">
+                    Duplicated in File: <b>@_parsedItems.Count(i => i.IsDuplicated)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => !i.IsValid && !i.IsDuplicated && !i.IsExistingMatched))
+            {
+                <span class="badge bg-danger-subtle text-danger-emphasis border px-3 py-2">
+                    Invalid: <b>@_parsedItems.Count(i => !i.IsValid && !i.IsDuplicated && !i.IsExistingMatched)</b>
+                </span>
+            }
+        </div>
+
+        <!-- Global Defaults Selection Bar -->
+        <RadzenCard Class="p-3" Style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px;">
+            <div class="d-flex flex-column gap-2">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <RadzenIcon Icon="tune" Style="font-size: 1.2rem; color: var(--rz-primary);" />
+                        <span class="fw-bold text-dark" style="font-size: 0.9rem;">Global Batch Assignment</span>
+                        <span class="text-muted small">(Applies to all rows in the list below)</span>
+                    </div>
+                </div>
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label small text-muted mb-1 fw-semibold">Global Scope</label>
+                        <RadzenDropDown TValue="eTgoScopeNo?"
+                                        Data="@_scopeOptions"
+                                        TextProperty="Text"
+                                        ValueProperty="Value"
+                                        Value="@_globalScope"
+                                        Change="@((object val) => OnGlobalScopeChanged((eTgoScopeNo?)val))"
+                                        Placeholder="Choose Scope to apply all..."
+                                        AllowClear="true"
+                                        Class="w-100"
+                                        Style="font-size: 0.8rem; height: 36px; display: flex; align-items: center;" />
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small text-muted mb-1 fw-semibold">Global Emission Group</label>
+                        <RadzenDropDown TValue="int?"
+                                        Data="@GetGlobalGroupOptions()"
+                                        TextProperty="Title"
+                                        ValueProperty="Id"
+                                        Value="@_globalGroupId"
+                                        Change="@((object val) => OnGlobalGroupChanged((int?)val))"
+                                        Placeholder="Choose Group to apply all..."
+                                        AllowClear="true"
+                                        Class="w-100"
+                                        Style="font-size: 0.8rem; height: 36px; display: flex; align-items: center;" />
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label small text-muted mb-1 fw-semibold">Global Unit</label>
+                        <RadzenDropDown TValue="int?"
+                                        Data="@_unitOptions"
+                                        TextProperty="Title"
+                                        ValueProperty="Id"
+                                        Value="@_globalUnitId"
+                                        Change="@((object val) => OnGlobalUnitChanged((int?)val))"
+                                        Placeholder="Choose Unit to apply all..."
+                                        AllowClear="true"
+                                        Class="w-100"
+                                        Style="font-size: 0.8rem; height: 36px; display: flex; align-items: center;" />
+                    </div>
+                    <div class="col-12 col-md-2 d-flex">
+                        <RadzenButton Text="Reset All"
+                                      Icon="refresh"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Variant="Variant.Outlined"
+                                      Disabled="@(!CanResetGlobal)"
+                                      Click="@ResetGlobalSelectionsAsync"
+                                      Class="w-100"
+                                      Style="font-size: 0.8rem; height: 36px; display: inline-flex; align-items: center; justify-content: center;" />
+                    </div>
+                </div>
+            </div>
+        </RadzenCard>
+
+        <!-- Preview DataGrid -->
+        <div style="max-height: 480px; overflow-y: auto; border: 1px solid var(--rz-border-color); border-radius: 8px;">
+            <RadzenDataGrid @ref="_grid" Data="@_parsedItems" TItem="EmissionSourceImportItemDto" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="EmissionSourceImportItemDto" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @item.RowNumber
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionSourceImportItemDto" Title="Title" Property="Title" MinWidth="180px">
+                        <Template Context="item">
+                            <div>
+                                <span class="fw-semibold text-dark">@item.Title</span>
+                                @if (item.IsDuplicated)
+                                {
+                                    <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">Duplicated</span>
+                                }
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionSourceImportItemDto" Title="Scope & Emission Group" MinWidth="300px">
+                        <Template Context="item">
+                            <div class="d-flex flex-column gap-1 p-1" style="background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;">
+                                <div class="d-flex gap-1">
+                                    <div style="width: 130px;">
+                                        <RadzenDropDown TValue="eTgoScopeNo"
+                                                        Data="@_scopeOptions"
+                                                        TextProperty="Text"
+                                                        ValueProperty="Value"
+                                                        Value="@item.Scope"
+                                                        Change="@((object val) => OnRowScopeChanged(item, (eTgoScopeNo)val))"
+                                                        Class="w-100"
+                                                        Style="font-size: 0.75rem;" />
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <RadzenDropDown TValue="int?"
+                                                        Data="@GetGroupsForScope(item.Scope)"
+                                                        TextProperty="Title"
+                                                        ValueProperty="Id"
+                                                        Value="@item.GroupId"
+                                                        Change="@((object val) => OnRowGroupChanged(item, (int?)val))"
+                                                        Placeholder="Select Emission Group..."
+                                                        AllowClear="true"
+                                                        AllowFiltering="true"
+                                                        FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                                        Class="w-100"
+                                                        Style="font-size: 0.75rem;" />
+                                    </div>
+                                </div>
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionSourceImportItemDto" Title="Unit" Width="160px">
+                        <Template Context="item">
+                            <RadzenDropDown TValue="int?"
+                                            Data="@_unitOptions"
+                                            TextProperty="Title"
+                                            ValueProperty="Id"
+                                            Value="@item.UnitId"
+                                            Change="@((object val) => OnRowUnitChanged(item, (int?)val))"
+                                            Placeholder="Select Unit..."
+                                            AllowClear="true"
+                                            AllowFiltering="true"
+                                            FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                            Class="w-100"
+                                            Style="font-size: 0.75rem;" />
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionSourceImportItemDto" Title="EF" Width="140px" TextAlign="TextAlign.Right" Property="EF">
+                        <Template Context="item">
+                            <RadzenNumeric TValue="decimal"
+                                           Value="@item.EF"
+                                           ValueChanged="@((decimal val) => OnRowEfChanged(item, val))"
+                                           Format="0.####"
+                                           Min="0"
+                                           Step="0.0001m"
+                                           Class="w-100 font-monospace fw-semibold text-end"
+                                           Style="font-size: 0.8rem;" />
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="EmissionSourceImportItemDto" Title="Status" Width="180px" TextAlign="TextAlign.Center" Sortable="false">
+                        <Template Context="item">
+                            @{
+                                var errText = string.Join("; ", item.ValidationErrors);
+                            }
+                            @if (item.IsExistingMatched)
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1">
+                                    <RadzenSplitButton Text="@GetExistingBtnText(item.ExistingAction)"
+                                                       Icon="@GetExistingBtnIcon(item.ExistingAction)"
+                                                       Size="ButtonSize.Small"
+                                                        ButtonStyle="@GetExistingBtnStyle(item.ExistingAction)"
+                                                        Click="@(async args => await OnExistingActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Overwrite Existing" Value="overwrite" Icon="sync" Disabled="@item.IsExistingDefaultMaster" />
+                                            <RadzenSplitButtonItem Text="Import as New" Value="as_new" Icon="add_box" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                    <span class="text-muted" style="font-size: 0.65rem;">@(item.IsExistingDefaultMaster ? "System Master" : "Already in DB")</span>
+                                </div>
+                            }
+                            else if (item.IsValid)
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1">
+                                    <RadzenSplitButton Text="@GetValidBtnText(item.RowAction)"
+                                                       Icon="@GetValidBtnIcon(item.RowAction)"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="@GetValidBtnStyle(item.RowAction)"
+                                                       Click="@(async args => await OnValidActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Import this Item" Value="import" Icon="check_circle" />
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                    <span class="text-success" style="font-size: 0.65rem;">Ready to Import</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1" title="@errText">
+                                    <RadzenSplitButton Text="@(item.IsDuplicated ? "Duplicated" : "Invalid")"
+                                                       Icon="warning"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="@(item.IsDuplicated ? ButtonStyle.Warning : ButtonStyle.Danger)"
+                                                       Click="@(async args => await OnInvalidActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                    <span class="text-danger text-truncate" style="max-width: 160px; font-size: 0.65rem;" title="@errText">
+                                        @(item.ValidationErrors.FirstOrDefault() ?? (item.IsDuplicated ? "Duplicate in file" : "Invalid data"))
+                                    </span>
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </div>
+    }
+
+    <!-- Action Buttons -->
+    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.75rem" Class="mt-3">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close(false))" />
+        <RadzenButton Text="@($"Import ({ReadyCount} Ready)")"
+                      Icon="file_upload"
+                      ButtonStyle="ButtonStyle.Success"
+                      Disabled="@(ReadyCount == 0 || _isSaving)"
+                      Click="@ExecuteImportAsync" />
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    #region class field
+    [Parameter] public int SubscriptionId { get; set; }
+
+    private bool _isParsing = false;
+    private bool _isSaving = false;
+    private List<EmissionSourceImportItemDto>? _parsedItems;
+    private RadzenDataGrid<EmissionSourceImportItemDto>? _grid;
+    private byte[]? _fileBytes;
+
+    private List<TbEmissionGroup> _allGroups = new();
+    private List<TbEmissionUnit> _unitOptions = new();
+
+    private readonly List<ScopeOption> _scopeOptions = new()
+    {
+        new ScopeOption { Value = eTgoScopeNo.Scope1, Text = "Scope 1" },
+        new ScopeOption { Value = eTgoScopeNo.Scope2, Text = "Scope 2" },
+        new ScopeOption { Value = eTgoScopeNo.Scope3, Text = "Scope 3" },
+        new ScopeOption { Value = eTgoScopeNo.SeparateReport, Text = "Separate Report" }
+    };
+
+    private class ScopeOption
+    {
+        public eTgoScopeNo Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private eTgoScopeNo? _globalScope = null;
+    private int? _globalGroupId = null;
+    private int? _globalUnitId = null;
+    private bool CanResetGlobal => _globalScope.HasValue || _globalGroupId.HasValue || _globalUnitId.HasValue;
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-09-06]
+        try
+        {
+            _allGroups = await EmissionGroupService.GetBySubscriptionIdAsync(SubscriptionId, includeDefault: true);
+            _unitOptions = await EmissionUnitService.GetBySubscriptionIdAsync(SubscriptionId, includeDefault: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load emission group / unit options for import dialog.");
+            NotificationService.Notify(NotificationSeverity.Error, "Data Error", "Failed to load emission groups and units.");
+        }
+        #endregion
+    }
+
+    private IEnumerable<TbEmissionGroup> GetGroupsForScope(eTgoScopeNo scope)
+    {
+        return _allGroups.Where(g => g.TgoScopeNo == scope);
+    }
+
+    private IEnumerable<TbEmissionGroup> GetGlobalGroupOptions()
+    {
+        if (_globalScope.HasValue)
+        {
+            return _allGroups.Where(g => g.TgoScopeNo == _globalScope.Value);
+        }
+        return _allGroups;
+    }
+
+    private void OnGlobalScopeChanged(eTgoScopeNo? newScope)
+    {
+        _globalScope = newScope;
+        if (_parsedItems == null || !_parsedItems.Any()) return;
+
+        if (newScope.HasValue)
+        {
+            // If global group is set but belongs to different scope, reset global group
+            if (_globalGroupId.HasValue && !_allGroups.Any(g => g.Id == _globalGroupId.Value && g.TgoScopeNo == newScope.Value))
+            {
+                _globalGroupId = null;
+            }
+
+            foreach (var item in _parsedItems)
+            {
+                item.Scope = newScope.Value;
+                // If item's group does not belong to the new scope, reset it
+                if (item.GroupId.HasValue && !_allGroups.Any(g => g.Id == item.GroupId.Value && g.TgoScopeNo == newScope.Value))
+                {
+                    item.GroupId = null;
+                    item.MatchedGroupTitle = string.Empty;
+                }
+                ValidateRow(item);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private void OnGlobalGroupChanged(int? newGroupId)
+    {
+        _globalGroupId = newGroupId;
+        if (_parsedItems == null || !_parsedItems.Any()) return;
+
+        if (newGroupId.HasValue)
+        {
+            var grp = _allGroups.FirstOrDefault(g => g.Id == newGroupId.Value);
+            if (grp != null)
+            {
+                _globalScope = grp.TgoScopeNo;
+                foreach (var item in _parsedItems)
+                {
+                    item.GroupId = grp.Id;
+                    item.MatchedGroupTitle = grp.Title ?? string.Empty;
+                    item.Scope = grp.TgoScopeNo;
+                    ValidateRow(item);
+                }
+            }
+        }
+        StateHasChanged();
+    }
+
+    private void OnGlobalUnitChanged(int? newUnitId)
+    {
+        _globalUnitId = newUnitId;
+        if (_parsedItems == null || !_parsedItems.Any()) return;
+
+        if (newUnitId.HasValue)
+        {
+            var unit = _unitOptions.FirstOrDefault(u => u.Id == newUnitId.Value);
+            var unitTitle = unit?.Title ?? string.Empty;
+
+            foreach (var item in _parsedItems)
+            {
+                item.UnitId = newUnitId.Value;
+                item.MatchedUnitTitle = unitTitle;
+                ValidateRow(item);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task ResetGlobalSelectionsAsync()
+    {
+        _globalScope = null;
+        _globalGroupId = null;
+        _globalUnitId = null;
+
+        if (_fileBytes != null)
+        {
+            await ParseCurrentFileAsync(notify: false);
+        }
+        StateHasChanged();
+    }
+
+    private void OnRowScopeChanged(EmissionSourceImportItemDto item, eTgoScopeNo newScope)
+    {
+        item.Scope = newScope;
+        // If current selected group does not belong to the new scope, reset it
+        if (item.GroupId.HasValue && !_allGroups.Any(g => g.Id == item.GroupId.Value && g.TgoScopeNo == newScope))
+        {
+            item.GroupId = null;
+            item.MatchedGroupTitle = string.Empty;
+        }
+        ValidateRow(item);
+    }
+
+    private void OnRowGroupChanged(EmissionSourceImportItemDto item, int? newGroupId)
+    {
+        item.GroupId = newGroupId;
+        if (newGroupId.HasValue)
+        {
+            var grp = _allGroups.FirstOrDefault(g => g.Id == newGroupId.Value);
+            if (grp != null)
+            {
+                item.MatchedGroupTitle = grp.Title ?? string.Empty;
+                item.Scope = grp.TgoScopeNo;
+            }
+        }
+        else
+        {
+            item.MatchedGroupTitle = string.Empty;
+        }
+        ValidateRow(item);
+    }
+
+    private void OnRowUnitChanged(EmissionSourceImportItemDto item, int? newUnitId)
+    {
+        item.UnitId = newUnitId;
+        if (newUnitId.HasValue)
+        {
+            var unit = _unitOptions.FirstOrDefault(u => u.Id == newUnitId.Value);
+            item.MatchedUnitTitle = unit?.Title ?? string.Empty;
+        }
+        else
+        {
+            item.MatchedUnitTitle = string.Empty;
+        }
+        ValidateRow(item);
+    }
+
+    private void OnRowEfChanged(EmissionSourceImportItemDto item, decimal newEf)
+    {
+        item.EF = newEf;
+        // หากไม่มีก๊าซอื่นๆ ให้ปรับ CO2 ตาม EF ด้วย
+        var otherGases = item.FossilCH4 + item.CH4 + item.N2O + item.SF6 + item.NF3 + item.HFCs + item.PFCs;
+        if (otherGases == 0m)
+        {
+            item.CO2 = newEf;
+        }
+        ValidateRow(item);
+    }
+
+    private void ValidateRow(EmissionSourceImportItemDto item)
+    {
+        // Clear group, unit, and EF errors
+        item.ValidationErrors.RemoveAll(e =>
+            e.StartsWith("Group is required") ||
+            e.StartsWith("Emission group") ||
+            e.StartsWith("Unit is required") ||
+            e.StartsWith("Emission unit") ||
+            e.StartsWith("EF is required") ||
+            e.StartsWith("EF value") ||
+            e.StartsWith("EF must not be negative"));
+
+        if (!item.GroupId.HasValue)
+        {
+            item.ValidationErrors.Add("Group is required.");
+        }
+
+        if (!item.UnitId.HasValue)
+        {
+            item.ValidationErrors.Add("Unit is required.");
+        }
+
+        if (item.EF < 0)
+        {
+            item.ValidationErrors.Add("EF must not be negative.");
+        }
+
+        item.IsValid = !item.IsDuplicated && item.ValidationErrors.Count == 0;
+    }
+
+    private async Task DownloadTemplateAsync()
+    {
+        #region hide [2026-09-06]
+        try
+        {
+            var bytes = await ExcelService.GenerateTemplateExcelAsync(SubscriptionId);
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("saveAsFile", "Template_EmissionSources.xlsx", base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Template Downloaded", "Emission source import template saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate emission source import template.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to download template.");
+        }
+        #endregion
+    }
+
+    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    {
+        #region hide [2026-09-06]
+        var file = e.File;
+        if (file == null) return;
+
+        _isParsing = true;
+        StateHasChanged();
+
+        try
+        {
+            var sub = SubscriptionId > 0 ? await SubscriptionService.GetByIdAsync(SubscriptionId) : null;
+            var maxBytes = FileConstants.GetMaxUploadSizeBytes(sub?.AllowDataUploadCount);
+
+            if (file.Size > maxBytes)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "File Too Large", $"{file.Name} ({FileConstants.FormatFileSize(file.Size)}) exceeds maximum allowed upload limit of {FileConstants.FormatFileSize(maxBytes)}.");
+                _isParsing = false;
+                StateHasChanged();
+                return;
+            }
+
+            using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _fileBytes = ms.ToArray();
+
+            await ParseCurrentFileAsync(notify: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to parse uploaded emission source Excel file.");
+            NotificationService.Notify(NotificationSeverity.Error, "Parsing Error", "Failed to parse Excel file. Please ensure it is a valid .xlsx file.");
+            _parsedItems = null;
+            _fileBytes = null;
+        }
+        finally
+        {
+            _isParsing = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private async Task ParseCurrentFileAsync(bool notify)
+    {
+        #region hide [2026-09-06]
+        if (_fileBytes == null) return;
+
+        using var ms = new MemoryStream(_fileBytes);
+        _parsedItems = await ExcelService.ParseImportExcelAsync(ms, SubscriptionId);
+        _globalScope = null;
+        _globalGroupId = null;
+        _globalUnitId = null;
+
+        if (!notify) return;
+
+        if (_parsedItems.Count == 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "No Data Found", "Could not detect the 'Title' column header or the file contains no data rows.");
+        }
+        else
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "Excel Parsed", $"Parsed {_parsedItems.Count} rows.");
+        }
+        #endregion
+    }
+
+    private bool IsReady(EmissionSourceImportItemDto i)
+    {
+        if (!i.IsValid) return false;
+        if (i.IsExistingMatched) return i.ExistingAction != eExistingSourceAction.Skip;
+        return i.RowAction != eRowAction.Skip;
+    }
+
+    private int ReadyCount => _parsedItems?.Count(i => IsReady(i)) ?? 0;
+
+    // [2026-09-20][Antigravity] รองรับ async Task สำหรับ action menu selection เพื่อให้ await reload grid ได้สมบูรณ์
+    private async Task OnValidActionSelected(RadzenSplitButtonItem? args, EmissionSourceImportItemDto item)
+    {
+        var action = args?.Value?.ToString() ?? "import";
+        switch (action)
+        {
+            case "skip":
+                item.RowAction = eRowAction.Skip;
+                break;
+            case "remove":
+                await RemoveItemFromList(item);
+                return;
+            case "import":
+            default:
+                item.RowAction = eRowAction.Default;
+                break;
+        }
+        StateHasChanged();
+    }
+
+    private async Task OnInvalidActionSelected(RadzenSplitButtonItem? args, EmissionSourceImportItemDto item)
+    {
+        var action = args?.Value?.ToString() ?? "skip";
+        switch (action)
+        {
+            case "remove":
+                await RemoveItemFromList(item);
+                return;
+            case "skip":
+            default:
+                item.RowAction = eRowAction.Skip;
+                break;
+        }
+        StateHasChanged();
+    }
+
+    private static string GetValidBtnText(eRowAction action) => action switch
+    {
+        eRowAction.Skip => "Skip",
+        _ => "Import"
+    };
+
+    private static string GetValidBtnIcon(eRowAction action) => action switch
+    {
+        eRowAction.Skip => "block",
+        _ => "check_circle"
+    };
+
+    private static ButtonStyle GetValidBtnStyle(eRowAction action) => action switch
+    {
+        eRowAction.Skip => ButtonStyle.Light,
+        _ => ButtonStyle.Success
+    };
+
+    private async Task OnExistingActionSelected(RadzenSplitButtonItem? args, EmissionSourceImportItemDto item)
+    {
+        var action = args?.Value?.ToString() ?? "skip";
+        switch (action)
+        {
+            case "overwrite":
+                if (!item.IsExistingDefaultMaster)
+                {
+                    item.ExistingAction = eExistingSourceAction.Overwrite;
+                }
+                break;
+            case "as_new":
+                item.ExistingAction = eExistingSourceAction.ImportAsNew;
+                break;
+            case "remove":
+                await RemoveItemFromList(item);
+                return;
+            case "skip":
+            default:
+                item.ExistingAction = eExistingSourceAction.Skip;
+                break;
+        }
+        StateHasChanged();
+    }
+
+    private static string GetExistingBtnText(eExistingSourceAction action) => action switch
+    {
+        eExistingSourceAction.Overwrite => "Overwrite",
+        eExistingSourceAction.ImportAsNew => "Import as New",
+        _ => "Skip"
+    };
+
+    private static string GetExistingBtnIcon(eExistingSourceAction action) => action switch
+    {
+        eExistingSourceAction.Overwrite => "sync",
+        eExistingSourceAction.ImportAsNew => "add_box",
+        _ => "block"
+    };
+
+    private static ButtonStyle GetExistingBtnStyle(eExistingSourceAction action) => action switch
+    {
+        eExistingSourceAction.Overwrite => ButtonStyle.Info,
+        eExistingSourceAction.ImportAsNew => ButtonStyle.Primary,
+        _ => ButtonStyle.Warning
+    };
+
+    // [2026-09-20][Antigravity] แก้ไขให้ Remove จาก List ทำงานจริง โดยลบรายการ อัปเดต reference ใหม่ ปรับสถานะซ้ำ และ Reload RadzenDataGrid
+    private async Task RemoveItemFromList(EmissionSourceImportItemDto item)
+    {
+        if (_parsedItems == null) return;
+
+        item.RowAction = eRowAction.Remove;
+
+        // หากรายการที่ลบเป็นรายการที่เคย match ข้อมูลเดิมใน DB ให้ส่งต่อ match นั้นให้กับรายการชื่อเดียวกันที่เหลืออยู่ (ถ้ามี)
+        if (item.IsExistingMatched)
+        {
+            var nextSame = _parsedItems.FirstOrDefault(x => x != item && string.Equals(x.Title?.Trim(), item.Title?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (nextSame != null && !nextSame.IsExistingMatched)
+            {
+                nextSame.IsExistingMatched = true;
+                nextSame.MatchedExistingSourceId = item.MatchedExistingSourceId;
+                nextSame.IsExistingDefaultMaster = item.IsExistingDefaultMaster;
+                nextSame.ExistingAction = item.ExistingAction;
+            }
+        }
+
+        _parsedItems.Remove(item);
+        _parsedItems = _parsedItems.ToList();
+
+        ReevaluateDuplicates();
+
+        if (_grid != null)
+        {
+            await _grid.Reload();
+        }
+
+        NotificationService.Notify(NotificationSeverity.Info, "Item Removed", $"Removed '{item.Title}' from import list.");
+        StateHasChanged();
+    }
+
+    // [2026-09-20][Antigravity] ตรวจสอบและอัปเดตสถานะความซ้ำซ้อนในไฟล์ใหม่เมื่อมีรายการถูกนำออกจากลิสต์
+    private void ReevaluateDuplicates()
+    {
+        if (_parsedItems == null) return;
+
+        var titleGroups = _parsedItems
+            .Where(x => !string.IsNullOrWhiteSpace(x.Title))
+            .GroupBy(x => x.Title.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var group in titleGroups)
+        {
+            var list = group.ToList();
+            if (list.Count == 1)
+            {
+                var single = list[0];
+                if (single.IsDuplicated)
+                {
+                    single.IsDuplicated = false;
+                    single.ValidationErrors.RemoveAll(e => e.Contains("Duplicated title within this file."));
+                    ValidateRow(single);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var current = list[i];
+                    if (i == 0)
+                    {
+                        if (current.IsDuplicated)
+                        {
+                            current.IsDuplicated = false;
+                            current.ValidationErrors.RemoveAll(e => e.Contains("Duplicated title within this file."));
+                            ValidateRow(current);
+                        }
+                    }
+                    else
+                    {
+                        current.IsDuplicated = true;
+                        if (!current.ValidationErrors.Any(e => e.Contains("Duplicated title within this file.")))
+                        {
+                            current.ValidationErrors.Add("Duplicated title within this file.");
+                        }
+                        ValidateRow(current);
+                    }
+                }
+            }
+        }
+    }
+
+    private async Task ExecuteImportAsync()
+    {
+        #region hide [2026-09-06]
+        if (_parsedItems == null || ReadyCount == 0) return;
+
+        if (SubscriptionId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Subscription Required", "Please select a subscription workspace before importing.");
+            return;
+        }
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            int insertedCount = 0;
+            int overwrittenCount = 0;
+            int skippedCount = 0;
+            int failedCount = 0;
+
+            var itemsToProcess = _parsedItems.Where(i => IsReady(i)).ToList();
+
+            foreach (var item in itemsToProcess)
+            {
+                try
+                {
+                    if (item.IsExistingMatched && item.ExistingAction == eExistingSourceAction.Overwrite && item.MatchedExistingSourceId.HasValue)
+                    {
+                        // Overwrite existing custom emission source
+                        var existing = await EmissionSourceService.GetByIdAsync(item.MatchedExistingSourceId.Value);
+                        if (existing != null && existing.SourceType != eSourceType.Default)
+                        {
+                            existing.GroupId = item.GroupId!.Value;
+                            existing.UnitId = item.UnitId!.Value;
+                            existing.CO2 = item.CO2;
+                            existing.FossilCH4 = item.FossilCH4;
+                            existing.CH4 = item.CH4;
+                            existing.N2O = item.N2O;
+                            existing.SF6 = item.SF6;
+                            existing.NF3 = item.NF3;
+                            existing.HFCs = item.HFCs;
+                            existing.PFCs = item.PFCs;
+                            existing.gwpCO2 = item.gwpCO2;
+                            existing.gwpFossilCH4 = item.gwpFossilCH4;
+                            existing.gwpCH4 = item.gwpCH4;
+                            existing.gwpN2O = item.gwpN2O;
+                            existing.gwpSF6 = item.gwpSF6;
+                            existing.gwpNF3 = item.gwpNF3;
+                            existing.gwpHFCs = item.gwpHFCs;
+                            existing.gwpPFCs = item.gwpPFCs;
+                            existing.GwpVersion = item.GwpVersion;
+                            if (!string.IsNullOrWhiteSpace(item.Ref))
+                            {
+                                existing.Ref = item.Ref;
+                            }
+                            await EmissionSourceService.UpdateAsync(existing);
+                            overwrittenCount++;
+                        }
+                        else
+                        {
+                            // If cannot overwrite (e.g. system master), insert as new
+                            await EmissionSourceService.CreateAsync(new TbEmissionSource
+                            {
+                                Title = item.Title,
+                                Remark = string.Empty,
+                                GroupId = item.GroupId!.Value,
+                                UnitId = item.UnitId!.Value,
+                                CO2 = item.CO2,
+                                FossilCH4 = item.FossilCH4,
+                                CH4 = item.CH4,
+                                N2O = item.N2O,
+                                SF6 = item.SF6,
+                                NF3 = item.NF3,
+                                HFCs = item.HFCs,
+                                PFCs = item.PFCs,
+                                gwpCO2 = item.gwpCO2,
+                                gwpFossilCH4 = item.gwpFossilCH4,
+                                gwpCH4 = item.gwpCH4,
+                                gwpN2O = item.gwpN2O,
+                                gwpSF6 = item.gwpSF6,
+                                gwpNF3 = item.gwpNF3,
+                                gwpHFCs = item.gwpHFCs,
+                                gwpPFCs = item.gwpPFCs,
+                                GwpVersion = item.GwpVersion,
+                                Ref = item.Ref,
+                                SubscriptionId = SubscriptionId,
+                                SourceType = eSourceType.Custom,
+                                IsActive = true
+                            });
+                            insertedCount++;
+                        }
+                    }
+                    else
+                    {
+                        // Insert new custom emission source
+                        await EmissionSourceService.CreateAsync(new TbEmissionSource
+                        {
+                            Title = item.Title,
+                            Remark = string.Empty,
+                            GroupId = item.GroupId!.Value,
+                            UnitId = item.UnitId!.Value,
+                            CO2 = item.CO2,
+                            FossilCH4 = item.FossilCH4,
+                            CH4 = item.CH4,
+                            N2O = item.N2O,
+                            SF6 = item.SF6,
+                            NF3 = item.NF3,
+                            HFCs = item.HFCs,
+                            PFCs = item.PFCs,
+                            gwpCO2 = item.gwpCO2,
+                            gwpFossilCH4 = item.gwpFossilCH4,
+                            gwpCH4 = item.gwpCH4,
+                            gwpN2O = item.gwpN2O,
+                            gwpSF6 = item.gwpSF6,
+                            gwpNF3 = item.gwpNF3,
+                            gwpHFCs = item.gwpHFCs,
+                            gwpPFCs = item.gwpPFCs,
+                            GwpVersion = item.GwpVersion,
+                            Ref = item.Ref,
+                            SubscriptionId = SubscriptionId,
+                            SourceType = eSourceType.Custom,
+                            IsActive = true
+                        });
+                        insertedCount++;
+                    }
+                }
+                catch (Exception exItem)
+                {
+                    failedCount++;
+                    item.IsValid = false;
+                    item.ValidationErrors.Add(exItem.Message);
+                    Logger.LogWarning(exItem, "Skipped emission source import row {Row}: {Title}", item.RowNumber, item.Title);
+                }
+            }
+
+            skippedCount = _parsedItems.Count(i => i.IsExistingMatched && i.ExistingAction == eExistingSourceAction.Skip);
+
+            var totalSuccess = insertedCount + overwrittenCount;
+            if (totalSuccess > 0)
+            {
+                var parts = new List<string>();
+                if (insertedCount > 0) parts.Add($"imported {insertedCount} new");
+                if (overwrittenCount > 0) parts.Add($"overwrote {overwrittenCount} existing");
+                if (skippedCount > 0) parts.Add($"skipped {skippedCount} existing");
+                if (failedCount > 0) parts.Add($"{failedCount} failed");
+
+                NotificationService.Notify(NotificationSeverity.Success, "Import Successful", $"Successfully {string.Join(", ", parts)} emission source(s).");
+                DialogService.Close(true);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Nothing Imported", "No emission source was imported. Please review row statuses.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save imported emission sources.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save imported emission sources.");
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+    #endregion
+}

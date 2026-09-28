@@ -1,0 +1,292 @@
+@page "/admin/roles/edit"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+
+@attribute [Authorize(Roles = SystemRoles.Administrator)]
+@inject IdentityAdminService IdentityAdminService
+@inject NotificationService NotificationService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject ILogger<EditUserRoles> Logger
+
+<PageTitle>Edit User Roles - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@GoBack" Style="border-radius: 8px;" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-0" Style="color: var(--rz-text-title-color);">
+                    Edit User Roles
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" class="text-muted mb-0">
+                Assign the system roles that govern platform-wide access for this account.
+            </RadzenText>
+        </div>
+
+        @if (_hasChanges)
+        {
+            <div>
+                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Unsaved Changes" IsPill="true" />
+            </div>
+        }
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading user account..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_user == null)
+    {
+        <div class="alert alert-danger d-flex align-items-center mb-4" role="alert">
+            <RadzenIcon Icon="error_outline" class="me-2 fs-5" />
+            <div>
+                <strong>Not Found:</strong> The requested user account could not be loaded.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="shadow-sm rounded-3" style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color); border-radius: 12px;">
+            <div class="p-4">
+                <!-- Account Summary -->
+                <div class="d-flex align-items-center gap-3 p-3 mb-4 bg-light rounded-3 border">
+                    <RadzenIcon Icon="account_circle" class="text-primary" Style="font-size: 2.5rem;" />
+                    <div class="flex-grow-1">
+                        <RadzenText TextStyle="TextStyle.Subtitle1" class="fw-bold mb-0">@(_user.Email ?? _user.UserName)</RadzenText>
+                        @if (!string.IsNullOrEmpty(_user.UserName) && !string.Equals(_user.UserName, _user.Email, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <span class="text-muted small d-block">Username: @_user.UserName</span>
+                        }
+                    </div>
+                    @if (_user.EmailConfirmed)
+                    {
+                        <RadzenBadge Text="Email Confirmed" BadgeStyle="BadgeStyle.Success" IsPill="true" />
+                    }
+                    else
+                    {
+                        <RadzenBadge Text="Email Pending" BadgeStyle="BadgeStyle.Warning" IsPill="true" />
+                    }
+                </div>
+
+                <!-- Role Selection -->
+                <RadzenText TextStyle="TextStyle.Subtitle2" class="fw-bold mb-1">Available System Roles</RadzenText>
+                <RadzenText TextStyle="TextStyle.Caption" class="text-muted mb-3 d-block">
+                    Select the system roles to assign to this user account.
+                </RadzenText>
+
+                @if (!_availableRoles.Any())
+                {
+                    <div class="p-4 text-center text-muted border rounded-3">
+                        <RadzenIcon Icon="shield" Style="font-size: 36px; opacity: 0.5;" class="mb-1" />
+                        <div>No system roles are defined in the database.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="row g-2">
+                        @foreach (var role in _availableRoles)
+                        {
+                            var roleName = role;
+                            <div class="col-12 col-md-6">
+                                <div class="d-flex align-items-center gap-2 p-3 border rounded-3 h-100">
+                                    <RadzenCheckBox TValue="bool"
+                                                    Value="@_selectedRoles.Contains(roleName)"
+                                                    ValueChanged="@((bool isChecked) => ToggleRole(roleName, isChecked))"
+                                                    Name="@($"role_chk_{roleName}")"
+                                                    InputAttributes="@(new Dictionary<string, object> { { "id", $"role_chk_{roleName}" } })" />
+                                    <label for="@($"role_chk_{roleName}")" class="mb-0 flex-grow-1" style="cursor: pointer;">
+                                        <span class="fw-bold d-block">@roleName</span>
+                                        <span class="text-muted small">@GetRoleDescription(roleName)</span>
+                                    </label>
+                                    <RadzenBadge Text="@roleName" BadgeStyle="@GetRoleBadgeStyle(roleName)" IsPill="true" />
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-end gap-2 mt-4">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@GoBack" Style="min-width: 120px; border-radius: 8px;" />
+            <RadzenButton Text="Update"
+                          Icon="save"
+                          ButtonStyle="ButtonStyle.Primary"
+                          IsBusy="@_isSaving"
+                          Disabled="@(_isSaving || !_hasChanges)"
+                          Click="@HandleSaveAsync"
+                          Style="min-width: 120px; border-radius: 8px; font-weight: 600;" />
+        </div>
+    }
+</div>
+
+@code {
+    #region class fields
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _hasChanges = false;
+
+    private ApplicationUser? _user;
+    private List<string> _availableRoles = new();
+    private HashSet<string> _selectedRoles = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _originalRoles = new(StringComparer.OrdinalIgnoreCase);
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+
+    public string UserId { get; set; } = string.Empty;
+    public string? ReturnUrl { get; set; }
+    #endregion
+
+    #region class methods
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-16]
+        UserId = DataProtection.Unprotect(SecureId) ?? string.Empty;
+        ReturnUrl = DataProtection.Unprotect(SecureRet);
+
+        await LoadUserDataAsync();
+        #endregion
+    }
+
+    private async Task LoadUserDataAsync()
+    {
+        #region hide [2026-08-16]
+        _isLoading = true;
+        _hasChanges = false;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(UserId))
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Invalid Request", "No user account was specified.");
+                _user = null;
+                return;
+            }
+
+            _user = await IdentityAdminService.GetUserByIdAsync(UserId);
+            if (_user == null)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Not Found", "User account not found.");
+                return;
+            }
+
+            _availableRoles = await IdentityAdminService.GetAvailableSystemRolesAsync();
+
+            var currentRoles = await IdentityAdminService.GetUserSystemRolesAsync(UserId);
+            _originalRoles = new HashSet<string>(currentRoles, StringComparer.OrdinalIgnoreCase);
+            _selectedRoles = new HashSet<string>(currentRoles, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading user roles for user {UserId}", UserId);
+            NotificationService.Notify(NotificationSeverity.Error, "Load Error", "Failed to load user role data.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void ToggleRole(string role, bool isChecked)
+    {
+        #region hide [2026-08-16]
+        if (isChecked)
+        {
+            _selectedRoles.Add(role);
+        }
+        else
+        {
+            _selectedRoles.Remove(role);
+        }
+
+        _hasChanges = !_selectedRoles.SetEquals(_originalRoles);
+        #endregion
+    }
+
+    private async Task HandleSaveAsync()
+    {
+        #region hide [2026-08-16]
+        if (_user == null) return;
+
+        _isSaving = true;
+        try
+        {
+            await IdentityAdminService.UpdateUserSystemRolesAsync(UserId, _selectedRoles.ToList());
+            _hasChanges = false;
+            NotificationService.Notify(NotificationSeverity.Success, "Saved", $"System roles for '{_user.Email ?? _user.UserName}' updated successfully.");
+            GoBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving user roles for user {UserId}", UserId);
+            NotificationService.Notify(NotificationSeverity.Error, "Save Error", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-16]
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/admin/roles");
+        }
+        #endregion
+    }
+
+    private BadgeStyle GetRoleBadgeStyle(string roleName)
+    {
+        #region hide [2026-08-16]
+        return roleName switch
+        {
+            SystemRoles.Administrator => BadgeStyle.Danger,
+            SystemRoles.Staff => BadgeStyle.Warning,
+            SystemRoles.SubscriptionManager => BadgeStyle.Primary,
+            SystemRoles.User => BadgeStyle.Info,
+            SystemRoles.Corporate => BadgeStyle.Success,
+            _ => BadgeStyle.Secondary
+        };
+        #endregion
+    }
+
+    private string GetRoleDescription(string roleName)
+    {
+        #region hide [2026-08-16]
+        return roleName switch
+        {
+            SystemRoles.Administrator => "Full control over system configuration and all tenant data.",
+            SystemRoles.Staff => "Platform operations and support across tenants.",
+            SystemRoles.SubscriptionManager => "Manage subscriptions, quotas, and validity dates without core system access.",
+            SystemRoles.User => "Standard access to assigned workspaces.",
+            SystemRoles.Corporate => "Tenant organization level access.",
+            _ => "Custom system role."
+        };
+        #endregion
+    }
+    #endregion
+}

@@ -1,0 +1,647 @@
+@page "/library/activity-topics/lci-breakdown"
+@page "/activities/topics/lci-breakdown"
+
+@using System.Text.Json.Nodes
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+
+@attribute [Authorize]
+
+@inject ActivityTopicService ActivityTopicService
+@inject ActivityEventService ActivityEventService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JSRuntime
+@inject ILogger<PageActivityTopicLciBreakdown> Logger
+
+<PageTitle>LCI & GHG Breakdown - ACAMP</PageTitle>
+
+<div class="container-fluid py-2 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@GoBack" Class="me-2" Style="border-radius: 6px;" Title="Back to previous page" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    LCI & GHG Breakdown
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0 ms-5">
+                Life cycle inventory measurements, greenhouse gas emission factors, GWP100 breakdown, and calculated kgCO₂e.
+            </RadzenText>
+        </div>
+
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+            <RadzenButton Text="Export Excel" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                          Click="@ExportToExcelAsync" Style="border-radius: 8px; font-weight: 600;"
+                          Disabled="@(!_filteredItems.Any() || !CanExport)"
+                          Title="@(CanExport ? "Export breakdown records to CSV" : "Export is restricted to users with edit permissions.")" />
+        </RadzenStack>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading LCI breakdown data..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_topic == null)
+    {
+        <div class="alert alert-danger text-center py-4 border rounded-3 bg-light shadow-sm">
+            <RadzenIcon Icon="error" Style="font-size: 2rem;" Class="text-danger mb-2 d-block" />
+            <strong>Activity Topic Not Found:</strong> The requested activity topic does not exist or you do not have permission.
+        </div>
+    }
+    else
+    {
+        <!-- Section 1: Topic Overview Card -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-3">
+            <RadzenRow AlignItems="AlignItems.Center" Class="g-3">
+                <RadzenColumn Size="12" SizeMD="8">
+                    <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                        <span class="badge @BadgeScopeColor rounded-pill px-3 py-1" style="font-size: 0.8rem; font-weight: 600;">
+                            @ScopeBadgeText
+                        </span>
+                        <RadzenText TextStyle="TextStyle.H6" Class="m-0 fw-bold text-dark">
+                            @_topic.Title
+                        </RadzenText>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_topic.Remark))
+                    {
+                        <RadzenText TextStyle="TextStyle.Body2" Class="text-muted mb-2">
+                            Remark: @_topic.Remark
+                        </RadzenText>
+                    }
+                    <div class="row g-2 text-secondary small" style="font-size: 0.88rem;">
+                        <div class="col-12 col-md-6">
+                            <strong>Activity Group:</strong> @(_masterChild?.ActivityGroup?.Title ?? "-")
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Emission Source:</strong> @(_masterChild?.Source?.Title ?? "-")
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Unit:</strong> <span class="badge bg-light text-dark border">@UnitTitle</span>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>EF × Ratio (Excl. Share):</strong> <span class="text-success fw-bold font-monospace">@EffectiveEF.ToString("N4")</span> kgCO₂e/@UnitTitle
+                        </div>
+                    </div>
+                </RadzenColumn>
+
+                <RadzenColumn Size="12" SizeMD="4" Class="border-start-md ps-md-4">
+                    <div class="text-md-end">
+                        <div class="mb-2">
+                            <span class="text-muted small d-block">Total Quantity (@(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years")):</span>
+                            <span class="fs-4 fw-bold text-dark font-monospace">@_filteredItems.Sum(e => e.Quantity).ToString("N2")</span>
+                            <span class="fs-6 text-muted fw-normal ms-1">@UnitTitle</span>
+                        </div>
+                        <div>
+                            <span class="text-muted small d-block">Total Calculated Emissions (@(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years")):</span>
+                            <span class="fs-4 fw-bold text-danger font-monospace">@_filteredItems.Sum(e => e.TotalKgCO2e).ToString("N2")</span>
+                            <span class="fs-6 text-secondary fw-semibold ms-1">kgCO₂e</span>
+                        </div>
+                    </div>
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenCard>
+
+        <!-- Section 2: Filters -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-3">
+            <RadzenRow Class="g-3 align-items-center">
+                <RadzenColumn Size="12" SizeMD="5">
+                    <RadzenFormField Text="Search Notes / Timestamp" Style="width: 100%;">
+                        <RadzenTextBox @bind-Value="@_searchQuery"
+                                       @oninput="@(args => { _searchQuery = args.Value?.ToString() ?? ""; ApplyFilters(); })"
+                                       Placeholder="Search remarks or time..." Style="width: 100%;" />
+                    </RadzenFormField>
+                </RadzenColumn>
+
+                <RadzenColumn Size="12" SizeMD="7" Class="d-flex align-items-center justify-content-md-end gap-2 flex-wrap">
+                    <RadzenFormField Text="Reporting Year" Style="width: 150px;">
+                        <RadzenDropDown TValue="int?" Value="@_selectedYear" Data="@_yearOptions"
+                                        TextProperty="Text" ValueProperty="Value"
+                                        Change="@(args => OnYearChanged((int?)args))" Style="width: 100%;" />
+                    </RadzenFormField>
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenCard>
+
+        <!-- Section 3: Multi-Column Detailed DataGrid -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-2">
+            @if (!_filteredItems.Any())
+            {
+                <div class="p-5 text-center text-muted">
+                    <RadzenIcon Icon="info" Style="font-size: 2.5rem; opacity: 0.5;" Class="mb-2 d-block" />
+                    <div>No activity event records found for the selected filter criteria.</div>
+                </div>
+            }
+            else
+            {
+                <RadzenDataGrid Data="@_filteredItems" TItem="EventDetailRow" AllowSorting="true" AllowPaging="true" PageSize="25"
+                                AllowColumnResize="true"
+                                ShowPagingSummary="true" PageSizeOptions="@(new int[] { 15, 25, 50, 100 })"
+                                Style="@GridStyles.Default" Class="rounded border">
+                    <Columns>
+                        <!-- Index -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                            <Template Context="row">
+                                @(_filteredItems.IndexOf(row) + 1)
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- Timestamp -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Property="TimeStamp" Title="Time-Stamp" Width="115px" TextAlign="TextAlign.Center">
+                            <Template Context="row">
+                                <span class="fw-bold font-monospace">@row.TimeStamp.ToString("yyyy-MM")</span>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- LCI Section -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Title="LCI Data" TextAlign="TextAlign.Center">
+                            <Columns>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="UnitTitle" Title="Unit" Width="85px" TextAlign="TextAlign.Center" />
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="Quantity" Title="Quantity" Width="130px" TextAlign="TextAlign.Right">
+                                    <Template Context="row">
+                                        <span class="fw-bold text-dark font-monospace">@row.Quantity.ToString("N2")</span>
+                                    </Template>
+                                    <FooterTemplate>
+                                        <div class="fw-bold text-end font-monospace">
+                                            @_filteredItems.Sum(r => r.Quantity).ToString("N2")
+                                        </div>
+                                    </FooterTemplate>
+                                </RadzenDataGridColumn>
+                            </Columns>
+                        </RadzenDataGridColumn>
+
+                        <!-- GHG EF Breakdown Section -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Title="Emission Factor (kg GHG/Unit)" TextAlign="TextAlign.Center">
+                            <Columns>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="CO2" Title="CO₂" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.CO2.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="FossilCH4" Title="FossilCH₄" Width="95px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.FossilCH4.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="CH4" Title="CH₄" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.CH4.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="N2O" Title="N₂O" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.N2O.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="SF6" Title="SF₆" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.SF6.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="NF3" Title="NF₃" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.NF3.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="HFCs" Title="HFCs" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.HFCs.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="PFCs" Title="PFCs" Width="85px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.PFCs.ToString("N4")</Template>
+                                </RadzenDataGridColumn>
+                            </Columns>
+                        </RadzenDataGridColumn>
+
+                        <!-- Calculated Emissions per Gas Section -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Title="Calculated Emissions (kgCO₂e)" TextAlign="TextAlign.Center">
+                            <Columns>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="CalcCO2" Title="CO₂" Width="100px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.CalcCO2.ToString("N2")</Template>
+                                    <FooterTemplate>
+                                        <div class="text-end fw-semibold">@_filteredItems.Sum(r => r.CalcCO2).ToString("N2")</div>
+                                    </FooterTemplate>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="CalcCH4" Title="CH₄ (Incl. Fossil)" Width="120px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.CalcCH4.ToString("N2")</Template>
+                                    <FooterTemplate>
+                                        <div class="text-end fw-semibold">@_filteredItems.Sum(r => r.CalcCH4).ToString("N2")</div>
+                                    </FooterTemplate>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="CalcN2O" Title="N₂O" Width="100px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.CalcN2O.ToString("N2")</Template>
+                                    <FooterTemplate>
+                                        <div class="text-end fw-semibold">@_filteredItems.Sum(r => r.CalcN2O).ToString("N2")</div>
+                                    </FooterTemplate>
+                                </RadzenDataGridColumn>
+                                <RadzenDataGridColumn TItem="EventDetailRow" Property="CalcOthers" Title="Other Gases" Width="100px" TextAlign="TextAlign.Right">
+                                    <Template Context="r">@r.CalcOthers.ToString("N2")</Template>
+                                    <FooterTemplate>
+                                        <div class="text-end fw-semibold">@_filteredItems.Sum(r => r.CalcOthers).ToString("N2")</div>
+                                    </FooterTemplate>
+                                </RadzenDataGridColumn>
+                            </Columns>
+                        </RadzenDataGridColumn>
+
+                        <!-- Total GHG kgCO2e -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Property="TotalKgCO2e" Title="Total GHG (kgCO₂e)" Width="150px" TextAlign="TextAlign.Right">
+                            <Template Context="row">
+                                <span class="fw-bold text-danger font-monospace">@row.TotalKgCO2e.ToString("N2")</span>
+                            </Template>
+                            <FooterTemplate>
+                                <div class="fw-bold text-end text-danger font-monospace">
+                                    @_filteredItems.Sum(r => r.TotalKgCO2e).ToString("N2")
+                                </div>
+                            </FooterTemplate>
+                        </RadzenDataGridColumn>
+
+                        <!-- Origin / Source Reference -->
+                        <RadzenDataGridColumn TItem="EventDetailRow" Title="Data Origin & Ref" Width="200px">
+                            <Template Context="row">
+                                <div class="small">
+                                    @if (!string.IsNullOrWhiteSpace(row.OriginTags))
+                                    {
+                                        <span class="badge bg-light text-dark border me-1">@row.OriginTags</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(row.Remark))
+                                    {
+                                        <span class="text-muted">@row.Remark</span>
+                                    }
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            }
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    #region nested row model
+    public class EventDetailRow
+    {
+        public int Id { get; set; }
+        public DateTime TimeStamp { get; set; }
+        public decimal Quantity { get; set; }
+        public string UnitTitle { get; set; } = "Unit";
+        public string Remark { get; set; } = string.Empty;
+
+        // EFs
+        public decimal CO2 { get; set; }
+        public decimal FossilCH4 { get; set; }
+        public decimal CH4 { get; set; }
+        public decimal N2O { get; set; }
+        public decimal SF6 { get; set; }
+        public decimal NF3 { get; set; }
+        public decimal HFCs { get; set; }
+        public decimal PFCs { get; set; }
+
+        // GWPs
+        public decimal gwpCO2 { get; set; }
+        public decimal gwpFossilCH4 { get; set; }
+        public decimal gwpCH4 { get; set; }
+        public decimal gwpN2O { get; set; }
+        public decimal gwpSF6 { get; set; }
+        public decimal gwpNF3 { get; set; }
+        public decimal gwpHFCs { get; set; }
+        public decimal gwpPFCs { get; set; }
+
+        // [GHG-06] ต้องคูณ Share และห้ามเติม GWP แทนเมื่อค่าเป็น 0
+        //          มิฉะนั้นหน้า verify นี้จะไม่ตรงกับ EmissionCalculator ที่รายงานใช้
+        public decimal Ratio { get; set; } = 1m;
+        public decimal SharePercent { get; set; } = 100m;
+        private decimal Factor => Ratio * (SharePercent / 100m);
+
+        public decimal CalcCO2 => Quantity * CO2 * gwpCO2 * Factor;
+        public decimal CalcCH4 => Quantity * (CH4 * gwpCH4 + FossilCH4 * gwpFossilCH4) * Factor;
+        public decimal CalcN2O => Quantity * N2O * gwpN2O * Factor;
+        public decimal CalcOthers => Quantity * (SF6 * gwpSF6 + NF3 * gwpNF3 + HFCs * gwpHFCs + PFCs * gwpPFCs) * Factor;
+
+        public decimal TotalKgCO2e => CalcCO2 + CalcCH4 + CalcN2O + CalcOthers;
+        public string OriginTags { get; set; } = string.Empty;
+    }
+
+    public class YearOption
+    {
+        public int? Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+    #endregion
+
+    #region class field
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private int _topicId = 0;
+    private int _subscriptionId = 0;
+    private int? _selectedYear;
+    private string _searchQuery = string.Empty;
+
+    private TbActivityTopic? _topic;
+    private TbActivityTopicChild? _masterChild;
+    private List<TbActivityEvent> _rawEvents = new();
+    private List<EventDetailRow> _allRows = new();
+    private List<EventDetailRow> _filteredItems = new();
+    private List<YearOption> _yearOptions = new();
+
+    private bool CanExport => _isAdmin || (_topic != null && _editableSubscriptionIds.Contains(_topic.SubscriptionId)) || (_subscriptionId > 0 && _editableSubscriptionIds.Contains(_subscriptionId));
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")] public string? SecureId { get; set; }
+    [SupplyParameterFromQuery(Name = "sid")] public string? SecureSid { get; set; }
+    [SupplyParameterFromQuery(Name = "yr")] public string? SecureYr { get; set; }
+    [SupplyParameterFromQuery(Name = "ret")] public string? SecureRet { get; set; }
+    public string? ReturnUrl { get; set; }
+
+    private string UnitTitle => !string.IsNullOrWhiteSpace(_masterChild?.Source?.Unit?.Title)
+        ? _masterChild.Source.Unit.Title
+        : "Unit";
+
+    private decimal EffectiveEF => (_masterChild?.Source?.EF ?? 0m) * (_masterChild?.UnitConversionRatio ?? 1m);
+
+    private eTgoScopeNo ScopeNo => _masterChild?.ActivityGroup?.TgoScopeNo
+        ?? _masterChild?.Source?.Group?.TgoScopeNo
+        ?? eTgoScopeNo.Scope1;
+
+    private string ScopeBadgeText => ScopeNo switch
+    {
+        eTgoScopeNo.Scope1 => "Scope 1 (Direct GHG)",
+        eTgoScopeNo.Scope2 => "Scope 2 (Indirect Energy)",
+        eTgoScopeNo.Scope3 => "Scope 3 (Other Indirect)",
+        _ => "Separate Report"
+    };
+
+    private string BadgeScopeColor => ScopeNo switch
+    {
+        eTgoScopeNo.Scope1 => "bg-primary text-white",
+        eTgoScopeNo.Scope2 => "bg-success text-white",
+        eTgoScopeNo.Scope3 => "bg-info text-white",
+        _ => "bg-secondary text-white"
+    };
+    #endregion
+
+    #region class methods
+    protected override async Task OnParametersSetAsync()
+    {
+        ResolveParameters();
+        await LoadDataAsync();
+    }
+
+    private void ResolveParameters()
+    {
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            _topicId = DataProtection.UnprotectInt(SecureId) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureSid))
+        {
+            _subscriptionId = DataProtection.UnprotectInt(SecureSid) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureRet))
+        {
+            var unprotected = DataProtection.Unprotect(SecureRet);
+            if (!string.IsNullOrWhiteSpace(unprotected) && unprotected.StartsWith("/"))
+            {
+                ReturnUrl = unprotected;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureYr))
+        {
+            if (int.TryParse(SecureYr, out var parsedYear) && parsedYear > 0)
+            {
+                _selectedYear = parsedYear;
+            }
+            else if (SecureYr.Equals("all", StringComparison.OrdinalIgnoreCase) || SecureYr == "0")
+            {
+                _selectedYear = null;
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncBrowserUrlAsync();
+        }
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["id"] = _topicId > 0 ? DataProtection.Protect(_topicId) : null,
+                ["sid"] = _subscriptionId > 0 ? DataProtection.Protect(_subscriptionId) : null,
+                ["ret"] = !string.IsNullOrWhiteSpace(ReturnUrl) ? DataProtection.Protect(ReturnUrl) : null,
+                ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+                ["q"] = !string.IsNullOrWhiteSpace(_searchQuery) ? _searchQuery : null
+            };
+
+            var uri = NavigationManager.GetUriWithQueryParameters(NavigationManager.Uri.Split('?')[0], queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // Ignore during prerender
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity != null && user.Identity.IsAuthenticated)
+            {
+                var email = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+                _isAdmin = user.IsInRole(SystemRoles.Administrator);
+                _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(email, _isAdmin);
+            }
+
+            if (_topicId > 0)
+            {
+                _topic = await ActivityTopicService.GetByIdAsync(_topicId, includeRelations: true);
+                if (_topic != null)
+                {
+                    _masterChild = _topic.Childs.FirstOrDefault(c => c.IsActive && !c.IsDeleted) ?? _topic.Childs.FirstOrDefault();
+                    _rawEvents = await ActivityEventService.GetByTopicIdAsync(_topicId);
+
+                    BuildDetailRows();
+                    UpdateYearOptions();
+                    ApplyFilters();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading topic LCI breakdown for topic ID: {Id}", _topicId);
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load LCI breakdown data.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void BuildDetailRows()
+    {
+        _allRows.Clear();
+        var src = _masterChild?.Source;
+        var ratio = _masterChild?.UnitConversionRatio ?? 1m;
+        var share = (decimal)(_masterChild?.EmissionSharePercent ?? 100f);
+
+        var originList = new List<string>();
+        if (src != null)
+        {
+            if (src.THLCIDB) originList.Add("TH LCI");
+            if (src.TGOEF) originList.Add("TGO EF");
+            if (src.ThaiRes) originList.Add("Thai Res");
+            if (src.IntDB) originList.Add("Int DB");
+            if (src.Supplier) originList.Add("Supplier");
+            if (src.SelfCollect) originList.Add("Self-Collect");
+        }
+        var originTags = string.Join(", ", originList);
+
+        foreach (var ev in _rawEvents.OrderByDescending(e => e.TimeStamp))
+        {
+            _allRows.Add(new EventDetailRow
+            {
+                Id = ev.Id,
+                TimeStamp = ev.TimeStamp,
+                Quantity = ev.Quantity,
+                UnitTitle = UnitTitle,
+                Remark = ev.Remark,
+                Ratio = ratio,
+                SharePercent = share,
+                OriginTags = originTags,
+
+                CO2 = src?.CO2 ?? 0m,
+                FossilCH4 = src?.FossilCH4 ?? 0m,
+                CH4 = src?.CH4 ?? 0m,
+                N2O = src?.N2O ?? 0m,
+                SF6 = src?.SF6 ?? 0m,
+                NF3 = src?.NF3 ?? 0m,
+                HFCs = src?.HFCs ?? 0m,
+                PFCs = src?.PFCs ?? 0m,
+
+                gwpCO2 = src?.gwpCO2 ?? 0m,
+                gwpFossilCH4 = src?.gwpFossilCH4 ?? 0m,
+                gwpCH4 = src?.gwpCH4 ?? 0m,
+                gwpN2O = src?.gwpN2O ?? 0m,
+                gwpSF6 = src?.gwpSF6 ?? 0m,
+                gwpNF3 = src?.gwpNF3 ?? 0m,
+                gwpHFCs = src?.gwpHFCs ?? 0m,
+                gwpPFCs = src?.gwpPFCs ?? 0m,
+            });
+        }
+    }
+
+    private void UpdateYearOptions()
+    {
+        // [GHG-17] Use AppTimeZone instead of DateTime.UtcNow to ensure correct local year
+        var currentYear = TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Year;
+        var eventYears = _allRows.Select(e => e.TimeStamp.Year).Distinct().ToList();
+
+        var yearsSet = new HashSet<int> { currentYear, currentYear - 1, currentYear - 2 };
+        foreach (var y in eventYears)
+        {
+            yearsSet.Add(y);
+        }
+
+        _yearOptions = new List<YearOption>
+        {
+            new YearOption { Value = null, Text = "All Years" }
+        };
+
+        foreach (var y in yearsSet.OrderByDescending(y => y))
+        {
+            _yearOptions.Add(new YearOption { Value = y, Text = $"Year {y}" });
+        }
+    }
+
+    private async Task OnYearChanged(int? year)
+    {
+        _selectedYear = year;
+        ApplyFilters();
+        await SyncBrowserUrlAsync();
+        StateHasChanged();
+    }
+
+    private void ApplyFilters()
+    {
+        var items = _allRows.AsEnumerable();
+
+        if (_selectedYear.HasValue && _selectedYear.Value > 0)
+        {
+            items = items.Where(e => e.TimeStamp.Year == _selectedYear.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var q = _searchQuery.Trim().ToLowerInvariant();
+            items = items.Where(e => e.Remark.ToLowerInvariant().Contains(q) ||
+                                     e.TimeStamp.ToString("yyyy-MM").Contains(q));
+        }
+
+        _filteredItems = items.ToList();
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        // [2026-09-19][Antigravity] Enforce edit permission check for exporting LCI breakdown
+        if (!CanExport)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Access Denied", "Only users with edit permissions can export data.");
+            return;
+        }
+
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Timestamp,Topic,Quantity,Unit,EF_CO2,EF_CH4,EF_N2O,\"EF × Ratio (Excl. Share)\",Calc_CO2_kgCO2e,Calc_CH4_kgCO2e,Calc_N2O_kgCO2e,Total_kgCO2e,Remark");
+            foreach (var r in _filteredItems)
+            {
+                sb.AppendLine($"{r.TimeStamp:yyyy-MM},\"{_topic?.Title}\",{r.Quantity},{r.UnitTitle},{r.CO2},{r.CH4 + r.FossilCH4},{r.N2O},{EffectiveEF},{r.CalcCO2:F2},{r.CalcCH4:F2},{r.CalcN2O:F2},{r.TotalKgCO2e:F2},\"{r.Remark}\"");
+            }
+
+            var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+            var base64 = Convert.ToBase64String(bytes);
+            // [2026-09-21][Gemini] Standard Export Filename: lci_breakdown_{topicTitle}_{date}_{time}.csv
+            var fileName = ExportFileNameHelper.Generate("lci_breakdown", _topic?.Title, extension: "csv", fallback: "topic");
+            await JSRuntime.InvokeVoidAsync("saveAsFile", fileName, base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Export Successful", $"Exported {_filteredItems.Count} breakdown records.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to export breakdown records.");
+            NotificationService.Notify(NotificationSeverity.Error, "Export Failed", "Failed to generate export file.");
+        }
+    }
+
+    private void GoBack()
+    {
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+            return;
+        }
+        NavigationManager.NavigateTo("/library/activity-topics");
+    }
+    #endregion
+}

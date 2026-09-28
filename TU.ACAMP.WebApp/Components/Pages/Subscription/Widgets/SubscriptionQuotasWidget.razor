@@ -1,0 +1,251 @@
+@using TU.ACAMP.Domain.Identity
+
+@* [2026-09-28][Gemini] Refactor Resource Quotas UI to RadzenDataGrid instead of multiple textboxes *@
+<div class="p-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 p-3 bg-light rounded border flex-wrap gap-2">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="fw-bold mb-0">Resource Quota Configurations</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="text-muted">Fine-tune resource allowances and capacity for this subscription.</RadzenText>
+        </div>
+        @if (IsAdmin && !IsFieldDisabled)
+        {
+            <RadzenButton Text="Reset to Plan Defaults"
+                          Icon="restart_alt"
+                          ButtonStyle="ButtonStyle.Light"
+                          Size="ButtonSize.Small"
+                          Class="btn-reset-quotas"
+                          Click="@HandleResetQuotas"
+                          Style="border-radius: 6px;" />
+        }
+    </div>
+
+    <RadzenDataGrid Data="@_quotaItems"
+                    TItem="QuotaItem"
+                    AllowPaging="false"
+                    AllowSorting="true"
+                    Density="Density.Compact"
+                    Class="grid-subscription-quotas"
+                    Style="border: 1px solid var(--rz-border-color); border-radius: 8px; overflow: hidden;">
+        <Columns>
+            <RadzenDataGridColumn Title="#" Width="50px" TextAlign="TextAlign.Center" Sortable="false">
+                <Template Context="item">
+                    <span class="text-muted small">@item.Index</span>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn Title="Category" Property="Category" Width="170px" TextAlign="TextAlign.Center">
+                <Template Context="item">
+                    <RadzenBadge BadgeStyle="@item.CategoryBadgeStyle" Text="@item.Category" IsPill="true" Style="font-size: 0.75rem; padding: 4px 8px;" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn Title="Resource / Metric" Property="Name" MinWidth="220px">
+                <Template Context="item">
+                    <div class="d-flex align-items-center gap-2 py-1">
+                        <RadzenIcon Icon="@item.Icon" Style="color: var(--rz-primary); font-size: 20px; flex-shrink: 0;" />
+                        <div>
+                            <div class="fw-semibold text-dark" style="font-size: 0.9rem;">@item.Name</div>
+                            <div class="text-muted small" style="font-size: 0.75rem;">@item.Description</div>
+                        </div>
+                    </div>
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn Title="Allocated Limit" Width="180px" TextAlign="TextAlign.Center" Sortable="false">
+                <Template Context="item">
+                    <RadzenNumeric TValue="int"
+                                   Value="@item.Value"
+                                   ValueChanged="@((int val) => OnItemValueChanged(item, val))"
+                                   Min="1"
+                                   Disabled="@(!IsAdmin || IsFieldDisabled)"
+                                   Style="width: 130px; font-weight: 600;" />
+                </Template>
+            </RadzenDataGridColumn>
+            <RadzenDataGridColumn Title="Unit" Property="Unit" Width="110px" TextAlign="TextAlign.Center">
+                <Template Context="item">
+                    <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@item.Unit" Style="font-weight: 500;" />
+                </Template>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TbSubscription Model { get; set; } = null!;
+    [Parameter] public bool IsAdmin { get; set; }
+    [Parameter] public bool IsFieldDisabled { get; set; }
+    [Parameter] public EventCallback OnFieldValueChanged { get; set; }
+    [Parameter] public EventCallback OnResetQuotas { get; set; }
+
+    public class QuotaItem
+    {
+        public int Index { get; set; }
+        public string Category { get; set; } = string.Empty;
+        public BadgeStyle CategoryBadgeStyle { get; set; } = BadgeStyle.Light;
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Unit { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+        public Func<int> Getter { get; set; } = () => 0;
+        public Action<int> Setter { get; set; } = _ => { };
+
+        public int Value
+        {
+            get => Getter();
+            set => Setter(value);
+        }
+    }
+
+    private List<QuotaItem> _quotaItems = new();
+
+    protected override void OnParametersSet()
+    {
+        InitializeQuotaItems();
+    }
+
+    private void InitializeQuotaItems()
+    {
+        if (Model == null) return;
+
+        // [2026-09-28][Gemini] Map all 10 subscription quota properties to structured grid items
+        _quotaItems = new List<QuotaItem>
+        {
+            new QuotaItem
+            {
+                Index = 1,
+                Category = "Organization",
+                CategoryBadgeStyle = BadgeStyle.Primary,
+                Name = "Max Corporates",
+                Description = "Maximum corporate groups or parent entities allowed",
+                Unit = "Entities",
+                Icon = "corporate_fare",
+                Getter = () => Model.AllowCorporateCount,
+                Setter = val => Model.AllowCorporateCount = val
+            },
+            new QuotaItem
+            {
+                Index = 2,
+                Category = "Organization",
+                CategoryBadgeStyle = BadgeStyle.Primary,
+                Name = "Max Companies",
+                Description = "Maximum subsidiaries or company entities allowed",
+                Unit = "Companies",
+                Icon = "apartment",
+                Getter = () => Model.AllowCompanyCount,
+                Setter = val => Model.AllowCompanyCount = val
+            },
+            new QuotaItem
+            {
+                Index = 3,
+                Category = "Organization",
+                CategoryBadgeStyle = BadgeStyle.Primary,
+                Name = "Max Facilities",
+                Description = "Maximum operational sites, branches, or plants allowed",
+                Unit = "Facilities",
+                Icon = "factory",
+                Getter = () => Model.AllowFacilityCount,
+                Setter = val => Model.AllowFacilityCount = val
+            },
+            new QuotaItem
+            {
+                Index = 4,
+                Category = "Organization",
+                CategoryBadgeStyle = BadgeStyle.Primary,
+                Name = "Max Users",
+                Description = "Maximum system users / seats across the subscription",
+                Unit = "Users",
+                Icon = "group",
+                Getter = () => Model.AllowUserCount,
+                Setter = val => Model.AllowUserCount = val
+            },
+            new QuotaItem
+            {
+                Index = 5,
+                Category = "Storage & Transfer",
+                CategoryBadgeStyle = BadgeStyle.Info,
+                Name = "Data Upload (MB)",
+                Description = "Maximum single-request upload file size limit",
+                Unit = "MB",
+                Icon = "cloud_upload",
+                Getter = () => Model.AllowDataUploadCount,
+                Setter = val => Model.AllowDataUploadCount = val
+            },
+            new QuotaItem
+            {
+                Index = 6,
+                Category = "Storage & Transfer",
+                CategoryBadgeStyle = BadgeStyle.Info,
+                Name = "Data Download (MB)",
+                Description = "Maximum single-request download file size limit",
+                Unit = "MB",
+                Icon = "cloud_download",
+                Getter = () => Model.AllowDataDownloadCount,
+                Setter = val => Model.AllowDataDownloadCount = val
+            },
+            new QuotaItem
+            {
+                Index = 7,
+                Category = "Storage & Transfer",
+                CategoryBadgeStyle = BadgeStyle.Info,
+                Name = "Data Store (MB)",
+                Description = "Total server storage capacity for documents and files",
+                Unit = "MB",
+                Icon = "storage",
+                Getter = () => Model.AllowDataStoreCount,
+                Setter = val => Model.AllowDataStoreCount = val
+            },
+            new QuotaItem
+            {
+                Index = 8,
+                Category = "Calculations & Records",
+                CategoryBadgeStyle = BadgeStyle.Success,
+                Name = "Emission Count",
+                Description = "Total emission calculation transactions / records allowance",
+                Unit = "Records",
+                Icon = "co2",
+                Getter = () => Model.AllowEmissionCount,
+                Setter = val => Model.AllowEmissionCount = val
+            },
+            new QuotaItem
+            {
+                Index = 9,
+                Category = "Calculations & Records",
+                CategoryBadgeStyle = BadgeStyle.Success,
+                Name = "Topic Count",
+                Description = "Total activity topics configured across all facilities",
+                Unit = "Topics",
+                Icon = "format_list_bulleted",
+                Getter = () => Model.AllowTopicCount,
+                Setter = val => Model.AllowTopicCount = val
+            },
+            new QuotaItem
+            {
+                Index = 10,
+                Category = "Calculations & Records",
+                CategoryBadgeStyle = BadgeStyle.Success,
+                Name = "Event Count",
+                Description = "Total activity data entry events allowed",
+                Unit = "Events",
+                Icon = "event_note",
+                Getter = () => Model.AllowEventCount,
+                Setter = val => Model.AllowEventCount = val
+            }
+        };
+    }
+
+    private async Task OnItemValueChanged(QuotaItem item, int newValue)
+    {
+        item.Value = newValue;
+        if (OnFieldValueChanged.HasDelegate)
+        {
+            await OnFieldValueChanged.InvokeAsync();
+        }
+    }
+
+    private async Task HandleResetQuotas()
+    {
+        if (OnResetQuotas.HasDelegate)
+        {
+            await OnResetQuotas.InvokeAsync();
+            InitializeQuotaItems();
+            StateHasChanged();
+        }
+    }
+}

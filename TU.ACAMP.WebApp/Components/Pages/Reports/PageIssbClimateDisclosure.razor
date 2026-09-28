@@ -1,0 +1,356 @@
+@page "/reports/issb-climate"
+@using System.Globalization
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using Microsoft.EntityFrameworkCore
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Services.Reports
+
+@attribute [Authorize]
+
+@inject IssbClimateDisclosureService IssbService
+@inject SubscriptionService SubscriptionService
+@inject CorporateService CorporateService
+@inject CompanyService CompanyService
+@inject FacilityService FacilityService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+@inject ILogger<PageIssbClimateDisclosure> Logger
+
+@*
+    ============================================================================
+    PageIssbClimateDisclosure.razor (2026-09-24: Claude)
+    การเปิดเผยข้อมูลด้านสภาพภูมิอากาศตาม IFRS S2 (ISSB) สำหรับแบบ 56-1 One Report
+    - ตัวเลขมาจาก CFO Report snapshot (Verified / Locked) ที่เลือกจากทะเบียนรายงาน
+    - ผู้ใช้กรอก Governance / Strategy / Risk Management, รายได้ (intensity), ผู้ทวนสอบ
+    - บันทึกเป็น issb_climate_disclosure.json + .docx ในโฟลเดอร์ snapshot
+    Spec: Documents/agent-jobs/2026_09_24_01-SPEC_ISSB_CLIMATE_DISCLOSURE.md
+    ============================================================================
+*@
+
+<PageTitle>ISSB Climate Disclosure - ACAMP</PageTitle>
+
+<div class="container-fluid py-2 px-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small"
+                              Click="@GoBack" Class="me-2" Style="border-radius: 6px;" Title="Back to report ledger" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold">ISSB Climate Disclosure (IFRS S2)</RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0 ms-5">
+                การเปิดเผยข้อมูลที่เกี่ยวข้องกับสภาพภูมิอากาศ สำหรับใส่ในแบบ 56-1 One Report — ตัวเลขมาจากรายงาน CFO ที่ Verified / Locked
+            </RadzenText>
+        </div>
+        @if (_doc != null)
+        {
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+                <RadzenButton Icon="save" Text="Save" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Flat"
+                              Click="@(() => SaveAsync(download: false))" Disabled="@(!_canEdit || _isSaving)" IsBusy="@_isSaving"
+                              Title="@(_canEdit ? "Save disclosure" : "Only users with edit permissions can save")" Style="border-radius: 6px;" />
+                <RadzenButton Image="images/icons/file-word.svg" ImageAlternateText="Word" Text="Save & Download Word" ButtonStyle="ButtonStyle.Light" Variant="Variant.Outlined"
+                              Click="@(() => SaveAsync(download: true))" Disabled="@(!_canEdit || _isSaving)"
+                              Title="@(_canEdit ? "Save and download the Word document" : "Only users with edit permissions can export")" Style="border-radius: 6px;" />
+            </RadzenStack>
+        }
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+        </div>
+    }
+    else if (_doc == null)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false">
+            @_errorMessage
+        </RadzenAlert>
+    }
+    else
+    {
+        var hasBase = _doc.Base != null;
+
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" Class="mb-3">
+            โครงเอกสารอ้างอิงเอกสารรับฟังความคิดเห็นของ ก.ล.ต. (อสย. 50/2567) และหลักการที่ปรับปรุงปี 2568 — โปรดตรวจสอบกับประกาศ ก.ล.ต. ฉบับล่าสุดก่อนยื่น
+        </RadzenAlert>
+
+        @if (_doc.IsPartialYear)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" Class="mb-3">
+                <strong>ข้อมูลอาจไม่ครบ 12 เดือน:</strong> รายงาน CFO ต้นทางสร้างเมื่อ @_doc.SourceCreatedAt.ToString("dd/MM/yyyy") ก่อนสิ้นปี @_doc.ReportingYear
+                — ไม่ควรใช้ยื่นในแบบ 56-1 One Report (ไฟล์ Word จะมีหมายเหตุนี้กำกับไว้)
+            </RadzenAlert>
+        }
+        @if (_doc.Base == null)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" Class="mb-3">
+                ไม่มีการเปรียบเทียบกับปีฐาน เพราะรายงาน CFO ต้นทางไม่ได้กำหนดปีฐาน หรือกำหนดปีฐานเป็นปีเดียวกับปีที่รายงาน
+            </RadzenAlert>
+        }
+
+        <!-- Source report -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-3 border-start border-4 border-success">
+            <div class="row g-3">
+                <div class="col-12 col-md-5">
+                    <span class="text-muted small d-block">Organization</span>
+                    <span class="fw-bold">@_doc.OrganizationTitle</span>
+                </div>
+                <div class="col-12 col-md-4">
+                    <span class="text-muted small d-block">Source CFO report (Verified / Locked)</span>
+                    <span class="fw-bold">@_doc.SourceCfoReportTitle</span>
+                    <span class="text-secondary small d-block">@_doc.PeriodDescription</span>
+                </div>
+                <div class="col-12 col-md-3">
+                    <span class="text-muted small d-block">Last saved</span>
+                    <span class="fw-semibold">@(_doc.UpdatedAt == default ? "Not saved yet" : $"{_doc.UpdatedAt:dd/MM/yyyy HH:mm} by {_doc.UpdatedBy}")</span>
+                </div>
+            </div>
+        </RadzenCard>
+
+        <!-- 4. Metrics (read-only) -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold text-primary mb-2">
+                <RadzenIcon Icon="query_stats" Class="me-1" /> 4. Metrics and Targets — GHG emissions (tCO₂e)
+            </RadzenText>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-2" style="font-size: 0.88rem;">
+                    <thead class="table-light">
+                        <tr>
+                            <th>ขอบเขต</th>
+                            <th class="text-end">ปี @_doc.ReportingYear</th>
+                            @if (hasBase)
+                            {
+                                <th class="text-end">ปีฐาน @_doc.BaseYear</th>
+                                <th class="text-end">เปลี่ยนแปลง (%)</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @(MetricRow("Scope 1 — การปล่อยทางตรง", _doc.Reporting.Scope1, _doc.Base?.Scope1, hasBase, false))
+                        @(MetricRow("Scope 2 — การปล่อยทางอ้อมจากพลังงาน", _doc.Reporting.Scope2, _doc.Base?.Scope2, hasBase, false))
+                        @(MetricRow("รวม Scope 1 + 2", _doc.Reporting.Scope1And2, _doc.Base?.Scope1And2, hasBase, true))
+                        @(MetricRow("Scope 3 — การปล่อยทางอ้อมอื่น ๆ", _doc.Reporting.Scope3, _doc.Base?.Scope3, hasBase, false))
+                        @(MetricRow("รวม Scope 1 + 2 + 3", _doc.Reporting.Gross, _doc.Base?.Gross, hasBase, true))
+                    </tbody>
+                </table>
+            </div>
+            <div class="row g-2 small text-secondary">
+                <div class="col-12 col-md-4">รายงานแยก (Biogenic / Non-Kyoto): <strong class="text-dark">@_doc.Reporting.Separate.ToString("N2") tCO₂e</strong> (ไม่รวมในยอดรวม)</div>
+                <div class="col-12 col-md-4">Consolidation approach: <strong class="text-dark">@_doc.ConsolidationApproach</strong> | GWP: <strong class="text-dark">@_doc.GwpVersion</strong></div>
+                <div class="col-12 col-md-4">
+                    Net Zero target:
+                    @if (_doc.NetZeroTarget != null)
+                    {
+                        <strong class="text-dark">ลด @_doc.NetZeroTarget.TargetReductionPercent.ToString("0.##")% ภายในปี @_doc.NetZeroTarget.TargetYear (ปีฐาน @_doc.NetZeroTarget.BaseYear)</strong>
+                    }
+                    else
+                    {
+                        <strong class="text-danger">ยังไม่ได้บันทึกในระบบ</strong>
+                    }
+                </div>
+            </div>
+        </RadzenCard>
+
+        <!-- Inputs -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold text-primary mb-3">
+                <RadzenIcon Icon="tune" Class="me-1" /> ข้อมูลประกอบ (Intensity / วิธีการวัด / การทวนสอบ)
+            </RadzenText>
+            <div class="row g-3">
+                <div class="col-12 col-md-3">
+                    <RadzenFormField Text="@($"รายได้ปี {_doc.ReportingYear} (ล้านบาท)")" Variant="Variant.Outlined" Style="width: 100%;">
+                        <RadzenNumeric TValue="decimal?" @bind-Value="_doc.RevenueMillionThb" Min="0" Format="N2" Disabled="@(!_canEdit)" Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+                <div class="col-12 col-md-3">
+                    <RadzenFormField Text="@(hasBase ? $"รายได้ปีฐาน {_doc.BaseYear} (ล้านบาท)" : "รายได้ปีฐาน (ล้านบาท)")" Variant="Variant.Outlined" Style="width: 100%;">
+                        <RadzenNumeric TValue="decimal?" @bind-Value="_doc.BaseRevenueMillionThb" Min="0" Format="N2" Disabled="@(!_canEdit || !hasBase)" Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+                <div class="col-12 col-md-4">
+                    <RadzenFormField Text="ผู้ทวนสอบ (ขึ้นทะเบียนกับ อบก. / มาตรฐานสากล)" Variant="Variant.Outlined" Style="width: 100%;">
+                        <RadzenTextBox @bind-Value="_doc.VerifierName" MaxLength="250" Disabled="@(!_canEdit)" Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+                <div class="col-12 col-md-2">
+                    <RadzenFormField Text="ระดับการรับรอง" Variant="Variant.Outlined" Style="width: 100%;">
+                        <RadzenDropDown TValue="string" @bind-Value="_doc.AssuranceLevel" Data="@_assuranceLevels" Disabled="@(!_canEdit)" Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+                <div class="col-12">
+                    <RadzenFormField Text="มาตรฐานและวิธีการวัด GHG" Variant="Variant.Outlined" Style="width: 100%;">
+                        <RadzenTextArea @bind-Value="_doc.MeasurementApproach" Rows="3" MaxLength="2000" Disabled="@(!_canEdit)" Style="width: 100%;" />
+                    </RadzenFormField>
+                    @if (_doc.RevenueMillionThb > 0)
+                    {
+                        <div class="small text-secondary mt-1">
+                            Intensity Scope 1+2: <strong class="text-dark">@(IssbClimateDisclosureService.Intensity(_doc.Reporting.Scope1And2, _doc.RevenueMillionThb)?.ToString("N4")) tCO₂e / ล้านบาท</strong>
+                        </div>
+                    }
+                </div>
+            </div>
+        </RadzenCard>
+
+        <!-- 1-3 Narratives -->
+        @(NarrativeCard("1. การกำกับดูแล (Governance)", "gavel", IssbClimateDisclosureService.GovernanceGuidance, _doc.Governance, v => _doc.Governance = v))
+        @(NarrativeCard("2. กลยุทธ์ (Strategy)", "insights", IssbClimateDisclosureService.StrategyGuidance, _doc.Strategy, v => _doc.Strategy = v))
+        @(NarrativeCard("3. การบริหารความเสี่ยง (Risk Management)", "shield", IssbClimateDisclosureService.RiskManagementGuidance, _doc.RiskManagement, v => _doc.RiskManagement = v))
+        @(NarrativeCard("4. ตัวชี้วัดและเป้าหมาย — คำอธิบายเพิ่มเติม (ไม่บังคับ)", "flag", "[ไม่บังคับ: คำอธิบายตัวชี้วัดอื่น เช่น เป้าหมายรายขอบเขต แผนลดก๊าซ หรือความคืบหน้า — ตารางตัวเลขระบบสร้างให้อัตโนมัติ]", _doc.MetricsTargetsNarrative, v => _doc.MetricsTargetsNarrative = v))
+    }
+</div>
+
+@code {
+    #region query parameters
+    [SupplyParameterFromQuery(Name = "k")] public string? EncryptedKey { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public string? EncryptedId { get; set; }
+    [SupplyParameterFromQuery(Name = "level")] public int LevelValue { get; set; } = 1;
+    [SupplyParameterFromQuery(Name = "ret")] public string? EncryptedRet { get; set; }
+    #endregion
+
+    #region fields
+    private bool _isLoading = true;
+    private bool _isSaving;
+    private bool _canEdit;
+    private string _email = string.Empty;
+    private string _errorMessage = "ไม่พบรายงาน CFO ต้นทาง หรือคุณไม่มีสิทธิ์เข้าถึงรายงานนี้";
+    private string? _returnUrl;
+    private IssbClimateDisclosureDocument? _doc;
+    private readonly string[] _assuranceLevels = { "Limited assurance", "Reasonable assurance" };
+    #endregion
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-09-24]
+        _isLoading = true;
+        try
+        {
+            var reportKey = DataProtection.Unprotect(EncryptedKey);
+            var targetId = DataProtection.UnprotectInt(EncryptedId) ?? 0;
+            _returnUrl = DataProtection.Unprotect(EncryptedRet);
+            var level = LevelValue switch { 2 => eTopicLevel.Company, 3 => eTopicLevel.Facility, _ => eTopicLevel.Corporate };
+
+            if (string.IsNullOrWhiteSpace(reportKey) || targetId <= 0) { _doc = null; return; }
+
+            var user = (await AuthStateProvider.GetAuthenticationStateAsync()).User;
+            var isAdmin = user.IsInRole(SystemRoles.Administrator);
+            _email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? user.Identity?.Name ?? string.Empty;
+
+            // สิทธิ์ดู: เป้าหมายต้องอยู่ใน Subscription ของผู้ใช้ / สิทธิ์บันทึก: ต้องมีสิทธิ์แก้ไขเป้าหมายนั้น
+            if (!isAdmin)
+            {
+                var subId = await ResolveSubscriptionIdAsync(level, targetId);
+                var userSubs = await SubscriptionService.GetSubscriptionsForUserAsync(_email, isAdmin);
+                if (subId == null || !userSubs.Any(s => s.Id == subId.Value)) { _doc = null; return; }
+            }
+
+            _canEdit = isAdmin || level switch
+            {
+                eTopicLevel.Company => (await CompanyService.GetEditableCompanyIdsAsync(_email, isAdmin)).Contains(targetId),
+                eTopicLevel.Facility => (await FacilityService.GetEditableFacilityIdsAsync(_email, isAdmin)).Contains(targetId),
+                _ => (await CorporateService.GetEditableCorporateIdsAsync(_email, isAdmin)).Contains(targetId)
+            };
+
+            _doc = await IssbService.LoadAsync(reportKey, level, targetId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading ISSB climate disclosure.");
+            _errorMessage = $"เกิดข้อผิดพลาดในการโหลดข้อมูล: {ex.Message}";
+            _doc = null;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private async Task<int?> ResolveSubscriptionIdAsync(eTopicLevel level, int targetId)
+    {
+        using var context = await DbFactory.CreateDbContextAsync();
+        return level switch
+        {
+            eTopicLevel.Corporate => await context.Corporates.Where(c => c.Id == targetId).Select(c => (int?)c.SubscriptionId).FirstOrDefaultAsync(),
+            eTopicLevel.Company => await (from co in context.Companies
+                                          join cp in context.Corporates on co.CorporateId equals cp.Id
+                                          where co.Id == targetId
+                                          select (int?)cp.SubscriptionId).FirstOrDefaultAsync(),
+            _ => await (from f in context.Facilities
+                        join co in context.Companies on f.CompanyId equals co.Id
+                        join cp in context.Corporates on co.CorporateId equals cp.Id
+                        where f.Id == targetId
+                        select (int?)cp.SubscriptionId).FirstOrDefaultAsync()
+        };
+    }
+
+    private async Task SaveAsync(bool download)
+    {
+        #region hide [2026-09-24]
+        if (_doc == null || !_canEdit) return;
+        try
+        {
+            _isSaving = true;
+            var bytes = await IssbService.SaveAsync(_doc, _email);
+            NotificationService.Notify(NotificationSeverity.Success, "บันทึกแล้ว", "บันทึกข้อมูลและสร้างไฟล์ Word ใหม่เรียบร้อย");
+            if (download)
+            {
+                var fileName = ExportFileNameHelper.Generate("issb_climate", _doc.OrganizationTitle, "docx", fallback: "org");
+                await JSRuntime.InvokeVoidAsync("saveAsFile", fileName, Convert.ToBase64String(bytes));
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving ISSB climate disclosure.");
+            NotificationService.Notify(NotificationSeverity.Error, "บันทึกไม่สำเร็จ", ex.Message, 8000);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        // [2026-09-25][Gemini] ย้อนกลับไปยัง CFO Verification Workbench (V2)
+        NavigationManager.NavigateTo(!string.IsNullOrWhiteSpace(_returnUrl) ? _returnUrl : "/reports/cfo-reports2");
+    }
+
+    private RenderFragment MetricRow(string label, decimal current, decimal? baseValue, bool hasBase, bool bold) => __builder =>
+    {
+        var pct = IssbClimateDisclosureService.PercentChange(current, baseValue);
+        <tr class="@(bold ? "fw-bold table-light" : "")">
+            <td>@label</td>
+            <td class="text-end">@current.ToString("N2")</td>
+            @if (hasBase)
+            {
+                <td class="text-end">@(baseValue?.ToString("N2") ?? "-")</td>
+                <td class="text-end">@(pct.HasValue ? pct.Value.ToString("+0.0;-0.0;0.0") : "-")</td>
+            }
+        </tr>
+    };
+
+    private RenderFragment NarrativeCard(string title, string icon, string guidance, string value, Action<string> setter) => __builder =>
+    {
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold text-primary mb-1">
+                <RadzenIcon Icon="@icon" Class="me-1" /> @title
+            </RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-2">@guidance</RadzenText>
+            <RadzenTextArea Value="@value" ValueChanged="@((string v) => setter(v))" Rows="7" MaxLength="20000"
+                            Disabled="@(!_canEdit)" Placeholder="พิมพ์ข้อความที่จะเปิดเผย (เว้นว่างได้ ระบบจะใส่คำแนะนำไว้ในไฟล์ Word แทน)" Style="width: 100%;" />
+        </RadzenCard>
+    };
+}

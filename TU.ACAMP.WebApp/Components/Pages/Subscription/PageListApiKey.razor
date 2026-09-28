@@ -1,0 +1,163 @@
+@page "/admin/api-keys"
+@page "/subscription/api-keys"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.Domain.Tools
+
+@attribute [Authorize]
+@inject ApiKeyService ApiKeyService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject DialogService DialogService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IWebHostEnvironment Env
+
+<PageTitle>API Key Management - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <RadzenText Text="API Key Management" TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-1" Style="color: var(--rz-text-title-color);" />
+            <RadzenText Text="Manage API keys for external IoT, ERP, and partner system integrations." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+        </div>
+        <div>
+            <RadzenButton Text="Create New API Key" Icon="add_circle" ButtonStyle="ButtonStyle.Primary" Click="@NavigateToCreateKey" Style="border-radius: 8px;" />
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading API keys..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenCard Class="shadow-sm rounded-3 p-3">
+            @if (!_keysList.Any())
+            {
+                <div class="p-5 text-center text-muted">
+                    <RadzenIcon Icon="key_off" Style="font-size: 48px; opacity: 0.5;" class="mb-2" />
+                    <RadzenText Text="No API keys found for your subscription workspace." TextStyle="TextStyle.Body1" class="text-muted mb-0" />
+                </div>
+            }
+            else
+            {
+                <RadzenDataGrid Data="@_keysList" TItem="TbApiKey" AllowPaging="true" PageSize="10" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                    <Columns>
+                        @if (Env.IsDevelopment() || _isAdmin)
+                        {
+                            <RadzenDataGridColumn TItem="TbApiKey" Property="Id" Title="ID" Width="60px" TextAlign="TextAlign.Center" />
+                        }
+
+                        <RadzenDataGridColumn Property="KeyName" Title="Key Name" MinWidth="180px">
+                            <Template Context="key">
+                                <div class="fw-bold text-dark">@key.KeyName</div>
+                                <span class="text-muted small">Prefix: <code>@key.KeyPrefix</code></span>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn Property="CreatedAt" Title="Created Date" Width="160px" TextAlign="TextAlign.Center">
+                            <Template Context="key">
+                                @AppTimeZone.FormatLocal(key.CreatedAt, "dd/MM/yyyy HH:mm")
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn Property="LastUsedAt" Title="Last Used" Width="160px" TextAlign="TextAlign.Center">
+                            <Template Context="key">
+                                @(key.LastUsedAt.HasValue ? AppTimeZone.FormatLocal(key.LastUsedAt.Value, "dd/MM/yyyy HH:mm") : "-")
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn Property="TotalIngestedEventsCount" Title="Total Events" Width="130px" TextAlign="TextAlign.Right">
+                            <Template Context="key">
+                                <span class="fw-bold">@key.TotalIngestedEventsCount.ToString("N0")</span>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn Property="IsActive" Title="Status" Width="120px" TextAlign="TextAlign.Center">
+                            <Template Context="key">
+                                @if (key.IsActive)
+                                {
+                                    <RadzenBadge Text="Active" BadgeStyle="BadgeStyle.Success" IsPill="true" />
+                                }
+                                else
+                                {
+                                    <RadzenBadge Text="Revoked" BadgeStyle="BadgeStyle.Danger" IsPill="true" />
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn Title="Actions" Width="110px" TextAlign="TextAlign.Center">
+                            <Template Context="key">
+                                @if (key.IsActive)
+                                {
+                                    <RadzenButton Icon="key_off" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Variant="Variant.Flat" Click="@(() => RevokeKey(key))" ToolTip="Revoke Key" />
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            }
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private List<TbApiKey> _keysList = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole(SystemRoles.Administrator);
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            // Load keys logic
+            _keysList = new List<TbApiKey>();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void NavigateToCreateKey()
+    {
+        #region hide [2026-08-24]
+        var returnUrl = "/subscription/api-keys";
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["ret"] = DataProtection.Protect(returnUrl)
+        };
+        var url = NavigationManager.GetUriWithQueryParameters("/subscription/api-keys/create", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private async Task RevokeKey(TbApiKey key)
+    {
+        var confirm = await DialogService.Confirm($"Revoke API Key '{key.KeyName}'? This action cannot be undone.", "Revoke Key", new ConfirmOptions { OkButtonText = "Revoke", CancelButtonText = "Cancel" });
+        if (confirm == true)
+        {
+            await ApiKeyService.RevokeApiKeyAsync(key.Id, key.SubscriptionId);
+            NotificationService.Notify(NotificationSeverity.Success, "Key Revoked", $"API Key '{key.KeyName}' was revoked.");
+            await LoadDataAsync();
+        }
+    }
+}

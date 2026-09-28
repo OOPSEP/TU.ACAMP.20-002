@@ -1,0 +1,196 @@
+@using Radzen
+@using Radzen.Blazor
+@using TU.ACAMP.WebApp.Components.Common
+
+<RadzenCard Class="mb-4 p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+    <!-- [2026-09-13][Antigravity] Primary Filter Bar using .acamp-filter-bar with spring search -->
+    <div class="acamp-filter-bar justify-content-between">
+        <!-- Search by Email -->
+        <div class="acamp-filter-search">
+            <RadzenFormField Text="Search by Email">
+                <ChildContent>
+                    <RadzenTextBox @bind-Value="@SearchQuery" 
+                                   @oninput="@OnSearchInput" 
+                                   Placeholder="Type email address to search..." />
+                </ChildContent>
+                <Start>
+                    <RadzenIcon Icon="search" />
+                </Start>
+                <End>
+                    @if (!string.IsNullOrWhiteSpace(SearchQuery))
+                    {
+                        <RadzenButton Icon="close" Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Click="@ClearSearch" Title="Clear search" />
+                    }
+                </End>
+            </RadzenFormField>
+        </div>
+
+        <div class="d-flex align-items-end gap-2 flex-wrap ms-auto flex-shrink-0">
+            <!-- Confirmation Status Dropdown -->
+            <RadzenFormField Text="Confirmation Status" Style="width: 180px;">
+                <RadzenDropDown TValue="string"
+                                Data="@_statusFilterOptions"
+                                TextProperty="Text"
+                                ValueProperty="Value"
+                                @bind-Value="@SelectedStatusFilter"
+                                Change="@OnStatusChanged" />
+            </RadzenFormField>
+
+            <!-- Users Count Badge (Always visible) -->
+            <div class="d-flex align-items-center" style="height: 40px;">
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" class="px-3 py-2 text-muted fw-normal" Style="font-size: 0.875rem;">
+                    Users: <strong class="text-dark">@FilteredCount</strong> / @TotalCount
+                </RadzenBadge>
+            </div>
+
+            <!-- Expand / Collapse Button with Active Date Filter Indicator -->
+            <div class="d-flex align-items-end position-relative">
+                @* [2026-09-26][Claude] ใช้ปุ่มมาตรฐาน AdvancedFilterToggle *@
+                <AdvancedFilterToggle IsExpanded="@_isExpanded"
+                                      HasActive="@HasActiveDateFilter"
+                                      OnToggle="@ToggleExpand"
+                                      Title="Toggle registration date range filters"
+                                      ActiveTooltip="Registration Date Filter is active" />
+            </div>
+        </div>
+    </div>
+
+    <!-- Secondary Filter Section (Collapsible Date Range) -->
+    @if (_isExpanded)
+    {
+        <div class="row g-3 align-items-center mt-2 pt-3 border-top" style="border-color: var(--rz-border-color) !important;">
+            <div class="col-12 col-md-4">
+                <RadzenFormField Text="Registered From" Style="width: 100%;">
+                    <RadzenDatePicker TValue="DateTime?"
+                                      @bind-Value="@RegisterDateFrom"
+                                      Change="@OnRegisterDateFromChanged"
+                                      DateFormat="dd/MM/yyyy"
+                                      Placeholder="dd/MM/yyyy"
+                                      ShowTime="false"
+                                      Max="@(RegisterDateTo ?? DateTime.MaxValue)" />
+                </RadzenFormField>
+            </div>
+            <div class="col-12 col-md-4">
+                <RadzenFormField Text="Registered To" Style="width: 100%;">
+                    <RadzenDatePicker TValue="DateTime?"
+                                      @bind-Value="@RegisterDateTo"
+                                      Change="@OnRegisterDateToChanged"
+                                      DateFormat="dd/MM/yyyy"
+                                      Placeholder="dd/MM/yyyy"
+                                      ShowTime="false"
+                                      Min="@(RegisterDateFrom ?? DateTime.MinValue)" />
+                </RadzenFormField>
+            </div>
+            <div class="col-12 col-md-4 d-flex align-items-center">
+                @if (HasActiveDateFilter)
+                {
+                    <RadzenButton Text="Clear Dates"
+                                  Icon="event_busy"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Medium"
+                                  Click="@ClearRegisterDates"
+                                  Style="border-radius: 8px;"
+                                  Title="Clear registration date filters" />
+                }
+            </div>
+        </div>
+    }
+</RadzenCard>
+
+@code {
+    #region class parameters
+    [Parameter] public string SearchQuery { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> SearchQueryChanged { get; set; }
+
+    [Parameter] public string SelectedStatusFilter { get; set; } = "All";
+    [Parameter] public EventCallback<string> SelectedStatusFilterChanged { get; set; }
+
+    [Parameter] public DateTime? RegisterDateFrom { get; set; }
+    [Parameter] public EventCallback<DateTime?> RegisterDateFromChanged { get; set; }
+
+    [Parameter] public DateTime? RegisterDateTo { get; set; }
+    [Parameter] public EventCallback<DateTime?> RegisterDateToChanged { get; set; }
+
+    [Parameter] public EventCallback OnFilterChanged { get; set; }
+    [Parameter] public int FilteredCount { get; set; }
+    [Parameter] public int TotalCount { get; set; }
+    #endregion
+
+    #region class fields
+    private bool _isExpanded = false;
+    private bool HasActiveDateFilter => RegisterDateFrom.HasValue || RegisterDateTo.HasValue;
+
+    private record StatusOption(string Value, string Text);
+    private readonly List<StatusOption> _statusFilterOptions = new()
+    {
+        new("All", "All Statuses"),
+        new("Confirmed", "Email Confirmed Only"),
+        new("Pending", "Pending Confirmation Only")
+    };
+    #endregion
+
+    #region class methods
+    private void ToggleExpand()
+    {
+        #region hide [2026-08-16]
+        _isExpanded = !_isExpanded;
+        #endregion
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        #region hide [2026-08-16]
+        SearchQuery = e.Value?.ToString() ?? string.Empty;
+        await SearchQueryChanged.InvokeAsync(SearchQuery);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task ClearSearch()
+    {
+        #region hide [2026-08-16]
+        SearchQuery = string.Empty;
+        await SearchQueryChanged.InvokeAsync(SearchQuery);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnStatusChanged(object value)
+    {
+        #region hide [2026-08-16]
+        SelectedStatusFilter = value?.ToString() ?? "All";
+        await SelectedStatusFilterChanged.InvokeAsync(SelectedStatusFilter);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnRegisterDateFromChanged(DateTime? value)
+    {
+        #region hide [2026-08-16]
+        RegisterDateFrom = value;
+        await RegisterDateFromChanged.InvokeAsync(RegisterDateFrom);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task OnRegisterDateToChanged(DateTime? value)
+    {
+        #region hide [2026-08-16]
+        RegisterDateTo = value;
+        await RegisterDateToChanged.InvokeAsync(RegisterDateTo);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+
+    private async Task ClearRegisterDates()
+    {
+        #region hide [2026-08-16]
+        RegisterDateFrom = null;
+        RegisterDateTo = null;
+        await RegisterDateFromChanged.InvokeAsync(null);
+        await RegisterDateToChanged.InvokeAsync(null);
+        await OnFilterChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+}

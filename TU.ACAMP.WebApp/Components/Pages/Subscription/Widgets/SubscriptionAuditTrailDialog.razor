@@ -1,0 +1,125 @@
+@using Radzen
+@using Radzen.Blazor
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Services.Identity
+@inject DialogService DialogService
+@inject SubscriptionService SubscriptionService
+@inject ILogger<SubscriptionAuditTrailDialog> Logger
+@inject IWebHostEnvironment Env
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="p-2">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">
+                Subscription Activity Audit Trail
+            </RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                Complete history of subscription creations, quota adjustments, and updates by operators.
+            </RadzenText>
+        </div>
+        <RadzenButton Icon="refresh" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@LoadLogsAsync" IsBusy="@_isLoading" Style="border-radius: 6px;" />
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading audit trail records..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (!_logs.Any())
+    {
+        <div class="p-5 text-center text-muted border rounded-3 bg-light">
+            <RadzenIcon Icon="history_toggle_off" Style="font-size: 40px; opacity: 0.5;" class="mb-2" />
+            <div>No audit trail records found.</div>
+        </div>
+    }
+    else
+    {
+        <RadzenDataGrid Data="@_logs" TItem="TbSubscriptionAuditLog"
+                        AllowPaging="true" PageSize="8" AllowSorting="true"
+                        Density="Density.Compact"
+                        Style="border: 1px solid var(--rz-border-color); border-radius: 8px;">
+            <Columns>
+                @if (Env.IsDevelopment() || _isAdmin)
+                {
+                    <RadzenDataGridColumn TItem="TbSubscriptionAuditLog" Property="Id" Title="ID" Width="60px" TextAlign="TextAlign.Center" />
+                }
+
+                <RadzenDataGridColumn TItem="TbSubscriptionAuditLog" Title="Date/Time (UTC)" Property="ActionDate" Width="140px">
+                    <Template Context="log">
+                        <span class="small font-monospace">@log.ActionDate.ToString("dd/MM/yyyy HH:mm")</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="TbSubscriptionAuditLog" Title="Subscription" Property="SubscriptionTitle" Width="180px">
+                    <Template Context="log">
+                        <div class="fw-bold text-truncate" title="@log.SubscriptionTitle">@log.SubscriptionTitle</div>
+                        <span class="text-muted small">ID: @log.SubscriptionId</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="TbSubscriptionAuditLog" Title="Action" Property="ActionType" Width="100px" TextAlign="TextAlign.Center">
+                    <Template Context="log">
+                        <RadzenBadge Text="@log.ActionType"
+                                     BadgeStyle="@(log.ActionType.Equals("Created", StringComparison.OrdinalIgnoreCase) ? BadgeStyle.Success : BadgeStyle.Info)"
+                                     IsPill="true" />
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="TbSubscriptionAuditLog" Title="Performed By" Property="ActorEmail" Width="180px">
+                    <Template Context="log">
+                        <div class="text-truncate small fw-semibold" title="@log.ActorEmail">@log.ActorEmail</div>
+                        <span class="badge bg-light text-dark border small" style="font-size: 0.65rem;">@log.ActorRole</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="TbSubscriptionAuditLog" Title="Details" Property="Details">
+                    <Template Context="log">
+                        <div class="small text-muted" style="max-height: 4.5em; overflow-y: auto; word-break: break-word;">
+                            @log.Details
+                        </div>
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+    }
+
+    <div class="d-flex justify-content-end align-items-center mt-3 pt-2 border-top">
+        <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close())" Style="border-radius: 6px;" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int? SubscriptionId { get; set; }
+
+    private List<TbSubscriptionAuditLog> _logs = new();
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole(SystemRoles.Administrator);
+        await LoadLogsAsync();
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            _logs = await SubscriptionService.GetSubscriptionAuditLogsAsync(SubscriptionId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load subscription audit logs in dialog.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+}

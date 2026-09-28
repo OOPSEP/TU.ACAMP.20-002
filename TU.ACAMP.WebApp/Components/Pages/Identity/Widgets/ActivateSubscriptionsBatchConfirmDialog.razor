@@ -1,0 +1,59 @@
+@using Radzen
+@using Radzen.Blazor
+
+<div class="d-flex flex-column gap-3 py-2">
+    <!-- Information Panel -->
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        <div class="d-flex align-items-center gap-2">
+            <RadzenIcon Icon="info" Style="font-size: 1.25rem;" />
+            <div>
+                <div>Users without a subscription: <strong class="text-primary">@TargetCount user(s)</strong> (in current filter)</div>
+                <div class="mt-1">Plan to activate: <strong class="text-success">@PlanName</strong></div>
+            </div>
+        </div>
+    </RadzenAlert>
+
+    <!-- Main Question / Explanation -->
+    <RadzenText TextStyle="TextStyle.Body1" class="mb-0">
+        The system will activate subscriptions for <strong>@TargetCount user(s)</strong>. 
+        Please choose whether to send notification emails to the users:
+    </RadzenText>
+
+    <!-- Action Buttons (3 Choices) -->
+    <div class="d-flex flex-column flex-sm-row justify-content-end gap-2 pt-3 border-top mt-2">
+        <RadzenButton Text="Cancel" 
+                      Icon="close" 
+                      ButtonStyle="ButtonStyle.Light" 
+                      Variant="Variant.Filled" 
+                      Size="ButtonSize.Medium" 
+                      Click="@(() => DialogService.Close(ActivateBatchChoice.Cancel))" 
+                      Style="border-radius: 8px;" />
+        
+        <RadzenButton Text="Activate (Skip Email)" 
+                      Icon="mark_email_unread" 
+                      ButtonStyle="ButtonStyle.Warning" 
+                      Variant="Variant.Filled" 
+                      Size="ButtonSize.Medium" 
+                      Click="@(() => DialogService.Close(ActivateBatchChoice.WithoutEmail))" 
+                      Style="border-radius: 8px; font-weight: 600;" />
+
+        <RadzenButton Text="Activate & Send Email" 
+                      Icon="mark_email_read" 
+                      ButtonStyle="ButtonStyle.Success" 
+                      Variant="Variant.Filled" 
+                      Size="ButtonSize.Medium" 
+                      Click="@(() => DialogService.Close(ActivateBatchChoice.WithEmail))" 
+                      Style="border-radius: 8px; font-weight: 600;" />
+    </div>
+</div>
+
+@code {
+    #region class parameters
+    [Parameter] public int TargetCount { get; set; }
+    [Parameter] public string PlanName { get; set; } = "Pro (3 Months)";
+    #endregion
+
+    #region dependencies
+    [Inject] private DialogService DialogService { get; set; } = default!;
+    #endregion
+}

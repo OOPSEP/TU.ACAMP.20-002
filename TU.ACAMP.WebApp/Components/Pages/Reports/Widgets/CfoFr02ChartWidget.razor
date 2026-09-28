@@ -1,0 +1,39 @@
+@* [2026-09-17][Claude] Step 3 Fr-02 Organization Diagram Widget: อัปโหลดรูป "แผนภาพองค์กร" ลงพื้นที่ merge A6:M26 ของชีต Fr-02 *@
+@* [2026-09-24][Claude] รูปแผนภาพใช้ CfoImagePicker (แสดงรูปที่เลือก/รูป default, คลิกที่รูปเพื่อเลือกไฟล์) *@
+
+<RadzenStack Gap="1.5rem" Class="pt-2">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-02: Organization Diagram (แผนภาพองค์กร)</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Upload the organization diagram image to embed into the merged area A6:M26 of sheet Fr-02. The organization name (G3) and preparer (G4) are linked to Fr-01 by formula and cannot be edited here.
+        </RadzenText>
+    </div>
+
+    <!-- Organization Diagram Image (Cell A6:M26) -->
+    <RadzenCard Class="p-3 shadow-none border rounded-3">
+        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-primary mb-2">
+            <RadzenIcon Icon="account_tree" Class="me-1" /> Organization Diagram (Cell A6:M26)
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-3">
+            Click the image to choose a diagram exported from Visio, PowerPoint or any drawing tool (PNG, JPG or WEBP, max 5 MB). It is scaled to fit the merged canvas without being enlarged beyond its original size.
+        </RadzenText>
+
+        @* [2026-09-24][Claude] แสดงรูปที่เลือกของรายงาน หรือรูป default / คลิกที่รูปเพื่อเลือกไฟล์ใหม่ (A6:M26 ~ 780x400) *@
+        <CfoImagePicker ImageBase64="@DiagramImageBase64" ImageBase64Changed="@DiagramImageBase64Changed"
+                        DefaultImageUrl="images/default_org_diagram.png" InputId="fr02FileInput"
+                        AltText="Organization Diagram" Width="520" Height="267" />
+    </RadzenCard>
+
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        <strong>Optional step:</strong> If no diagram is selected, the system default diagram shown above is exported to sheet <code>Fr-02</code>.
+    </RadzenAlert>
+</RadzenStack>
+
+@code {
+    // [2026-09-17][Claude] Parameters for Step 3 Fr-02 Organization Diagram Widget
+    [Parameter] public string? DiagramImageBase64 { get; set; }
+    [Parameter] public EventCallback<string?> DiagramImageBase64Changed { get; set; }
+
+    [Parameter] public DateTime? DiagramDate { get; set; }
+    [Parameter] public EventCallback<DateTime?> DiagramDateChanged { get; set; }
+}

@@ -1,0 +1,92 @@
+/* [2026-09-24][Claude] กล่องแจ้งเตือน Pre-flight: พื้นอ่อน + ตัวอักษรเข้ม (contrast สูง) + แถบสีด้านซ้ายบอกระดับ (โทนสว่าง) */
+.pf-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid;
+    border-left-width: 5px;
+    border-radius: 8px;
+    color: #1F2937;
+    font-size: 0.875rem;
+    line-height: 1.55;
+}
+
+.pf-notice ::deep .pf-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.pf-title {
+    font-weight: 700;
+    color: #111827;
+}
+
+.pf-text {
+    color: #374151;
+}
+
+.pf-list {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+
+.pf-list li + li {
+    margin-top: 0.3rem;
+}
+
+.pf-badge {
+    display: inline-block;
+    min-width: 84px;
+    margin-right: 0.35rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background-color: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+    color: #111827;
+}
+
+.pf-warning {
+    background-color: #FFFBEB;
+    border-color: #FCD34D;
+    border-left-color: #D97706;
+}
+
+.pf-warning ::deep .pf-icon {
+    color: #B45309;
+}
+
+.pf-info {
+    background-color: #F0F9FF;
+    border-color: #BAE6FD;
+    border-left-color: #0284C7;
+}
+
+.pf-info ::deep .pf-icon {
+    color: #0369A1;
+}
+
+.pf-danger {
+    background-color: #FEF2F2;
+    border-color: #FCA5A5;
+    border-left-color: #DC2626;
+}
+
+.pf-danger ::deep .pf-icon {
+    color: #B91C1C;
+}
+
+.pf-success {
+    align-items: center;
+    background-color: #F0FDF4;
+    border-color: #86EFAC;
+    border-left-color: #16A34A;
+}
+
+.pf-success ::deep .pf-icon {
+    color: #15803D;
+}

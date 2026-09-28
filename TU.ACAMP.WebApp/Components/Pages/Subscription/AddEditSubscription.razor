@@ -1,0 +1,483 @@
+@page "/subscriptions/add"
+@page "/subscriptions/edit"
+@page "/subscriptions/view"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using System.ComponentModel.DataAnnotations
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Components.Pages.Subscription.Widgets
+
+@attribute [Authorize]
+@inject SubscriptionService SubscriptionService
+@inject IdentityAdminService IdentityAdminService
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDataProtectionProvider DataProtection
+@inject ILogger<AddEditSubscription> Logger
+
+<PageTitle>@PageHeading - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@GoBack" Style="border-radius: 8px;" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-0" Style="color: var(--rz-text-title-color);">
+                    @PageHeading
+                </RadzenText>
+                @if (!_isCreateMode && !string.IsNullOrWhiteSpace(_model.Title))
+                {
+                    <RadzenBadge BadgeStyle="@GetPlanBadgeStyle(_model.SubscriptionPlan)" Text="@_model.SubscriptionPlan.ToString()" IsPill="true" Class="ms-2" />
+                }
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" class="text-muted mb-0">
+                Manage subscription details, quotas, validity dates, and authorized workspace members.
+            </RadzenText>
+        </div>
+
+        @if (_hasChanges && !_isViewMode)
+        {
+            <div>
+                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Unsaved Changes" IsPill="true" />
+            </div>
+        }
+    </div>
+
+    @if (!_isAdmin && !_isSubscriptionManager && _isCreateMode)
+    {
+        <div class="alert alert-danger d-flex align-items-center mb-4" role="alert">
+            <RadzenIcon Icon="block" class="me-2 fs-5" />
+            <div>
+                <strong>Access Denied:</strong> Only System Administrators and Subscription Managers are allowed to create new subscriptions.
+            </div>
+        </div>
+    }
+    else if (!_isAdmin && !_isSubscriptionManager && !_canUserEdit && !_isCreateMode)
+    {
+        <div class="alert alert-warning d-flex align-items-center mb-4" role="alert">
+            <RadzenIcon Icon="lock" class="me-2 fs-5 text-warning" />
+            <div>
+                <strong>Read-Only Mode:</strong> You are viewing this subscription in read-only mode.
+            </div>
+        </div>
+    }
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading subscription details..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenTemplateForm Data="@_model" Submit="@HandleSaveAsync" TItem="TbSubscription">
+            <RadzenTabs RenderMode="TabRenderMode.Client" Class="shadow-sm rounded-3" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);" @bind-SelectedIndex="@_activeTabIndex">
+                <Tabs>
+                    <!-- Tab 1: Basic Information -->
+                    <RadzenTabsItem Text="1. Basic Information" Icon="info">
+                        <ChildContent>
+                            <SubscriptionBasicInfoWidget Model="@_model"
+                                                          IsCreateMode="@_isCreateMode"
+                                                          IsFieldDisabled="@IsFieldDisabled"
+                                                          OnFieldValueChanged="@OnFieldValueChanged" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+
+                    <!-- Tab 2: Plan & Validity -->
+                    <RadzenTabsItem Text="2. Plan & Validity" Icon="card_membership">
+                        <ChildContent>
+                            <SubscriptionPlanValidityWidget Model="@_model"
+                                                             IsAdmin="@_isAdmin"
+                                                             IsFieldDisabled="@IsFieldDisabled"
+                                                             OnFieldValueChanged="@OnFieldValueChanged"
+                                                             OnPlanChanged="@OnPlanChanged" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+
+                    <!-- Tab 3: Authorized Workspace Users -->
+                    <RadzenTabsItem Text="3. Authorized Workspace Users" Icon="people">
+                        <ChildContent>
+                            <SubscriptionUsersWidget UserList="@_userList"
+                                                      AllowUserCount="@_model.AllowUserCount"
+                                                      IsFieldDisabled="@IsFieldDisabled"
+                                                      OnChanged="@OnFieldValueChanged" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+
+                    <!-- Tab 4: Resource Quotas & Limits -->
+                    <RadzenTabsItem Text="4. Quotas & Limits" Icon="tune">
+                        <ChildContent>
+                            <SubscriptionQuotasWidget Model="@_model"
+                                                       IsAdmin="@_isAdmin"
+                                                       IsFieldDisabled="@IsFieldDisabled"
+                                                       OnFieldValueChanged="@OnFieldValueChanged"
+                                                       OnResetQuotas="@ResetQuotasToDefault" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+                </Tabs>
+            </RadzenTabs>
+
+            <div class="d-flex justify-content-end gap-2 mt-4">
+                <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@GoBack" Style="min-width: 120px; border-radius: 8px;" />
+                @if (!_isViewMode && (_isAdmin || _canUserEdit))
+                {
+                    <RadzenButton ButtonType="ButtonType.Submit"
+                                  Text="@(_isCreateMode ? "Create" : "Update")"
+                                  Icon="save"
+                                  ButtonStyle="ButtonStyle.Primary"
+                                  IsBusy="@_isSaving"
+                                  Disabled="@(_isSaving || (!_isAdmin && _isCreateMode) || (!_isCreateMode && !_hasChanges))"
+                                  Style="min-width: 120px; border-radius: 8px; font-weight: 600;" />
+                }
+            </div>
+        </RadzenTemplateForm>
+    }
+</div>
+
+@code {
+    #region class fields
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _hasChanges = false;
+    private bool _isAdmin = false;
+    private bool _isSubscriptionManager = false;
+    private bool _canUserEdit = false;
+    private bool _isViewMode = false;
+    private bool _isCreateMode = true;
+
+    private int _activeTabIndex = 0;
+    private string _currentUserEmail = string.Empty;
+
+    private TbSubscription _model = new();
+    private List<TbSubscriptionUser> _userList = new();
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+
+    public int Id { get; set; }
+    public string? ReturnUrl { get; set; }
+
+    private string PageHeading => _isViewMode ? "View Subscription" : (_isCreateMode ? "Create Subscription" : "Edit Subscription");
+
+    private bool IsFieldDisabled => _isViewMode || (!_isAdmin && !_isSubscriptionManager && !_canUserEdit);
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-15]
+        await CheckUserRoleAsync();
+        #endregion
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-15]
+        Id = DataProtection.UnprotectInt(SecureId) ?? 0;
+        ReturnUrl = DataProtection.Unprotect(SecureRet);
+
+        var uri = new Uri(NavigationManager.Uri);
+        _isViewMode = uri.AbsolutePath.EndsWith("/view", StringComparison.OrdinalIgnoreCase);
+        _isCreateMode = Id <= 0 && !uri.AbsolutePath.EndsWith("/edit", StringComparison.OrdinalIgnoreCase) && !uri.AbsolutePath.EndsWith("/view", StringComparison.OrdinalIgnoreCase);
+
+        await LoadSubscriptionDataAsync();
+        #endregion
+    }
+
+    private async Task CheckUserRoleAsync()
+    {
+        #region hide [2026-08-15]
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity != null && user.Identity.IsAuthenticated)
+            {
+                _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+                _isAdmin = user.IsInRole(SystemRoles.Administrator);
+                _isSubscriptionManager = user.IsInRole(SystemRoles.SubscriptionManager);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to check user role in AddEditSubscription.");
+        }
+        #endregion
+    }
+
+    private async Task LoadSubscriptionDataAsync()
+    {
+        #region hide [2026-08-15]
+        _isLoading = true;
+        _hasChanges = false;
+        try
+        {
+            if (_isCreateMode)
+            {
+                _model = new TbSubscription
+                {
+                    OwnerType = eSubscriptionOwnerType.Juristic,
+                    SubscriptionPlan = eSubscriptionPlan.Pro,
+                    Title = string.Empty,
+                    OwnerEmail = _currentUserEmail,
+                    BillingAddress = string.Empty,
+                    StartDate = DateTime.UtcNow,
+                    ExpiryDate = DateTime.UtcNow.AddMonths(3),
+                    IsActive = true
+                };
+                _model.ApplyPlanQuotas(eSubscriptionPlan.Pro);
+
+                _userList = new List<TbSubscriptionUser>();
+                /* Cannot do this: current user is an admin who must not be automatically added to the subscription user list
+                if (!string.IsNullOrWhiteSpace(_currentUserEmail))
+                {
+                    _userList.Add(new TbSubscriptionUser
+                    {
+                        Email = _currentUserEmail,
+                        Role = eSubscriptionRole.Owner,
+                        IsActive = true
+                    });
+                }*/
+
+                _canUserEdit = _isAdmin || _isSubscriptionManager;
+            }
+            else
+            {
+                var existing = await SubscriptionService.GetByIdAsync(Id, includeUsers: true, includeCorporates: false);
+                if (existing == null)
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "Not Found", "Subscription not found.");
+                    NavigationManager.NavigateTo("/subscriptions/list");
+                    return;
+                }
+
+                _model = existing;
+                _userList = (await SubscriptionService.GetSubscriptionUsersAsync(Id)).ToList();
+
+                // Check permission: Admin, SubscriptionManager, or User with Owner/Admin role in subscription
+                var userInSub = _userList.FirstOrDefault(u => u.Email.Equals(_currentUserEmail, StringComparison.OrdinalIgnoreCase));
+                _canUserEdit = _isAdmin || _isSubscriptionManager || (userInSub != null && (userInSub.Role == eSubscriptionRole.Owner || userInSub.Role == eSubscriptionRole.Admin));
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading subscription Id {Id}", Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Load Error", "Failed to load subscription.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void OnPlanChanged(object value)
+    {
+        #region hide [2026-08-15]
+        if (value is eSubscriptionPlan plan)
+        {
+            _model.ApplyPlanQuotas(plan);
+            _hasChanges = true;
+        }
+        #endregion
+    }
+
+    private void OnFieldValueChanged()
+    {
+        #region hide [2026-08-15]
+        _hasChanges = true;
+        #endregion
+    }
+
+    private void ResetQuotasToDefault()
+    {
+        #region hide [2026-08-15]
+        _model.ApplyPlanQuotas(_model.SubscriptionPlan);
+        _hasChanges = true;
+        NotificationService.Notify(NotificationSeverity.Info, "Quotas Reset", $"Reset quotas to default limits for {_model.SubscriptionPlan}.");
+        #endregion
+    }
+
+    private async Task HandleSaveAsync()
+    {
+        #region hide [2026-08-15]
+        if (_isCreateMode && !_isAdmin && !_isSubscriptionManager)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Access Denied", "Only system administrators and subscription managers can create subscriptions.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.Title))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Subscription Title is required.");
+            _activeTabIndex = 0;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.OwnerEmail))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Owner Email is required.");
+            _activeTabIndex = 0;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.BillingAddress))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Billing Address is required.");
+            _activeTabIndex = 0;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.TaxId) || _model.TaxId.Length != 13 || !_model.TaxId.All(char.IsDigit))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Tax ID must be exactly 13 digits numeric.");
+            _activeTabIndex = 0;
+            return;
+        }
+
+        // [2026-09-28][Gemini] ตรวจสอบ Subscription ซ้ำระดับองค์กร (TaxId หรือ Title) และถามยืนยันก่อนสร้าง License เพิ่มเติม
+        if (_isCreateMode)
+        {
+            var duplicates = await SubscriptionService.FindDuplicateSubscriptionsAsync(_model.TaxId, _model.Title, _model.Id);
+            if (duplicates.Count > 0)
+            {
+                var matchDetail = duplicates.First();
+                var confirm = await DialogService.Confirm(
+                    $"This organization already has {duplicates.Count} existing subscription(s) in the system (e.g. '{matchDetail.Title}', Plan: {matchDetail.SubscriptionPlan}).\n\nDo you want to proceed with creating an additional subscription license for this organization?",
+                    "Duplicate Organization Confirmation",
+                    new ConfirmOptions
+                    {
+                        OkButtonText = "Yes, Create Additional License",
+                        CancelButtonText = "Cancel & Review",
+                        Width = "560px"
+                    });
+
+                if (confirm != true)
+                {
+                    return;
+                }
+            }
+        }
+
+        // Check if there is already an Owner in _userList; if not, add OwnerEmail with Owner role
+        var hasOwner = _userList.Any(u => u.Role == eSubscriptionRole.Owner);
+        if (!hasOwner && !string.IsNullOrWhiteSpace(_model.OwnerEmail))
+        {
+            var ownerEmailTrimmed = _model.OwnerEmail.Trim();
+            var existingOwnerUser = _userList.FirstOrDefault(u => u.Email.Trim().Equals(ownerEmailTrimmed, StringComparison.OrdinalIgnoreCase));
+            if (existingOwnerUser != null)
+            {
+                existingOwnerUser.Role = eSubscriptionRole.Owner;
+                existingOwnerUser.IsActive = true;
+            }
+            else
+            {
+                _userList.Insert(0, new TbSubscriptionUser
+                {
+                    Email = ownerEmailTrimmed,
+                    Role = eSubscriptionRole.Owner,
+                    IsActive = true
+                });
+            }
+        }
+
+        _isSaving = true;
+        try
+        {
+            var wasCreateMode = _isCreateMode;
+            var saved = await SubscriptionService.SaveSubscriptionWithUsersAsync(_model, _userList);
+            _hasChanges = false;
+
+            // Audit Trail & Admin Notification
+            var actionType = wasCreateMode ? "Created" : "Updated";
+            var actorRole = _isAdmin ? SystemRoles.Administrator : (_isSubscriptionManager ? SystemRoles.SubscriptionManager : "User");
+            var details = $"Plan: {saved.SubscriptionPlan}, Owner: {saved.OwnerEmail}, TaxId: {saved.TaxId}, Validity: {saved.StartDate:dd/MM/yyyy}-{saved.ExpiryDate:dd/MM/yyyy}, Quotas: [Corp:{saved.AllowCorporateCount}, Co:{saved.AllowCompanyCount}, Fac:{saved.AllowFacilityCount}, User:{saved.AllowUserCount}]";
+
+            await SubscriptionService.LogAuditAsync(
+                saved.Id,
+                saved.Title,
+                actionType,
+                _currentUserEmail,
+                actorRole,
+                details);
+
+            // Notify System Administrators if performed by SubscriptionManager or non-admin
+            if (!_isAdmin || _isSubscriptionManager)
+            {
+                var adminEmails = await IdentityAdminService.GetAdminEmailsAsync();
+                await SubscriptionService.NotifyAdminsOnSubscriptionChangeAsync(
+                    saved,
+                    actionType,
+                    _currentUserEmail,
+                    actorRole,
+                    adminEmails,
+                    details);
+            }
+
+            NotificationService.Notify(NotificationSeverity.Success, "Saved", $"Subscription '{saved.Title}' saved successfully.");
+            
+            if (!string.IsNullOrWhiteSpace(ReturnUrl))
+            {
+                NavigationManager.NavigateTo(ReturnUrl);
+            }
+            else
+            {
+                NavigationManager.NavigateTo("/subscriptions/list");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving subscription {Title}", _model.Title);
+            NotificationService.Notify(NotificationSeverity.Error, "Save Error", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-15]
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/subscriptions/list");
+        }
+        #endregion
+    }
+
+    private BadgeStyle GetPlanBadgeStyle(eSubscriptionPlan plan)
+    {
+        #region hide [2026-08-15]
+        return plan switch
+        {
+            eSubscriptionPlan.Basic => BadgeStyle.Secondary,
+            eSubscriptionPlan.Pro => BadgeStyle.Primary,
+            eSubscriptionPlan.Premium => BadgeStyle.Warning,
+            eSubscriptionPlan.Enterprise => BadgeStyle.Danger,
+            _ => BadgeStyle.Light
+        };
+        #endregion
+    }
+
+    #endregion
+}

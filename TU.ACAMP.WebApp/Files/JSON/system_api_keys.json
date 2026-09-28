@@ -1,0 +1,9 @@
+[
+  {
+    "SubscriptionId": 1,
+    "KeyName": "Default Workspace Integration Key",
+    "KeyPrefix": "acamp_default1",
+    "KeyHash": "f0102610d471797507e2fd679799760c7bb7b5292c448d71287a0b6af8bcdae7",
+    "IsActive": true
+  }
+]

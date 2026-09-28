@@ -1,0 +1,111 @@
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Constants
+
+<div class="p-4">
+    @if (Model.Id == 0)
+    {
+        <div class="alert alert-info d-flex align-items-center mb-0" role="alert">
+            <RadzenIcon Icon="info" Class="me-2 fs-5" />
+            <div>
+                Emission activity topics and GHG monitoring boundaries can be assigned and configured after saving the Facility record.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold m-0">
+                Assigned Topics & Emission Boundaries (@(TopicsList.Count))
+            </RadzenText>
+            <div class="d-flex gap-2">
+                <RadzenButton Text="Manage Topics" Icon="category" ButtonStyle="ButtonStyle.Primary"
+                              Size="ButtonSize.Small" Click="@HandleManageTopics"
+                              Style="border-radius: 6px;" />
+            </div>
+        </div>
+
+        @if (!TopicsList.Any())
+        {
+            <div class="p-4 text-center text-muted border rounded bg-light">
+                <RadzenIcon Icon="category" Style="font-size: 36px; opacity: 0.5;" Class="mb-2" />
+                <div>No emission activity topics currently registered under this facility node.</div>
+            </div>
+        }
+        else
+        {
+            <RadzenDataGrid Data="@TopicsList" TItem="TbActivityTopic" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="TbActivityTopic" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @(TopicsList.IndexOf(item) + 1)
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityTopic" Property="Title" Title="Activity Topic Title" MinWidth="220px">
+                        <Template Context="item">
+                            <div class="d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="topic" Style="color: var(--rz-primary); font-size: 1.1rem;" />
+                                <span class="fw-bold">@item.Title</span>
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityTopic" Title="Scope & Group" Width="200px">
+                        <Template Context="item">
+                            @if (item.EmissionGroup != null)
+                            {
+                                <span class="badge bg-primary-subtle text-primary border px-2 py-1" style="font-size: 0.75rem;">
+                                    @item.EmissionGroup.TgoScopeNo - @item.EmissionGroup.Title
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">-</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityTopic" Title="Activity Events" Width="130px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <span class="badge bg-success-subtle text-success-emphasis border fw-bold px-2 py-1">
+                                @((item.Events?.Count ?? 0)) Records
+                            </span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityTopic" Property="IsActive" Title="Status" Width="110px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (item.IsActive)
+                            {
+                                <span class="badge bg-success-subtle text-success border px-2 py-1" style="font-size: 0.75rem;">Active</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary-subtle text-secondary border px-2 py-1" style="font-size: 0.75rem;">Inactive</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityTopic" Property="Remark" Title="Remark" MinWidth="180px" />
+                </Columns>
+            </RadzenDataGrid>
+        }
+    }
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public TbFacility Model { get; set; } = new();
+    [Parameter] public List<TbActivityTopic> TopicsList { get; set; } = new();
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnManageTopics { get; set; }
+    #endregion
+
+    #region class methods
+    private async Task HandleManageTopics()
+    {
+        #region hide [2026-08-18]
+        if (OnManageTopics.HasDelegate)
+        {
+            await OnManageTopics.InvokeAsync();
+        }
+        #endregion
+    }
+    #endregion
+}

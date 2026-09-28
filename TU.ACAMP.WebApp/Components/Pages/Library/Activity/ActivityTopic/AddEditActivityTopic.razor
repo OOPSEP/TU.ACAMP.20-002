@@ -1,0 +1,1075 @@
+@page "/library/activity-topics/add"
+@page "/library/activity-topics/edit"
+@page "/library/activity-topics/view"
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Components.Common
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+
+@attribute [Authorize]
+
+@inject ActivityTopicService ActivityTopicService
+@inject ActivityGroupService ActivityGroupService
+@inject EmissionSourceService EmissionSourceService
+@inject EmissionGroupService EmissionGroupService
+@inject EmissionMappingService EmissionMappingService
+@inject FacilityService FacilityService
+@inject CompanyService CompanyService
+@inject CorporateService CorporateService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<AddEditActivityTopic> Logger
+
+<PageTitle>@(_isReadOnlyForm ? "View Activity Topic" : (_model.Id == 0 ? "Register Activity Topic" : "Edit Activity Topic")) - ACAMP</PageTitle>
+
+<div class="container-fluid py-2 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@GoBack" Class="me-2" Style="border-radius: 6px;" Title="Back to previous page" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isReadOnlyForm ? "View Activity Topic" : (_model.Id == 0 ? "Register Activity Topic" : "Edit Activity Topic"))
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-1 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    Manage activity topic configuration, scopes, and emission source mappings.
+                </RadzenText>
+            </div>
+        </div>
+
+        @if (_hasChanges && !_isReadOnlyForm)
+        {
+            <div class="d-flex align-items-center">
+                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Unsaved Changes" IsPill="true" Class="px-3 py-2 shadow-sm" Style="font-size: 0.8rem; font-weight: 600;" />
+            </div>
+        }
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading activity topic configuration..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        @if (_isReadOnlyForm)
+        {
+            <div class="alert alert-warning d-flex align-items-center mb-3 shadow-sm rounded-3">
+                <RadzenIcon Icon="lock" class="me-2 fs-5 text-warning" />
+                <div>
+                    <strong>Read-Only Mode:</strong> You are viewing this activity topic. Editing is restricted for your current access role or workspace.
+                </div>
+            </div>
+        }
+
+        <RadzenTemplateForm TItem="TbActivityTopic" Data="@_model" Submit="@OnSubmit">
+            <RadzenStack Gap="1.5rem">
+                <!-- Section 1: Basic Information -->
+                <RadzenCard Class="shadow-sm p-4 rounded-3" Style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color);">
+                    <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-3 text-primary">
+                        1. Topic Identification
+                    </RadzenText>
+
+                    <RadzenRow Class="g-3 mb-3">
+                        <RadzenColumn Size="12">
+                            <RadzenFormField Text="Topic Title / Activity Name *" Style="width: 100%;">
+                                <RadzenTextBox Name="Title" @bind-Value="@_model.Title"
+                                               Change="@(_ => UpdateChanges())"
+                                               Placeholder="e.g. Diesel for Emergency Generators, Main Facility Grid Electricity..."
+                                               Style="width: 100%; font-weight: 600;"
+                                               Disabled="@_isReadOnlyForm" />
+                                <RadzenRequiredValidator Component="Title" Text="Topic title is required." />
+                            </RadzenFormField>
+                        </RadzenColumn>
+                    </RadzenRow>
+
+                    <!-- Section 2: Emission Source Details (Primary / Master Allocation) -->
+                    <div class="border-top pt-3 mt-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold m-0 text-secondary">
+                                Emission Source & Scope Allocation
+                            </RadzenText>
+                            @if (_currentMapping != null)
+                            {
+                                <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" style="font-size: 0.8rem;">
+                                    <i class="bi bi-link-45deg me-1"></i> Auto-Mapped: @_currentMapping.Title
+                                </span>
+                            }
+                        </div>
+
+                        @if (_masterChild != null)
+                        {
+                            <!-- Row: Emission Share, Scope No -->
+                            <RadzenRow Class="g-3 mb-3 align-items-center">
+                                <RadzenColumn Size="12" SizeMD="6">
+                                    <RadzenFormField Text="Emission Share (%) *" Style="width: 100%;">
+                                        <RadzenNumeric TValue="float" Min="0" Max="100" @bind-Value="@_masterChild.EmissionSharePercent"
+                                                       Change="@(_ => UpdateChanges())" Style="width: 100%;" Disabled="@_isReadOnlyForm" />
+                                    </RadzenFormField>
+                                </RadzenColumn>
+
+                                <RadzenColumn Size="12" SizeMD="6">
+                                    <RadzenFormField Text="Greenhouse Gas Scope *" Style="width: 100%;">
+                                        <RadzenDropDown TValue="eTgoScopeNo"
+                                                        Data="@_scopes"
+                                                        TextProperty="Text"
+                                                        ValueProperty="Value"
+                                                        @bind-Value="@_selectedScopeNo"
+                                                        Change="@OnScopeChanged"
+                                                        Style="width: 100%;"
+                                                        Disabled="@_isReadOnlyForm" />
+                                    </RadzenFormField>
+                                </RadzenColumn>
+                            </RadzenRow>
+
+                            <!-- Activity Group -->
+                            <RadzenRow Class="g-3 mb-3">
+                                <RadzenColumn Size="12">
+                                    <RadzenFormField Text="Activity *" Style="width: 100%;">
+                                        <RadzenDropDown TValue="int"
+                                                        Data="@_activityGroupDropdownItems"
+                                                        TextProperty="SearchText"
+                                                        ValueProperty="Id"
+                                                        @bind-Value="@_masterChild.ActivityGroupId"
+                                                        Change="@OnActivityGroupChanged"
+                                                        Style="width: 100%;"
+                                                        Disabled="@_isReadOnlyForm"
+                                                        AllowFiltering="true"
+                                                        FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                                             <ValueTemplate Context="item">
+                                                 @{
+                                                     var dto = item as ActivityGroupDropdownItem;
+                                                     var g = dto?.Group ?? _allActivityGroups.FirstOrDefault(ag => ag.Id == _masterChild.ActivityGroupId);
+                                                 }
+                                                 @if (g != null)
+                                                 {
+                                                     var idx = dto?.Index ?? (_filteredActivityGroups.IndexOf(g) + 1);
+                                                     var displayIndex = idx > 0 ? idx : (_allActivityGroups.IndexOf(g) + 1);
+                                                     var th = !string.IsNullOrWhiteSpace(g.TitleTh) ? $" ({g.TitleTh})" : "";
+                                                     <span>@displayIndex. <b>@g.Title</b>@th</span>
+                                                 }
+                                                 else
+                                                 {
+                                                     <span>Select Activity Group...</span>
+                                                 }
+                                             </ValueTemplate>
+                                             <Template Context="item">
+                                                 @{
+                                                     var dto = (ActivityGroupDropdownItem)item;
+                                                     var th = !string.IsNullOrWhiteSpace(dto.TitleTh) ? $" ({dto.TitleTh})" : "";
+                                                 }
+                                                 <span>@dto.Index. <b>@dto.Title</b>@th</span>
+                                             </Template>
+                                        </RadzenDropDown>
+                                    </RadzenFormField>
+                                </RadzenColumn>
+                            </RadzenRow>
+
+                            <!-- Emission Group & Emission Source -->
+                            <RadzenRow Class="g-3 mb-3">
+                                <RadzenColumn Size="12" SizeMD="6">
+                                     <RadzenFormField Text="Emission *" Style="width: 100%;">
+                                         <RadzenDropDown TValue="int"
+                                                         Data="@_emissionGroupDropdownItems"
+                                                         TextProperty="SearchText"
+                                                         ValueProperty="Id"
+                                                         @bind-Value="@_selectedEmissionGroupId"
+                                                         Change="@OnEmissionGroupChanged"
+                                                         Style="width: 100%;"
+                                                         Disabled="@_isReadOnlyForm"
+                                                         AllowFiltering="true"
+                                                         FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                                              <ValueTemplate Context="item">
+                                                  @{
+                                                      var dto = item as EmissionGroupDropdownItem;
+                                                      var eg = dto?.Group ?? _allEmissionGroups.FirstOrDefault(g => g.Id == _selectedEmissionGroupId);
+                                                  }
+                                                  @if (eg != null)
+                                                  {
+                                                      var idx = dto?.Index ?? (_filteredEmissionGroups.IndexOf(eg) + 1);
+                                                      var displayIndex = idx > 0 ? idx : (_allEmissionGroups.IndexOf(eg) + 1);
+                                                      var th = !string.IsNullOrWhiteSpace(eg.TitleTh) ? $" ({eg.TitleTh})" : "";
+                                                      <span>@displayIndex. <strong>@eg.Title</strong>@th</span>
+                                                  }
+                                                  else
+                                                  {
+                                                      <span>Select Emission Group...</span>
+                                                  }
+                                              </ValueTemplate>
+                                              <Template Context="item">
+                                                  @{
+                                                      var dto = (EmissionGroupDropdownItem)item;
+                                                      var th = !string.IsNullOrWhiteSpace(dto.TitleTh) ? $" ({dto.TitleTh})" : "";
+                                                  }
+                                                  <span>@dto.Index. <strong>@dto.Title</strong>@th</span>
+                                              </Template>
+                                          </RadzenDropDown>
+                                     </RadzenFormField>
+                                </RadzenColumn>
+
+                                <RadzenColumn Size="12" SizeMD="6">
+                                    <RadzenFormField Text="Source *" Style="width: 100%;">
+                                        <RadzenDropDown TValue="int"
+                                                        Data="@_filteredEmissionSources"
+                                                        TextProperty="Title"
+                                                        ValueProperty="Id"
+                                                        @bind-Value="@_masterChild.SourceId"
+                                                        Change="@OnSourceChanged"
+                                                        Style="width: 100%;"
+                                                        Disabled="@_isReadOnlyForm"
+                                                        AllowFiltering="true"
+                                                        FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive">
+                                            <ValueTemplate Context="item">
+                                                @{
+                                                    var es = item as TbEmissionSource ?? _masterChild?.Source;
+                                                }
+                                                @if (es != null)
+                                                {
+                                                    var esUnit = !string.IsNullOrEmpty(es.Unit?.Title) ? es.Unit.Title : "Unit";
+                                                    @if (es.IsExpire)
+                                                    {
+                                                        <span class="badge bg-danger text-white me-1" style="font-size: 0.7rem; border-radius: 4px; padding: 2px 6px;">Expired</span>
+                                                    }
+                                                    <span>@es.Title : <b style="color: darkorange;">@es.EF.ToString("N4")</b>/<b>@esUnit</b></span>
+                                                }
+                                                else
+                                                {
+                                                    <span>Select Emission Source...</span>
+                                                }
+                                            </ValueTemplate>
+                                            <Template Context="item">
+                                                @{
+                                                    var es = item as TbEmissionSource;
+                                                }
+                                                @if (es != null)
+                                                {
+                                                    var esUnit = !string.IsNullOrEmpty(es.Unit?.Title) ? es.Unit.Title : "Unit";
+                                                    var idx = _filteredEmissionSources.IndexOf(es) + 1;
+                                                    @if (es.IsExpire)
+                                                    {
+                                                        <span class="badge bg-danger text-white me-1" style="font-size: 0.7rem; border-radius: 4px; padding: 2px 6px;">Expired</span>
+                                                    }
+                                                    <span>@idx. @es.Title : <b style="color: darkorange;">@es.EF.ToString("N4")</b>/<b>@esUnit</b></span>
+                                                }
+                                            </Template>
+                                        </RadzenDropDown>
+                                    </RadzenFormField>
+                                    @if (_masterChild?.Source != null && _masterChild.Source.IsExpire)
+                                    {
+                                        <div class="mt-2 p-2 bg-danger-subtle border border-danger-subtle rounded text-danger d-flex align-items-center" style="font-size: 0.82rem;">
+                                            <RadzenIcon Icon="error" Class="me-2 text-danger fs-6" />
+                                            <span><strong>Warning:</strong> This greenhouse gas emission source has expired (@(_masterChild.Source.DateExpire?.ToString("dd/MM/yyyy") ?? "Expired"))</span>
+                                        </div>
+                                    }
+                                </RadzenColumn>
+                            </RadzenRow>
+
+                            <!-- Breakdown Expand Toggle Button -->
+                            @if (_childsList.Count > 0)
+                            {
+                                <RadzenRow Class="mt-2">
+                                    <RadzenColumn Size="12" Class="d-flex justify-content-end">
+                                        <RadzenButton ButtonType="ButtonType.Button"
+                                                      Text="@(_isBreakdownExpanded ? "Hide Breakdown" : $"Breakdown ({_childsList.Count} Scopes)")"
+                                                      Icon="@(_isBreakdownExpanded ? "expand_less" : "expand_more")"
+                                                      ButtonStyle="ButtonStyle.Light"
+                                                      Variant="Variant.Flat"
+                                                      Size="ButtonSize.Small"
+                                                      Click="@(() => _isBreakdownExpanded = !_isBreakdownExpanded)" />
+                                    </RadzenColumn>
+                                </RadzenRow>
+                            }
+
+                            <!-- Multi-Source Breakdown Grid (Expanded) -->
+                            @if (_isBreakdownExpanded && _childsList.Count > 0)
+                            {
+                                <RadzenRow Class="mt-3">
+                                    <RadzenColumn Size="12">
+                                        <RadzenText TextStyle="TextStyle.Subtitle2" Class="mb-2 fw-bold text-secondary">
+                                            Active Scopes & Emissions Breakdown
+                                        </RadzenText>
+
+                                        <RadzenDataGrid Data="@_childsList" TItem="TbActivityTopicChild" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default" class="rounded">
+                                            <Columns>
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="#" Width="50px" TextAlign="TextAlign.Center" Sortable="false" Filterable="false">
+                                                    <Template Context="c">
+                                                        @(_childsList.IndexOf(c) + 1)
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="Active" Width="80px" TextAlign="TextAlign.Center">
+                                                    <Template Context="c">
+                                                        @if (c == _masterChild)
+                                                        {
+                                                            <RadzenCheckBox TValue="bool" Value="true" Disabled="true" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <RadzenCheckBox TValue="bool" @bind-Value="@c.IsActive" Change="@UpdateChanges" Disabled="@_isReadOnlyForm" />
+                                                        }
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="Activity Name" Width="220px">
+                                                    <Template Context="c">
+                                                        @if (c == _masterChild)
+                                                        {
+                                                            <span class="badge bg-success text-white me-1" style="font-size: 0.75rem; font-weight: bold; border-radius: 4px; padding: 2px 6px;">Master</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge bg-warning text-dark me-1" style="font-size: 0.75rem; font-weight: bold; border-radius: 4px; padding: 2px 6px;">Child</span>
+                                                        }
+                                                        <span>@(c.ActivityGroup?.Title ?? "-")</span>
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="Source" Width="380px">
+                                                    <Template Context="c">
+                                                        @{
+                                                            var srcTitle = c.Source?.Title;
+                                                            var srcUnit = !string.IsNullOrEmpty(c.Source?.Unit?.Title) ? c.Source.Unit.Title : "Unit";
+                                                        }
+                                                        @if (c.Source != null && c.Source.IsExpire)
+                                                        {
+                                                            <span class="badge bg-danger text-white me-1" style="font-size: 0.7rem; border-radius: 4px; padding: 2px 6px;">Expired</span>
+                                                        }
+                                                        <span>@(srcTitle ?? "-") : <b style="color: darkorange;">@(c.Source?.EF.ToString("N4") ?? "0")</b>/<b>@srcUnit</b></span>
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="Scope" Width="110px" TextAlign="TextAlign.Center">
+                                                    <Template Context="c">
+                                                        @{
+                                                            var scopeNo = c.ActivityGroup?.TgoScopeNo ?? c.Source?.Group?.TgoScopeNo ?? eTgoScopeNo.Scope1;
+                                                            var badgeColor = scopeNo switch
+                                                            {
+                                                                eTgoScopeNo.Scope1 => "bg-primary text-white",
+                                                                eTgoScopeNo.Scope2 => "bg-success text-white",
+                                                                eTgoScopeNo.Scope3 => "bg-info text-white",
+                                                                _ => "bg-secondary text-white"
+                                                            };
+                                                            var scopeText = scopeNo switch
+                                                            {
+                                                                eTgoScopeNo.Scope1 => "Scope 1",
+                                                                eTgoScopeNo.Scope2 => "Scope 2",
+                                                                eTgoScopeNo.Scope3 => "Scope 3",
+                                                                _ => "Separate"
+                                                            };
+                                                        }
+                                                        <span class="badge @badgeColor" style="font-size: 0.75rem; font-weight: bold; border-radius: 4px; padding: 2px 8px;">@scopeText</span>
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="Unit Ratio" Width="130px" TextAlign="TextAlign.Center">
+                                                    <Template Context="c">
+                                                        @if (_editingChild == c)
+                                                        {
+                                                            <RadzenNumeric TValue="decimal?" @bind-Value="@c.UnitConversionRatio" Step="0.0001m" Format="N4" Style="width: 100%;" Change="@UpdateChanges" Disabled="@_isReadOnlyForm" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="fw-bold text-dark">@(c.UnitConversionRatio?.ToString("N4") ?? "1.0000")</span>
+                                                        }
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+
+                                                <RadzenDataGridColumn TItem="TbActivityTopicChild" Title="Actions" Width="120px" TextAlign="TextAlign.Center" Sortable="false">
+                                                    <Template Context="c">
+                                                        @if (_editingChild == c)
+                                                        {
+                                                            <RadzenButton Icon="check" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@(() => { _editingChild = null; UpdateChanges(); })" Class="me-1" Title="Confirm edit" />
+                                                            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@(() => _editingChild = null)" Title="Cancel" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Warning" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@(() => _editingChild = c)" Class="me-1" Disabled="@_isReadOnlyForm" Title="Edit Ratio/Share" />
+                                                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@(() => RemoveChild(c))" Disabled="@(_isReadOnlyForm || c == _masterChild)" Title="@(c == _masterChild ? "Master row cannot be deleted" : "Delete")" />
+                                                        }
+                                                    </Template>
+                                                </RadzenDataGridColumn>
+                                            </Columns>
+                                        </RadzenDataGrid>
+                                    </RadzenColumn>
+                                </RadzenRow>
+                            }
+                        }
+                    </div>
+
+                    <!-- Remark & Status -->
+                    <div class="border-top pt-3 mt-3">
+                        <RadzenRow Class="g-3 mb-3">
+                            <RadzenColumn Size="12">
+                                <RadzenFormField Text="Remark / Description" Style="width: 100%;">
+                                    <RadzenTextArea Rows="2" Name="Remark" @bind-Value="@_model.Remark"
+                                                    Change="@(_ => UpdateChanges())"
+                                                    Placeholder="Optional meter serials, boundary notes, or accounting references..."
+                                                    Style="width: 100%;"
+                                                    Disabled="@_isReadOnlyForm" />
+                                </RadzenFormField>
+                            </RadzenColumn>
+                        </RadzenRow>
+
+                        <RadzenRow>
+                            <RadzenColumn Size="12" Class="d-flex align-items-center gap-2">
+                                <RadzenSwitch @bind-Value="@_model.IsActive" Change="@(_ => UpdateChanges())" Disabled="@_isReadOnlyForm" />
+                                <RadzenLabel Text="Active Topic (Included in carbon accounting and reporting)" Style="font-weight: 500;" />
+                            </RadzenColumn>
+                        </RadzenRow>
+                    </div>
+                </RadzenCard>
+
+                <!-- Attached Evidence Files & Links Section with Expand/Collapse -->
+                <RadzenCard Class="mt-3 p-3 shadow-sm rounded-3 bg-white border">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <RadzenIcon Icon="attach_file" Style="font-size: 1.2rem; color: var(--rz-secondary);" />
+                            <RadzenText TextStyle="TextStyle.Subtitle2" Class="m-0 fw-bold text-secondary">
+                                Attached Files & References
+                            </RadzenText>
+                            @if (_attachedFilesCount > 0)
+                            {
+                                <span class="badge bg-info-subtle text-info border px-2 py-1" style="font-size: 0.75rem;">
+                                    @_attachedFilesCount Files Attached
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary-subtle text-secondary border px-2 py-1" style="font-size: 0.75rem;">
+                                    No files attached
+                                </span>
+                            }
+                        </div>
+                        <RadzenButton ButtonType="ButtonType.Button"
+                                      Icon="@(_showFilesSection ? "expand_less" : "expand_more")"
+                                      Text="@(_showFilesSection ? "Hide Attachments" : "Manage Attachments")"
+                                      Variant="Variant.Outlined"
+                                      ButtonStyle="ButtonStyle.Secondary"
+                                      Size="ButtonSize.Small"
+                                      Click="@ToggleFilesSection"
+                                      Style="border-radius: 6px;" />
+                    </div>
+
+                    @if (_showFilesSection)
+                    {
+                        <div class="mt-3 pt-3 border-top">
+                            <AttachedFilesWidget @bind-JsonDataFiles="@_model.JsonDataFiles"
+                                                 IsReadOnly="@_isReadOnlyForm"
+                                                 SubscriptionId="@_model.SubscriptionId"
+                                                 OnModelChanged="@HandleFilesChanged" />
+                        </div>
+                    }
+                </RadzenCard>
+
+                <!-- Action Buttons -->
+                <RadzenRow Class="mt-3">
+                    <RadzenColumn Size="12" Class="d-flex justify-content-end gap-2">
+                        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@GoBack" Style="min-width: 120px; border-radius: 8px;" />
+                        @if (!_isReadOnlyForm)
+                        {
+                            <RadzenButton ButtonType="ButtonType.Submit" 
+                                          Text="@(_model.Id == 0 ? "Create Topic" : "Save Changes")" 
+                                          ButtonStyle="ButtonStyle.Primary"
+                                          Icon="save" 
+                                          IsBusy="@_isSaving"
+                                          Disabled="@(IsSaveDisabled || _isSaving)"
+                                          Style="min-width: 140px; border-radius: 8px; font-weight: 600;" 
+                                          Title="@SaveDisabledReason" />
+                        }
+                    </RadzenColumn>
+                </RadzenRow>
+            </RadzenStack>
+        </RadzenTemplateForm>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _isReadOnlyForm = false;
+    private bool _isSaving = false;
+    private bool _hasChanges = false;
+    private bool _isBreakdownExpanded = false;
+    private bool _showFilesSection = false;
+    private int _attachedFilesCount = 0;
+    private string _originalSnapshot = string.Empty;
+
+    private eTgoScopeNo _selectedScopeNo = eTgoScopeNo.Scope1;
+    private int _selectedEmissionGroupId = 0;
+    private string _currentUserEmail = string.Empty;
+
+    private TbActivityTopic _model = new();
+    private List<TbActivityTopicChild> _childsList = new();
+    private TbActivityTopicChild? _masterChild;
+    private TbActivityTopicChild? _editingChild;
+    private TbEmissionMapping? _currentMapping;
+
+    private List<TbActivityGroup> _allActivityGroups = new();
+    private List<TbActivityGroup> _filteredActivityGroups = new();
+    private List<ActivityGroupDropdownItem> _activityGroupDropdownItems = new();
+    private List<TbEmissionGroup> _allEmissionGroups = new();
+    private List<TbEmissionGroup> _filteredEmissionGroups = new();
+    private List<EmissionGroupDropdownItem> _emissionGroupDropdownItems = new();
+    private List<TbEmissionSource> _allEmissionSources = new();
+    private List<TbEmissionSource> _filteredEmissionSources = new();
+
+    private class ActivityGroupDropdownItem
+    {
+        public int Id { get; set; }
+        public int Index { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string TitleTh { get; set; } = string.Empty;
+        public TbActivityGroup Group { get; set; } = null!;
+
+        public string SearchText => $"{Index} {Index}. {Code} {Title} {TitleTh}";
+    }
+
+    private class EmissionGroupDropdownItem
+    {
+        public int Id { get; set; }
+        public int Index { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string TitleTh { get; set; } = string.Empty;
+        public TbEmissionGroup Group { get; set; } = null!;
+
+        public string SearchText => $"{Index} {Index}. {Code} {Title} {TitleTh}";
+    }
+
+    private class ScopeDropdownItem
+    {
+        public eTgoScopeNo Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private readonly List<ScopeDropdownItem> _scopes = new()
+    {
+        new() { Value = eTgoScopeNo.Scope1, Text = "1. Scope 1 (Direct GHG)" },
+        new() { Value = eTgoScopeNo.Scope2, Text = "2. Scope 2 (Indirect Energy)" },
+        new() { Value = eTgoScopeNo.Scope3, Text = "3. Scope 3 (Other Indirect)" },
+        new() { Value = eTgoScopeNo.SeparateReport, Text = "4. Separate Report (Biogenic CO2)" }
+    };
+
+    private bool IsSaveDisabled
+    {
+        get
+        {
+            if (_isReadOnlyForm || _isSaving) return true;
+            if (string.IsNullOrWhiteSpace(_model.Title)) return true;
+            if (_masterChild == null) return true;
+            if (_masterChild.ActivityGroupId <= 0) return true;
+            if (_masterChild.SourceId <= 0) return true;
+            if (_model.Id > 0 && !_hasChanges) return true;
+            return false;
+        }
+    }
+
+    private string SaveDisabledReason => _isReadOnlyForm ? "You do not have permission to edit."
+        : _isSaving ? "Saving changes..."
+        : string.IsNullOrWhiteSpace(_model.Title) ? "Topic title is required."
+        : (_masterChild == null || _masterChild.ActivityGroupId <= 0) ? "Activity group is required."
+        : (_masterChild.SourceId <= 0) ? "Emission source is required."
+        : (_model.Id > 0 && !_hasChanges) ? "No changes detected."
+        : string.Empty;
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ptype")]
+    public string? RawParentType { get; set; }
+
+    [SupplyParameterFromQuery(Name = "pid")]
+    public string? SecurePid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? SecureTab { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+
+    public int TopicId { get; set; }
+    public int SubscriptionId { get; set; }
+    public int TargetParentId { get; set; }
+    public string? ReturnUrl { get; set; }
+
+    public eTopicLevel ParentLevel
+    {
+        get
+        {
+            if (string.Equals(RawParentType, "Corporate", StringComparison.OrdinalIgnoreCase)) return eTopicLevel.Corporate;
+            if (string.Equals(RawParentType, "Company", StringComparison.OrdinalIgnoreCase)) return eTopicLevel.Company;
+            return eTopicLevel.Facility;
+        }
+    }
+    #endregion
+
+    #region class methods
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-20]
+        ResolveParameters();
+        await LoadDataAsync();
+        #endregion
+    }
+
+    private void ResolveParameters()
+    {
+        #region hide [2026-08-20]
+        // Resolve Topic ID
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            TopicId = DataProtection.UnprotectInt(SecureId) ?? 0;
+        }
+
+        // Resolve Subscription ID
+        if (!string.IsNullOrWhiteSpace(SecureSid))
+        {
+            SubscriptionId = DataProtection.UnprotectInt(SecureSid) ?? 0;
+        }
+
+        // Resolve Parent Target ID
+        if (!string.IsNullOrWhiteSpace(SecurePid))
+        {
+            TargetParentId = DataProtection.UnprotectInt(SecurePid) ?? 0;
+        }
+
+        // Resolve Return URL
+        if (!string.IsNullOrWhiteSpace(SecureRet))
+        {
+            var unprotected = DataProtection.Unprotect(SecureRet);
+            if (!string.IsNullOrWhiteSpace(unprotected) && unprotected.StartsWith("/"))
+            {
+                ReturnUrl = unprotected;
+            }
+        }
+
+        // Resolve Tab
+        if (!string.IsNullOrWhiteSpace(SecureTab) && int.TryParse(SecureTab, out var tabIdx))
+        {
+            _selectedScopeNo = tabIdx switch
+            {
+                0 or 1 => tabIdx == 0 ? eTgoScopeNo.Scope1 : eTgoScopeNo.Scope2,
+                2 => eTgoScopeNo.Scope3,
+                3 => eTgoScopeNo.SeparateReport,
+                _ => eTgoScopeNo.Scope1
+            };
+        }
+        #endregion
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-20]
+        try
+        {
+            _isLoading = true;
+            await InitializeUserSessionAsync();
+
+            // Load Master / Library Data
+            _allActivityGroups = await ActivityGroupService.GetAllAsync();
+            _allEmissionGroups = await EmissionGroupService.GetAllAsync();
+            _allEmissionSources = await EmissionSourceService.GetAllAsync();
+
+            if (TopicId > 0)
+            {
+                var existing = await ActivityTopicService.GetByIdAsync(TopicId, includeRelations: true);
+                if (existing != null)
+                {
+                    _model = existing;
+                    SubscriptionId = existing.SubscriptionId;
+                    TargetParentId = existing.TargetId;
+                    _childsList = existing.Childs.ToList();
+
+                    _masterChild = _childsList.FirstOrDefault();
+                    if (_masterChild == null)
+                    {
+                        AddDefaultChild();
+                    }
+                    else
+                    {
+                        if (_masterChild.ActivityGroup != null)
+                        {
+                            _selectedScopeNo = _masterChild.ActivityGroup.TgoScopeNo;
+                        }
+                        if (_masterChild.Source != null)
+                        {
+                            _selectedEmissionGroupId = _masterChild.Source.GroupId;
+                        }
+                    }
+
+                    // Restore navigation properties for childs
+                    foreach (var child in _childsList)
+                    {
+                        child.ActivityGroup = _allActivityGroups.FirstOrDefault(g => g.Id == child.ActivityGroupId);
+                        child.Source = _allEmissionSources.FirstOrDefault(s => s.Id == child.SourceId);
+                    }
+                }
+            }
+            else
+            {
+                if (SubscriptionId <= 0) SubscriptionId = 1;
+
+                _model = new TbActivityTopic
+                {
+                    SubscriptionId = SubscriptionId,
+                    Level = ParentLevel,
+                    TargetId = TargetParentId,
+                    Title = string.Empty,
+                    Remark = string.Empty,
+                    IsActive = true
+                };
+
+                AddDefaultChild();
+            }
+
+            FilterCascadingDropdowns();
+
+            if (_masterChild != null && _masterChild.SourceId > 0)
+            {
+                _currentMapping = await EmissionMappingService.FindMappingBySourceIdAsync(_masterChild.SourceId, SubscriptionId);
+            }
+
+            UpdateFilesCount();
+            if (_attachedFilesCount > 0)
+            {
+                _showFilesSection = true;
+            }
+
+            _originalSnapshot = CreateSnapshot();
+            _hasChanges = _model.Id == 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load topic editor data.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load topic editor.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void ToggleFilesSection()
+    {
+        _showFilesSection = !_showFilesSection;
+    }
+
+    private void UpdateFilesCount()
+    {
+        try
+        {
+            var json = _model.JsonDataFiles?.ToJsonString(null) ?? "[]";
+            var files = TbFileEntity.DeserializeListFromJson(json);
+            _attachedFilesCount = files?.Count ?? 0;
+        }
+        catch
+        {
+            _attachedFilesCount = 0;
+        }
+    }
+
+    private void HandleFilesChanged()
+    {
+        UpdateFilesCount();
+        UpdateChanges();
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-20]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+        }
+        #endregion
+    }
+
+    private void AddDefaultChild()
+    {
+        _masterChild = new TbActivityTopicChild
+        {
+            TopicId = _model.Id,
+            EmissionSharePercent = 100,
+            UnitConversionRatio = 1,
+            IsActive = true
+        };
+        _childsList.Clear();
+        _childsList.Add(_masterChild);
+    }
+
+    private void FilterCascadingDropdowns()
+    {
+        #region hide [2026-08-20]
+        // 1. Filter Activity Groups by Scope
+        _filteredActivityGroups = _allActivityGroups
+            .Where(g => g.TgoScopeNo == _selectedScopeNo)
+            .OrderBy(g => g.Id)
+            .ToList();
+
+        _activityGroupDropdownItems = _filteredActivityGroups
+            .Select((g, idx) => new ActivityGroupDropdownItem
+            {
+                Id = g.Id,
+                Index = idx + 1,
+                Code = g.Code,
+                Title = g.Title,
+                TitleTh = g.TitleTh,
+                Group = g
+            })
+            .ToList();
+
+        if (_masterChild != null && !_filteredActivityGroups.Any(g => g.Id == _masterChild.ActivityGroupId))
+        {
+            _masterChild.ActivityGroupId = _filteredActivityGroups.FirstOrDefault()?.Id ?? 0;
+            _masterChild.ActivityGroup = _filteredActivityGroups.FirstOrDefault(g => g.Id == _masterChild.ActivityGroupId);
+        }
+
+        // 2. Filter Emission Groups by Scope
+        _filteredEmissionGroups = _allEmissionGroups
+            .Where(g => g.TgoScopeNo == _selectedScopeNo)
+            .OrderBy(g => g.Id)
+            .ToList();
+
+        _emissionGroupDropdownItems = _filteredEmissionGroups
+            .Select((g, idx) => new EmissionGroupDropdownItem
+            {
+                Id = g.Id,
+                Index = idx + 1,
+                Code = g.Code,
+                Title = g.Title,
+                TitleTh = g.TitleTh,
+                Group = g
+            })
+            .ToList();
+
+        if (!_filteredEmissionGroups.Any(g => g.Id == _selectedEmissionGroupId))
+        {
+            _selectedEmissionGroupId = _filteredEmissionGroups.FirstOrDefault()?.Id ?? 0;
+        }
+
+        // 3. Filter Emission Sources by Emission Group
+        _filteredEmissionSources = _allEmissionSources
+            .Where(s => s.GroupId == _selectedEmissionGroupId && (s.SubscriptionId == null || s.SubscriptionId == SubscriptionId))
+            .OrderBy(s => s.IsExpire)
+            .ThenBy(s => s.Title)
+            .ToList();
+
+        if (_masterChild != null && !_filteredEmissionSources.Any(s => s.Id == _masterChild.SourceId))
+        {
+            _masterChild.SourceId = _filteredEmissionSources.FirstOrDefault()?.Id ?? 0;
+            _masterChild.Source = _filteredEmissionSources.FirstOrDefault(s => s.Id == _masterChild.SourceId);
+        }
+        #endregion
+    }
+
+    private void OnScopeChanged(object value)
+    {
+        FilterCascadingDropdowns();
+        UpdateChanges();
+    }
+
+    private void OnActivityGroupChanged(object value)
+    {
+        if (_masterChild != null)
+        {
+            _masterChild.ActivityGroup = _allActivityGroups.FirstOrDefault(g => g.Id == _masterChild.ActivityGroupId);
+        }
+        UpdateChanges();
+    }
+
+    private async Task OnEmissionGroupChanged(object value)
+    {
+        _filteredEmissionSources = _allEmissionSources
+            .Where(s => s.GroupId == _selectedEmissionGroupId && (s.SubscriptionId == null || s.SubscriptionId == SubscriptionId))
+            .OrderBy(s => s.IsExpire)
+            .ThenBy(s => s.Title)
+            .ToList();
+
+        if (_masterChild != null)
+        {
+            _masterChild.SourceId = _filteredEmissionSources.FirstOrDefault()?.Id ?? 0;
+            _masterChild.Source = _filteredEmissionSources.FirstOrDefault(s => s.Id == _masterChild.SourceId);
+            await CheckAndApplyEmissionMappingAsync(_masterChild.SourceId);
+        }
+        UpdateChanges();
+    }
+
+    private async Task OnSourceChanged(object value)
+    {
+        if (_masterChild != null && _masterChild.SourceId > 0)
+        {
+            _masterChild.Source = _allEmissionSources.FirstOrDefault(s => s.Id == _masterChild.SourceId);
+            await CheckAndApplyEmissionMappingAsync(_masterChild.SourceId);
+        }
+        UpdateChanges();
+    }
+
+    private async Task CheckAndApplyEmissionMappingAsync(int sourceId)
+    {
+        #region hide [2026-08-20]
+        try
+        {
+            _currentMapping = await EmissionMappingService.FindMappingBySourceIdAsync(sourceId, SubscriptionId);
+            if (_currentMapping != null && (_selectedScopeNo == eTgoScopeNo.Scope1 || _selectedScopeNo == eTgoScopeNo.Scope2))
+            {
+                var requiredTargetIds = new HashSet<int>();
+                if (_currentMapping.Scope3ChildId > 0) requiredTargetIds.Add(_currentMapping.Scope3ChildId);
+                if (_currentMapping.BiogenicChildId > 0) requiredTargetIds.Add(_currentMapping.BiogenicChildId);
+
+                // Remove previously auto-mapped children that no longer apply
+                _childsList.RemoveAll(c => c != _masterChild && 
+                    (c.ActivityGroup?.TgoScopeNo == eTgoScopeNo.Scope3 || c.ActivityGroup?.TgoScopeNo == eTgoScopeNo.SeparateReport) &&
+                    !requiredTargetIds.Contains(c.SourceId));
+
+                // Auto-sync Scope 3 WTT child if mapped
+                if (_currentMapping.Scope3ChildId > 0 && !_childsList.Any(c => c.SourceId == _currentMapping.Scope3ChildId))
+                {
+                    var s3Source = _allEmissionSources.FirstOrDefault(s => s.Id == _currentMapping.Scope3ChildId);
+                    var s3ActivityGroupId = s3Source != null 
+                        ? TbEmissionMapping.GetActivityGroupIdForSource(s3Source, _allActivityGroups)
+                        : _allActivityGroups.FirstOrDefault(g => g.TgoScopeNo == eTgoScopeNo.Scope3)?.Id ?? 0;
+
+                    var s3Child = new TbActivityTopicChild
+                    {
+                        TopicId = _model.Id,
+                        ActivityGroupId = s3ActivityGroupId,
+                        SourceId = _currentMapping.Scope3ChildId,
+                        Source = s3Source,
+                        ActivityGroup = _allActivityGroups.FirstOrDefault(g => g.Id == s3ActivityGroupId),
+                        EmissionSharePercent = 100,
+                        UnitConversionRatio = _currentMapping.UnitConversionRatio ?? 1,
+                        IsActive = true
+                    };
+                    _childsList.Add(s3Child);
+                }
+
+                // Auto-sync Biogenic child if mapped
+                if (_currentMapping.BiogenicChildId > 0 && !_childsList.Any(c => c.SourceId == _currentMapping.BiogenicChildId))
+                {
+                    var bioSource = _allEmissionSources.FirstOrDefault(s => s.Id == _currentMapping.BiogenicChildId);
+                    var bioActivityGroupId = bioSource != null 
+                        ? TbEmissionMapping.GetActivityGroupIdForSource(bioSource, _allActivityGroups)
+                        : _allActivityGroups.FirstOrDefault(g => g.TgoScopeNo == eTgoScopeNo.SeparateReport)?.Id ?? 0;
+
+                    var bioChild = new TbActivityTopicChild
+                    {
+                        TopicId = _model.Id,
+                        ActivityGroupId = bioActivityGroupId,
+                        SourceId = _currentMapping.BiogenicChildId,
+                        Source = bioSource,
+                        ActivityGroup = _allActivityGroups.FirstOrDefault(g => g.Id == bioActivityGroupId),
+                        EmissionSharePercent = TbEmissionMapping.BiogenicChildEmissionSharePercent, // [2026-09-24][Claude] เดิมคูณ BiogenicSharePercent ซ้ำ
+                        UnitConversionRatio = 1,
+                        IsActive = true
+                    };
+                    _childsList.Add(bioChild);
+                }
+            }
+            else
+            {
+                // Clear extra childs if not a mapped source
+                _childsList.RemoveAll(c => c != _masterChild);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to apply automatic emission mapping.");
+        }
+        #endregion
+    }
+
+    private void RemoveChild(TbActivityTopicChild child)
+    {
+        if (child == _masterChild) return;
+        _childsList.Remove(child);
+        UpdateChanges();
+    }
+
+    private void UpdateChanges()
+    {
+        _hasChanges = CreateSnapshot() != _originalSnapshot;
+        StateHasChanged();
+    }
+
+    private string CreateSnapshot()
+    {
+        var filesState = _model.JsonDataFiles?.ToJsonString(null) ?? "[]";
+        var childsState = string.Join(";", _childsList.Select(c => $"{c.Id}:{c.ActivityGroupId}:{c.SourceId}:{c.ActivityUnitId}:{c.EmissionSharePercent}:{c.UnitConversionRatio}:{c.IsActive}"));
+        return $"{_model.Title}|{_model.Remark}|{_model.IsActive}|{_selectedScopeNo}|{_masterChild?.ActivityGroupId}|{_masterChild?.SourceId}|{_masterChild?.ActivityUnitId}|{_masterChild?.EmissionSharePercent}|{childsState}|{filesState}";
+    }
+
+    private async Task OnSubmit()
+    {
+        #region hide [2026-08-20]
+        if (_isReadOnlyForm) return;
+
+        _isSaving = true;
+        try
+        {
+            _model.EmissionGroupId = _selectedEmissionGroupId;
+            await ActivityTopicService.SaveTopicWithChildsAsync(_model, _childsList);
+
+            _hasChanges = false;
+            NotificationService.Notify(NotificationSeverity.Success, "Saved", $"Activity Topic '{_model.Title}' saved successfully.");
+            GoBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save activity topic.");
+            NotificationService.Notify(NotificationSeverity.Error, "Save Error", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-20]
+        if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith("/"))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/library/activity-topics");
+        }
+        #endregion
+    }
+    #endregion
+}

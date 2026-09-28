@@ -1,0 +1,80 @@
+{
+  "SourceCfoReportKey": "54fa59b4b5fe4cf08945a6471fbdcdb1",
+  "SourceCfoReportTitle": "GHG Emissions Report Year 2026",
+  "Level": 1,
+  "TargetId": 1,
+  "OrganizationTitle": "D7-CRP-001 \u2014 \u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E40\u0E14\u0E42\u0E21\u0E48\u0E1F\u0E39\u0E49\u0E14\u0E2A\u0E4C \u0E2D\u0E34\u0E19\u0E14\u0E31\u0E2A\u0E17\u0E23\u0E35 \u0E08\u0E33\u0E01\u0E31\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E33\u0E25\u0E2D\u0E07)",
+  "ReportingYear": 2026,
+  "BaseYear": 2026,
+  "PeriodDescription": "1 \u0E21.\u0E04. 2026 - 31 \u0E18.\u0E04. 2026",
+  "Governance": "\u0E01\u0E01\u0E01",
+  "Strategy": "\u0E01\u0E01",
+  "RiskManagement": "\u0E01",
+  "MetricsTargetsNarrative": "\u0E01",
+  "RevenueMillionThb": 140,
+  "BaseRevenueMillionThb": 150,
+  "MeasurementApproach": "\u0E04\u0E33\u0E19\u0E27\u0E13\u0E15\u0E32\u0E21\u0E02\u0E49\u0E2D\u0E01\u0E33\u0E2B\u0E19\u0E14\u0E01\u0E32\u0E23\u0E04\u0E33\u0E19\u0E27\u0E13\u0E41\u0E25\u0E30\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19\u0E04\u0E32\u0E23\u0E4C\u0E1A\u0E2D\u0E19\u0E1F\u0E38\u0E15\u0E1E\u0E23\u0E34\u0E49\u0E19\u0E17\u0E4C\u0E02\u0E2D\u0E07\u0E2D\u0E07\u0E04\u0E4C\u0E01\u0E23 (CFO) \u0E02\u0E2D\u0E07\u0E2D\u0E07\u0E04\u0E4C\u0E01\u0E32\u0E23\u0E1A\u0E23\u0E34\u0E2B\u0E32\u0E23\u0E08\u0E31\u0E14\u0E01\u0E32\u0E23\u0E01\u0E4A\u0E32\u0E0B\u0E40\u0E23\u0E37\u0E2D\u0E19\u0E01\u0E23\u0E30\u0E08\u0E01 (\u0E2D\u0E1A\u0E01.) \u0E0B\u0E36\u0E48\u0E07\u0E2A\u0E2D\u0E14\u0E04\u0E25\u0E49\u0E2D\u0E07\u0E01\u0E31\u0E1A ISO 14064-1:2018 \u0E43\u0E0A\u0E49\u0E20\u0E32\u0E22\u0E43\u0E15\u0E49\u0E02\u0E49\u0E2D\u0E1C\u0E48\u0E2D\u0E19\u0E1B\u0E23\u0E19\u0E23\u0E30\u0E22\u0E30\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E1C\u0E48\u0E32\u0E19\u0E17\u0E35\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E43\u0E2B\u0E49\u0E43\u0E0A\u0E49\u0E21\u0E32\u0E15\u0E23\u0E10\u0E32\u0E19\u0E17\u0E35\u0E48\u0E40\u0E17\u0E35\u0E22\u0E1A\u0E40\u0E17\u0E48\u0E32 GHG Protocol / Scope 2 \u0E04\u0E33\u0E19\u0E27\u0E13\u0E14\u0E49\u0E27\u0E22\u0E04\u0E48\u0E32\u0E01\u0E32\u0E23\u0E1B\u0E25\u0E48\u0E2D\u0E22\u0E01\u0E4A\u0E32\u0E0B\u0E40\u0E23\u0E37\u0E2D\u0E19\u0E01\u0E23\u0E30\u0E08\u0E01\u0E02\u0E2D\u0E07\u0E44\u0E1F\u0E1F\u0E49\u0E32\u0E15\u0E32\u0E21\u0E17\u0E35\u0E48\u0E43\u0E0A\u0E49\u0E43\u0E19\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19 CFO",
+  "VerifierName": "\u0E1B\u0E1B\u0E1B",
+  "AssuranceLevel": "Reasonable assurance",
+  "ConsolidationApproach": "Operational Control",
+  "GwpVersion": "IPCC AR5 (100-year GWP - TGO Standard)",
+  "Reporting": {
+    "Scope1": 584.04956476628900473430045,
+    "Scope2": 1349.3054250000000000000000,
+    "Scope3": 413.53791157578080000000000,
+    "Separate": 46.632891038600000000000000,
+    "Scope1And2": 1933.35498976628900473430045,
+    "Gross": 2346.89290134206980473430045
+  },
+  "Base": {
+    "Scope1": 584.04956476628900473430045,
+    "Scope2": 1349.3054250000000000000000,
+    "Scope3": 413.53791157578080000000000,
+    "Separate": 46.632891038600000000000000,
+    "Scope1And2": 1933.35498976628900473430045,
+    "Gross": 2346.89290134206980473430045
+  },
+  "Scope3Categories": [
+    {
+      "Code": "0301",
+      "Title": "Purchased Goods and Services",
+      "Total_tCO2e": 21.57503880000000000000000000
+    },
+    {
+      "Code": "0303",
+      "Title": "Fuel- and Energy-Related Activities",
+      "Total_tCO2e": 303.34162487578080000000000000
+    },
+    {
+      "Code": "0304",
+      "Title": "Upstream Transportation and Distribution",
+      "Total_tCO2e": 31.517134000000000000000000
+    },
+    {
+      "Code": "0305",
+      "Title": "Waste Generated in Operations",
+      "Total_tCO2e": 57.104113900000000000000000
+    }
+  ],
+  "SeparateCategories": [
+    {
+      "Code": "0401",
+      "Title": "Biogenic CO\u2082 - Stationary Combustion",
+      "Total_tCO2e": 0.27092888877600000000000000
+    },
+    {
+      "Code": "0402",
+      "Title": "Biogenic CO\u2082 - Mobile Combustion",
+      "Total_tCO2e": 15.56196214982400000000000000
+    },
+    {
+      "Code": "0403",
+      "Title": "Other Non-Kyoto Greenhouse Gases",
+      "Total_tCO2e": 30.8000000000000000000000000
+    }
+  ],
+  "NetZeroTarget": null,
+  "CreatedAt": "2026-09-24T15:31:37.4188163+07:00",
+  "UpdatedAt": "2026-09-24T15:32:19.1708212+07:00",
+  "UpdatedBy": "admin@acamp.com"
+}

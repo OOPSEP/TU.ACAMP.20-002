@@ -1,0 +1,882 @@
+@page "/library/activity-topics/events"
+@page "/activity-topics/events"
+@page "/activities/topics/events"
+@page "/activities/events"
+
+@using System.Text.Json.Nodes
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Common
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Components.Common
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Components.Pages.Library.Activity.ActivityEvent.Dialogs
+
+@attribute [Authorize]
+@implements IAsyncDisposable
+
+@inject ActivityTopicService ActivityTopicService
+@inject ActivityEventService ActivityEventService
+@inject SubscriptionService SubscriptionService
+@inject EmissionMappingService EmissionMappingService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject GhgEventBusService GhgEventBus
+@inject IJSRuntime JS
+@inject ILogger<PageListActivityEvent> Logger
+
+<PageTitle>Activity Events - ACAMP</PageTitle>
+
+<div class="container-fluid py-2 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@GoBack" Class="me-2" Style="border-radius: 6px;" Title="Back to previous page" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    Events
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0 ms-5">
+                Log monthly activity measurements, quantities, and calculated GHG emissions.
+            </RadzenText>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading activity events..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_topic == null)
+    {
+        <div class="alert alert-danger text-center py-4 border rounded-3 bg-light shadow-sm">
+            <RadzenIcon Icon="error" Style="font-size: 2rem;" Class="text-danger mb-2 d-block" />
+            <strong>Activity Topic Not Found:</strong> The requested activity topic does not exist or you do not have permission.
+        </div>
+    }
+    else
+    {
+        <!-- Section 1: Topic Overview Card -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+            <RadzenRow AlignItems="AlignItems.Center" Class="g-3">
+                <RadzenColumn Size="12" SizeMD="8">
+                    <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                        <span class="badge @BadgeScopeColor" style="font-size: 0.8rem; font-weight: 600; border-radius: 4px; padding: 4px 10px;">
+                            @ScopeBadgeText
+                        </span>
+                        <RadzenText TextStyle="TextStyle.H6" Class="m-0 fw-bold text-dark">
+                            @_topic.Title
+                        </RadzenText>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_topic.Remark))
+                    {
+                        <RadzenText TextStyle="TextStyle.Body2" Class="text-muted mb-3">
+                            Remark: @_topic.Remark
+                        </RadzenText>
+                    }
+                    <div class="row g-2 text-secondary small" style="font-size: 0.88rem;">
+                        <div class="col-12 col-md-6">
+                            <strong>Activity Group:</strong> @(_masterChild?.ActivityGroup?.Title ?? "-")
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Emission Source:</strong> @(_masterChild?.Source?.Title ?? "-")
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Emission Factor (EF):</strong> <span class="text-success fw-bold">@(_masterChild?.Source?.EF.ToString("N4") ?? "0.0000")</span>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <strong>Unit:</strong> @UnitTitle
+                        </div>
+                    </div>
+                </RadzenColumn>
+
+                <RadzenColumn Size="12" SizeMD="4" Class="border-start-md ps-md-4">
+                    <div class="text-md-end">
+                        <div class="mb-2">
+                            <span class="text-muted small d-block">Total Quantity Logged (@(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years")):</span>
+                            <span class="fs-4 fw-bold text-dark">@FilteredEvents.Sum(e => e.Quantity).ToString("N2")</span>
+                            <span class="fs-6 text-muted fw-normal ms-1">@UnitTitle</span>
+                        </div>
+                        <div>
+                            <span class="text-muted small d-block">Total Calculated Emissions (@(_selectedYear.HasValue ? $"Year {_selectedYear.Value}" : "All Years")):</span>
+                            <span class="fs-4 fw-bold text-danger">@TotalEmissions.ToString("N2")</span>
+                            <span class="fs-6 text-secondary fw-semibold ms-1">kgCO₂e</span>
+                        </div>
+                    </div>
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenCard>
+
+        <!-- Section 2: Events Grid -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4">
+            <!-- [2026-09-13][Antigravity] Toolbar with .acamp-filter-bar and spring search -->
+            <div class="acamp-filter-bar justify-content-between mb-3">
+                <div class="acamp-filter-search">
+                    <RadzenFormField Text="Search Remark">
+                        <ChildContent>
+                            <RadzenTextBox @bind-Value="SearchRemark"
+                                           @bind-Value:event="oninput"
+                                           Placeholder="Search remark..."
+                                           aria-label="Search by Remark"
+                                           Style="width: 100%;" />
+                        </ChildContent>
+                        <Start>
+                            <RadzenIcon Icon="search" />
+                        </Start>
+                    </RadzenFormField>
+                </div>
+
+                <div class="d-flex align-items-end gap-2 flex-wrap ms-auto flex-shrink-0">
+                    <RadzenFormField Text="Year" Style="width: 130px;">
+                        <RadzenDropDown TValue="int?"
+                                        Value="@_selectedYear"
+                                        Data="@_yearOptions"
+                                        TextProperty="Text"
+                                        ValueProperty="Value"
+                                        Change="@(args => OnYearChanged((int?)args))"
+                                        Style="width: 100%;" />
+                    </RadzenFormField>
+
+                    <RadzenButton Icon="download" Text="Export Excel" ButtonStyle="ButtonStyle.Info" Size="ButtonSize.Medium"
+                                  Click="@ExportToExcelAsync" Disabled="@(FilteredEvents.Count == 0 || _isLoading || _isReadOnly)"
+                                  Title="@(!_isReadOnly ? "Export events to Excel" : "Export is restricted to users with edit permissions.")"
+                                  Style="border-radius: 6px;" />
+                    <RadzenButton Icon="upload" Text="Import Excel" ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Medium"
+                                  Click="@OpenImportDialogAsync" Disabled="@(_isReadOnly || _isLoading)" Style="border-radius: 6px;" />
+                    <RadzenButton Icon="add" Text="Add Event" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Medium"
+                                  Click="@AddEvent" Disabled="@_isReadOnly" Style="border-radius: 6px;" />
+                </div>
+            </div>
+
+            <RadzenDataGrid @ref="_grid" Data="@FilteredEvents" TItem="TbActivityEvent" AllowPaging="true" PageSize="12"
+                            AllowColumnResize="true"
+                            ExpandMode="DataGridExpandMode.Single"
+                            EditMode="DataGridEditMode.Single" RowUpdate="@OnRowUpdate" RowCreate="@OnRowCreate"
+                            RowDoubleClick="@OnRowDoubleClick"
+                            Style="@GridStyles.Default" Class="rounded border">
+                <Template Context="ev">
+                    <RadzenCard Class="p-3 shadow-none bg-light border-start border-4 border-info rounded-3 my-2">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="attach_file" Class="text-info" />
+                                <span class="fw-bold text-dark">Attached Files & Evidence Links — Event (@ev.TimeStamp.ToString("yyyy-MM"))</span>
+                            </div>
+                            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.ExtraSmall"
+                                          Click="@(() => ToggleExpandRow(ev))" Title="Close files section" />
+                        </div>
+                        <AttachedFilesWidget JsonDataFiles="@ev.JsonDataFiles"
+                                             JsonDataFilesChanged="@(node => ev.JsonDataFiles = node)"
+                                             SubscriptionId="@ev.SubscriptionId"
+                                             IsReadOnly="@_isReadOnly"
+                                             OnModelChanged="@(async () => {
+                                                 if (ev.Id > 0)
+                                                 {
+                                                     await ActivityEventService.UpdateAsync(ev);
+                                                 }
+                                             })" />
+                    </RadzenCard>
+                </Template>
+                <Columns>
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                        <Template Context="ev">
+                            @(FilteredEvents.IndexOf(ev) + 1)
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Property="Remark" Title="Remark / Note" MinWidth="180px">
+                        <Template Context="ev">
+                            <span>@ev.Remark</span>
+                        </Template>
+                        <EditTemplate Context="ev">
+                            <RadzenTextBox @bind-Value="ev.Remark" Placeholder="Optional note..." Style="width: 100%;" Disabled="@_isReadOnly" />
+                        </EditTemplate>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Property="TimeStamp" Title="Time (yyyy-MM)" Width="150px" TextAlign="TextAlign.Center">
+                        <Template Context="ev">
+                            <span class="fw-bold">@ev.TimeStamp.ToString("yyyy-MM")</span>
+                        </Template>
+                        <EditTemplate Context="ev">
+                            <RadzenDatePicker TValue="DateTime" @bind-Value="ev.TimeStamp" DateFormat="yyyy-MM" Style="width: 100%;" Disabled="@_isReadOnly" />
+                        </EditTemplate>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Property="Quantity" Title="Quantity" Width="140px" TextAlign="TextAlign.Right">
+                        <Template Context="ev">
+                            <span class="fw-bold text-dark">@ev.Quantity.ToString("N2")</span>
+                        </Template>
+                        <EditTemplate Context="ev">
+                            <RadzenNumeric TValue="decimal" @bind-Value="ev.Quantity" Format="N2" Min="0" Style="width: 100%;" Disabled="@_isReadOnly" />
+                        </EditTemplate>
+                        <FooterTemplate>
+                            <div class="fw-bold text-end">
+                                @FilteredEvents.Sum(e => e.Quantity).ToString("N2")
+                            </div>
+                        </FooterTemplate>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Title="Unit" Width="100px" TextAlign="TextAlign.Center">
+                        <Template Context="ev">
+                            <span>@UnitTitle</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Title="Calculated GHG Emissions (kgCO₂e)" Width="240px" TextAlign="TextAlign.Right">
+                        <Template Context="ev">
+                            <div class="d-flex flex-column align-items-end">
+                                <div>
+                                    <span class="fw-bold text-danger">@CalculateEmissions(ev.Quantity, _masterChild).ToString("N2")</span>
+                                    <small class="text-muted ms-1" style="font-size: 0.8rem; font-weight: 500;">(Master)</small>
+                                </div>
+                                @foreach (var child in _childSources)
+                                {
+                                    <div style="font-size: 0.78rem;">
+                                        <span class="text-danger-emphasis fw-medium">+ @CalculateEmissions(ev.Quantity, child).ToString("N2")</span>
+                                        <small class="text-muted ms-1">(@(child.ActivityGroup?.Title ?? "Child"))</small>
+                                    </div>
+                                }
+                            </div>
+                        </Template>
+                        <FooterTemplate>
+                            <div class="fw-bold text-end">
+                                <span class="text-danger">@TotalEmissions.ToString("N2")</span>
+                                <span class="text-secondary fw-semibold ms-1" style="font-size: 0.88rem;">kgCO₂e</span>
+                            </div>
+                        </FooterTemplate>
+                    </RadzenDataGridColumn>
+
+                   
+
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Title="Files" Width="130px" TextAlign="TextAlign.Center" Sortable="false" Filterable="false">
+                        <Template Context="ev">
+                            @{
+                                var fileCount = GetEventFileCount(ev);
+                            }
+                            <RadzenButton Icon="attach_file"
+                                          Text="@($"{fileCount} Files")"
+                                          ButtonStyle="@(fileCount > 0 ? ButtonStyle.Info : ButtonStyle.Light)"
+                                          Variant="Variant.Flat"
+                                          Size="ButtonSize.Small"
+                                          Click="@(() => ToggleExpandRow(ev))"
+                                          Style="border-radius: 6px;"
+                                          Title="Toggle Event Attachments" />
+                        </Template>
+                        <EditTemplate Context="ev">
+                            @{
+                                var fileCount = GetEventFileCount(ev);
+                            }
+                            <RadzenButton Icon="attach_file"
+                                          Text="@($"{fileCount} Files")"
+                                          ButtonStyle="@(fileCount > 0 ? ButtonStyle.Info : ButtonStyle.Light)"
+                                          Variant="Variant.Flat"
+                                          Size="ButtonSize.Small"
+                                          Click="@(() => ToggleExpandRow(ev))"
+                                          Style="border-radius: 6px;"
+                                          Title="Toggle Event Attachments" />
+                        </EditTemplate>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TbActivityEvent" Title="Actions" Width="130px" TextAlign="TextAlign.Center" Sortable="false">
+                        <Template Context="ev">
+                            <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Warning" Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(() => EditEvent(ev))" Class="me-1" Disabled="@_isReadOnly" Title="Edit" />
+                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(() => DeleteEvent(ev))" Disabled="@_isReadOnly" Title="Delete" />
+                        </Template>
+                        <EditTemplate Context="ev">
+                            <RadzenButton Icon="check" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(() => SaveEvent(ev))" Class="me-1" Title="Save" />
+                            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small"
+                                          Click="@(() => CancelEdit(ev))" Title="Cancel" />
+                        </EditTemplate>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _isReadOnly = false;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private int _topicId = 0;
+    private int _subscriptionId = 0;
+
+    private string _searchRemark = string.Empty;
+    private int? _selectedYear = null;
+    private List<YearOption> _yearOptions = new();
+
+    private TbActivityTopic? _topic;
+    private TbActivityTopicChild? _masterChild;
+    private List<TbActivityTopicChild> _childSources = new();
+    private List<TbActivityEvent> _events = new();
+    private List<TbActivityEvent> _filteredEvents = new();
+    private TbActivityEvent? _eventToInsert;
+    private RadzenDataGrid<TbActivityEvent>? _grid;
+
+    public class YearOption
+    {
+        public int? Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+
+    [SupplyParameterFromQuery(Name = "yr")]
+    public string? SecureYr { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SecureQ { get; set; }
+
+    public string? ReturnUrl { get; set; }
+
+    private List<TbActivityEvent> FilteredEvents => _filteredEvents;
+
+    private string SearchRemark
+    {
+        get => _searchRemark;
+        set
+        {
+            if (_searchRemark != value)
+            {
+                _searchRemark = value;
+                ApplyFilters();
+                _ = SyncBrowserUrlAsync();
+            }
+        }
+    }
+
+    private string UnitTitle => !string.IsNullOrWhiteSpace(_masterChild?.Source?.Unit?.Title)
+        ? _masterChild.Source.Unit.Title
+        : "Unit";
+
+    private eTgoScopeNo ScopeNo => _masterChild?.ActivityGroup?.TgoScopeNo
+        ?? _masterChild?.Source?.Group?.TgoScopeNo
+        ?? eTgoScopeNo.Scope1;
+
+    private string ScopeBadgeText => ScopeNo switch
+    {
+        eTgoScopeNo.Scope1 => "Scope 1 (Direct GHG)",
+        eTgoScopeNo.Scope2 => "Scope 2 (Indirect Energy)",
+        eTgoScopeNo.Scope3 => "Scope 3 (Other Indirect)",
+        _ => "Separate Report"
+    };
+
+    private string BadgeScopeColor => ScopeNo switch
+    {
+        eTgoScopeNo.Scope1 => "bg-primary text-white",
+        eTgoScopeNo.Scope2 => "bg-success text-white",
+        eTgoScopeNo.Scope3 => "bg-info text-white",
+        _ => "bg-secondary text-white"
+    };
+
+    private decimal TotalEmissions
+    {
+        get
+        {
+            decimal total = 0m;
+            foreach (var ev in FilteredEvents)
+            {
+                total += CalculateEmissions(ev.Quantity, _masterChild);
+                foreach (var child in _childSources)
+                {
+                    total += CalculateEmissions(ev.Quantity, child);
+                }
+            }
+            return total;
+        }
+    }
+    #endregion
+
+    #region class methods
+    protected override void OnInitialized()
+    {
+        #region hide [2026-08-24]
+        GhgEventBus.OnEventIngested += HandleGhgEventIngestedAsync;
+        #endregion
+    }
+
+    private async Task HandleGhgEventIngestedAsync(GhgEventIngestedNotification notif)
+    {
+        if (_topicId > 0 && notif.TopicId != _topicId) return;
+        if (_subscriptionId > 0 && notif.SubscriptionId != _subscriptionId) return;
+
+        await InvokeAsync(async () =>
+        {
+            await LoadDataAsync();
+            NotificationService.Notify(NotificationSeverity.Info, "Live Event Ingested", $"A new activity event was ingested via API and updated in real-time ({notif.Quantity:N2}).");
+            StateHasChanged();
+        });
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-20]
+        ResolveParameters();
+        await LoadDataAsync();
+        #endregion
+    }
+
+    private void ResolveParameters()
+    {
+        #region hide [2026-08-20]
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            _topicId = DataProtection.UnprotectInt(SecureId) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureSid))
+        {
+            _subscriptionId = DataProtection.UnprotectInt(SecureSid) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureRet))
+        {
+            var unprotected = DataProtection.Unprotect(SecureRet);
+            if (!string.IsNullOrWhiteSpace(unprotected) && unprotected.StartsWith("/"))
+            {
+                ReturnUrl = unprotected;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureYr))
+        {
+            if (int.TryParse(SecureYr, out var parsedYear) && parsedYear > 0)
+            {
+                _selectedYear = parsedYear;
+            }
+            else if (SecureYr.Equals("all", StringComparison.OrdinalIgnoreCase) || SecureYr == "0")
+            {
+                _selectedYear = null;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureQ))
+        {
+            _searchRemark = SecureQ;
+        }
+        #endregion
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncBrowserUrlAsync();
+        }
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["id"] = _topicId > 0 ? DataProtection.Protect(_topicId) : null,
+                ["sid"] = _subscriptionId > 0 ? DataProtection.Protect(_subscriptionId) : null,
+                ["ret"] = !string.IsNullOrWhiteSpace(ReturnUrl) ? DataProtection.Protect(ReturnUrl) : null,
+                ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+                ["q"] = !string.IsNullOrWhiteSpace(_searchRemark) ? _searchRemark : null
+            };
+
+            var uri = NavigationManager.GetUriWithQueryParameters(NavigationManager.Uri.Split('?')[0], queryParams);
+            await JS.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // Ignore during prerender or if JS interop is not yet connected
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-20]
+        try
+        {
+            _isLoading = true;
+            await InitializeUserSessionAsync();
+
+            if (_topicId > 0)
+            {
+                _topic = await ActivityTopicService.GetByIdAsync(_topicId, includeRelations: true);
+                if (_topic != null)
+                {
+                    _masterChild = _topic.Childs.FirstOrDefault();
+                    _childSources = _topic.Childs.Skip(1).Where(c => c.IsActive && !c.IsDeleted).ToList();
+                    _events = await ActivityEventService.GetByTopicIdAsync(_topicId);
+                    UpdateYearOptions();
+                    ApplyFilters();
+                }
+            }
+
+            var targetSubId = _topic?.SubscriptionId ?? _subscriptionId;
+            _isReadOnly = !(_isAdmin || (targetSubId > 0 && _editableSubscriptionIds.Contains(targetSubId)) || (_topicId == 0 && _editableSubscriptionIds.Any()));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading activity events page.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load activity events.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        #region hide [2026-08-24]
+        GhgEventBus.OnEventIngested -= HandleGhgEventIngestedAsync;
+        return ValueTask.CompletedTask;
+        #endregion
+    }
+
+    private void ApplyFilters()
+    {
+        var items = _events.AsEnumerable();
+
+        if (_selectedYear.HasValue && _selectedYear.Value > 0)
+        {
+            items = items.Where(e => e.TimeStamp.Year == _selectedYear.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchRemark))
+        {
+            var q = _searchRemark.Trim();
+            items = items.Where(e => (e.Remark ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        _filteredEvents = items.OrderByDescending(e => e.TimeStamp).ToList();
+    }
+
+    private void UpdateYearOptions()
+    {
+        var currentYear = TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Year;
+        var eventYears = _events.Select(e => e.TimeStamp.Year).Distinct().ToList();
+
+        var yearsSet = new HashSet<int> { currentYear, currentYear - 1, currentYear - 2 };
+        foreach (var y in eventYears)
+        {
+            yearsSet.Add(y);
+        }
+
+        _yearOptions = new List<YearOption>
+        {
+            new YearOption { Value = null, Text = "All Years" }
+        };
+
+        foreach (var y in yearsSet.OrderByDescending(y => y))
+        {
+            _yearOptions.Add(new YearOption { Value = y, Text = $"Year {y}" });
+        }
+    }
+
+    private async Task OnYearChanged(int? year)
+    {
+        _selectedYear = year;
+        ApplyFilters();
+        await SyncBrowserUrlAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnSearchRemarkChanged(string? val)
+    {
+        _searchRemark = val ?? string.Empty;
+        ApplyFilters();
+        await SyncBrowserUrlAsync();
+        StateHasChanged();
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-20]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(email, _isAdmin);
+        }
+        #endregion
+    }
+
+    private decimal CalculateEmissions(decimal quantity, TbActivityTopicChild? child)
+    {
+        #region hide [2026-08-22]
+        return EmissionCalculator.CalculateKgCO2e(quantity, child);
+        #endregion
+    }
+
+    private async Task AddEvent()
+    {
+        if (_grid == null) return;
+
+        var targetYear = (_selectedYear.HasValue && _selectedYear.Value > 0)
+            ? _selectedYear.Value
+            : TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Year;
+
+        var defaultMonth = targetYear == TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Year
+            ? TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Month
+            : 1;
+
+        _eventToInsert = new TbActivityEvent
+        {
+            TopicId = _topicId,
+            SubscriptionId = _topic?.SubscriptionId ?? _subscriptionId,
+            TimeStamp = new DateTime(targetYear, defaultMonth, 1),
+            Quantity = 0m,
+            Remark = string.Empty
+        };
+
+        await _grid.InsertRow(_eventToInsert);
+    }
+
+    private async Task EditEvent(TbActivityEvent ev)
+    {
+        if (_grid == null) return;
+        await _grid.EditRow(ev);
+    }
+
+    private async Task OnRowDoubleClick(DataGridRowMouseEventArgs<TbActivityEvent> args)
+    {
+        if (_isReadOnly || args.Data == null) return;
+        await EditEvent(args.Data);
+    }
+
+    private async Task SaveEvent(TbActivityEvent ev)
+    {
+        if (_grid == null) return;
+        await _grid.UpdateRow(ev);
+    }
+
+    private void CancelEdit(TbActivityEvent ev)
+    {
+        if (_grid == null) return;
+        if (ev == _eventToInsert)
+        {
+            _eventToInsert = null;
+        }
+        _grid.CancelEditRow(ev);
+    }
+
+    private async Task OnRowCreate(TbActivityEvent ev)
+    {
+        #region hide [2026-08-20]
+        _eventToInsert = null;
+        try
+        {
+            // [GHG-08] Non-negative quantity validation
+            if (ev.Quantity < 0)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Validation Error", "Quantity must be non-negative (per ISO 14064-1:2018 §5.2.3).");
+                return;
+            }
+
+            ev.TopicId = _topicId;
+            ev.SubscriptionId = _topic?.SubscriptionId ?? _subscriptionId;
+            await ActivityEventService.CreateAsync(ev);
+            NotificationService.Notify(NotificationSeverity.Success, "Created", "New measurement event logged.");
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating activity event.");
+            NotificationService.Notify(NotificationSeverity.Error, "Save Error", ex.Message);
+        }
+        #endregion
+    }
+
+    private int GetEventFileCount(TbActivityEvent ev)
+    {
+        try
+        {
+            var json = ev.JsonDataFiles?.ToJsonString(null) ?? "[]";
+            var files = TbFileEntity.DeserializeListFromJson(json);
+            return files?.Count ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private void ToggleExpandRow(TbActivityEvent ev)
+    {
+        if (_grid != null)
+        {
+            try
+            {
+                _grid.ExpandRow(ev);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    private async Task OnRowUpdate(TbActivityEvent ev)
+    {
+        #region hide [2026-08-20]
+        try
+        {
+            // [GHG-08] Non-negative quantity validation
+            if (ev.Quantity < 0)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Validation Error", "Quantity must be non-negative (per ISO 14064-1:2018 §5.2.3).");
+                return;
+            }
+
+            await ActivityEventService.UpdateAsync(ev);
+            NotificationService.Notify(NotificationSeverity.Success, "Updated", "Event updated successfully.");
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating activity event.");
+            NotificationService.Notify(NotificationSeverity.Error, "Update Error", ex.Message);
+        }
+        #endregion
+    }
+
+    private async Task DeleteEvent(TbActivityEvent ev)
+    {
+        #region hide [2026-08-20]
+        var confirm = await DialogService.Confirm(
+            "Are you sure you want to delete this event?",
+            "Delete Event",
+            new ConfirmOptions { OkButtonText = "Delete", CancelButtonText = "Cancel" });
+
+        if (confirm == true)
+        {
+            try
+            {
+                await ActivityEventService.DeleteAsync(ev.Id);
+                NotificationService.Notify(NotificationSeverity.Success, "Deleted", "Event deleted successfully.");
+                await LoadDataAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error deleting activity event.");
+                NotificationService.Notify(NotificationSeverity.Error, "Delete Error", ex.Message);
+            }
+        }
+        #endregion
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        #region hide [2026-08-20]
+        // [2026-09-19][Antigravity] Enforce edit permission check for exporting activity events
+        if (_isReadOnly)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Access Denied", "Only users with edit permissions can export data.");
+            return;
+        }
+
+        try
+        {
+            // [2026-09-21][Gemini] Standard Export Filename: events_{topicTitle}_{date}_{time}.xlsx
+            var fileName = ExportFileNameHelper.Generate("events", _topic?.Title, fallback: "topic");
+            var excelBytes = ActivityEventService.ExportToExcel(
+                FilteredEvents,
+                _topic?.Title ?? "Activity Events",
+                UnitTitle,
+                (ev) => CalculateEmissions(ev.Quantity, _masterChild) +
+                         _childSources.Sum(c => CalculateEmissions(ev.Quantity, c))
+            );
+
+            var base64 = Convert.ToBase64String(excelBytes);
+            await JS.InvokeVoidAsync("downloadFile", base64, fileName, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            NotificationService.Notify(NotificationSeverity.Success, "Exported", "Events exported to Excel successfully.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error exporting events to Excel.");
+            NotificationService.Notify(NotificationSeverity.Error, "Export Failed", ex.Message);
+        }
+        #endregion
+    }
+
+    /// <summary>
+    /// [2026-09-14] เปิด Import Dialog (แนวคิดเดียวกับหน้า Library อื่น ๆ) พร้อม Preview และปุ่ม Download Template
+    /// </summary>
+    private async Task OpenImportDialogAsync()
+    {
+        #region hide [2026-09-14]
+        if (_isReadOnly || _isLoading) return;
+
+        if (_topicId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Topic Required", "ไม่พบ Topic ปลายทางสำหรับการนำเข้า");
+            return;
+        }
+
+        var parameters = new Dictionary<string, object>
+        {
+            { "TopicId", _topicId },
+            { "SubscriptionId", _topic?.SubscriptionId ?? _subscriptionId },
+            { "TopicTitle", _topic?.Title ?? "Activity Topic" },
+            { "UnitTitle", UnitTitle },
+            { "Year", (_selectedYear.HasValue && _selectedYear.Value > 0) ? _selectedYear.Value : TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Year },
+            { "ExistingEvents", _events }
+        };
+
+        var options = new DialogOptions
+        {
+            Width = "1100px",
+            Height = "auto",
+            Resizable = true,
+            Draggable = true
+        };
+
+        var result = await DialogService.OpenAsync<ImportActivityEventDialog>("Import Activity Events", parameters, options);
+        if (result == true)
+        {
+            await LoadDataAsync();
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-20]
+        if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith("/"))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/library/activity-topics");
+        }
+        #endregion
+    }
+    #endregion
+}

@@ -1,0 +1,426 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Identity
+
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject ActivityTopicExcelService ExcelService
+@inject ActivityTopicService TopicService
+@inject SubscriptionService SubscriptionService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IJSRuntime JSRuntime
+@inject ILogger<ImportActivityTopicDialogV1> Logger
+
+<RadzenStack Gap="1.5rem" Style="padding: 0.5rem;">
+    <!-- Top Bar & Template Download -->
+    <RadzenCard Class="p-3 bg-light" Style="border-radius: 8px; border: 1px solid var(--rz-border-color);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <RadzenText Text="Import Activity Topics (.xlsx)" TextStyle="TextStyle.Subtitle1" class="fw-bold mb-1" />
+                <RadzenText Text="Upload an Excel file containing Master Activity Topics and Emission Sources. Scope 3 (WTT) and Biogenic components will be automatically mapped." TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+            </div>
+            <RadzenButton Text="Download Template" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@DownloadTemplateAsync" />
+        </div>
+    </RadzenCard>
+
+    <!-- File Upload Section -->
+    <div>
+        <label class="form-label fw-semibold small text-muted">Select Excel File (.xlsx):</label>
+        <InputFile OnChange="@OnInputFileChange" accept=".xlsx" class="form-control form-control-sm" />
+    </div>
+
+    @if (_isParsing)
+    {
+        <div class="py-4 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Parsing Excel file and mapping child topics..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_parsedItems != null)
+    {
+        <!-- Validation Summary Badges -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2">
+                Total Rows: <b>@_parsedItems.Count</b>
+            </span>
+            <span class="badge bg-primary-subtle text-primary-emphasis border px-3 py-2">
+                Master Topics: <b>@_parsedItems.Count(i => !i.IsChildTopic && i.IsValid)</b>
+            </span>
+            @if (_parsedItems.Any(i => i.IsChildTopic && i.IsValid))
+            {
+                <span class="badge bg-info-subtle text-info-emphasis border px-3 py-2">
+                    Auto-Mapped Childs: <b>@_parsedItems.Count(i => i.IsChildTopic && i.IsValid)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => i.IsExistingMasterMatched && i.IsValid))
+            {
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2">
+                    Existing Topics (Append): <b>@_parsedItems.Count(i => i.IsExistingMasterMatched && i.IsValid)</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => !i.IsValid))
+            {
+                <span class="badge bg-danger-subtle text-danger-emphasis border px-3 py-2">
+                    Invalid: <b>@_parsedItems.Count(i => !i.IsValid)</b>
+                </span>
+            }
+        </div>
+
+        <!-- Preview DataGrid -->
+        <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--rz-border-color); border-radius: 8px;">
+            <RadzenDataGrid Data="@_parsedItems" TItem="ActivityTopicImportItemDto" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="#" Width="45px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @item.RowNumber
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Type" Width="110px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (!item.IsChildTopic)
+                            {
+                                <span class="badge bg-primary text-white px-2 py-1" style="font-size: 0.75rem;">Master</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-info text-dark px-2 py-1" style="font-size: 0.75rem;">Child (Auto)</span>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Topic / Master Name" MinWidth="180px" Property="TopicTitle">
+                        <Template Context="item">
+                            <div>
+                                @if (item.IsChildTopic)
+                                {
+                                    <div class="d-flex align-items-center gap-1 text-secondary small">
+                                        <i class="bi bi-arrow-return-right"></i>
+                                        <span>Child of: <b>@item.MasterTopicTitle</b></span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="fw-bold text-dark">@item.TopicTitle</span>
+                                }
+                                @if (!string.IsNullOrEmpty(item.Remark))
+                                {
+                                    <div class="text-muted small text-truncate">@item.Remark</div>
+                                }
+                            </div>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Source" MinWidth="180px" Property="SourceName">
+                        <Template Context="item">
+                            <div class="d-flex align-items-center gap-1 flex-wrap">
+                                @{
+                                    var scopeBadge = item.Scope switch
+                                    {
+                                        eTgoScopeNo.Scope1 => "bg-primary text-white",
+                                        eTgoScopeNo.Scope2 => "bg-success text-white",
+                                        eTgoScopeNo.Scope3 => "bg-info text-white",
+                                        _ => "bg-secondary text-white"
+                                    };
+                                    var scopeName = item.Scope switch
+                                    {
+                                        eTgoScopeNo.Scope1 => "Scope 1",
+                                        eTgoScopeNo.Scope2 => "Scope 2",
+                                        eTgoScopeNo.Scope3 => "Scope 3",
+                                        _ => "Separate"
+                                    };
+                                }
+                                <span class="badge @scopeBadge" style="font-size: 0.7rem; padding: 2px 5px; border-radius: 4px;">
+                                    @scopeName
+                                </span>
+                                <span class="fw-semibold">
+                                    @(string.IsNullOrEmpty(item.MatchedSourceName) ? item.SourceName : item.MatchedSourceName)
+                                </span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(item.ActivityGroupTitle))
+                            {
+                                <div class="text-muted small">@item.ActivityGroupTitle</div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Unit" Width="85px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <span class="text-secondary fw-medium">@(string.IsNullOrEmpty(item.MatchedUnit) ? (string.IsNullOrEmpty(item.Unit) ? "-" : item.Unit) : item.MatchedUnit)</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="EF" Width="95px" TextAlign="TextAlign.Right">
+                        <Template Context="item">
+                            <span class="font-monospace fw-semibold">@item.MatchedEF.ToString("N4")</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Share %" Width="80px" TextAlign="TextAlign.Right">
+                        <Template Context="item">
+                            <span class="fw-semibold @(item.EmissionSharePercent < 100 ? "text-primary" : "text-dark")">@item.EmissionSharePercent.ToString("0.#")%</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityTopicImportItemDto" Title="Status" Width="130px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @if (!item.IsValid)
+                            {
+                                var errText = string.Join("; ", item.ValidationErrors);
+                                <RadzenBadge Text="Invalid" BadgeStyle="BadgeStyle.Danger" IsPill="true" title="@errText" />
+                            }
+                            else if (item.IsExistingMasterMatched)
+                            {
+                                <RadzenBadge Text="Append Child" BadgeStyle="BadgeStyle.Warning" IsPill="true" title="Will append as child to existing topic in system" />
+                            }
+                            else
+                            {
+                                <RadzenBadge Text="Valid" BadgeStyle="BadgeStyle.Success" IsPill="true" />
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </div>
+    }
+
+    <!-- Action Buttons -->
+    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.75rem" Class="mt-3">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close(false))" />
+        <RadzenButton Text="@($"Import ({_parsedItems?.Count(i => i.IsValid) ?? 0} Valid Items)")"
+                      Icon="file_upload"
+                      ButtonStyle="ButtonStyle.Success"
+                      Disabled="@(_parsedItems == null || !_parsedItems.Any(i => i.IsValid) || _isSaving)"
+                      Click="@ExecuteImportAsync" />
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    [Parameter] public int SubscriptionId { get; set; }
+    [Parameter] public eTopicLevel Level { get; set; }
+    [Parameter] public int TargetId { get; set; }
+
+    private bool _isParsing = false;
+    private bool _isSaving = false;
+    private List<ActivityTopicImportItemDto>? _parsedItems;
+
+    private async Task DownloadTemplateAsync()
+    {
+        try
+        {
+            var bytes = await ExcelService.GenerateTemplateExcelAsync();
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("saveAsFile", "Template_Topics.xlsx", base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Template Downloaded", "Import template (Version 2) saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate Excel import template.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to download template.");
+        }
+    }
+
+    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        _isParsing = true;
+        StateHasChanged();
+
+        try
+        {
+            var sub = SubscriptionId > 0 ? await SubscriptionService.GetByIdAsync(SubscriptionId) : null;
+            var maxBytes = FileConstants.GetMaxUploadSizeBytes(sub?.AllowDataUploadCount);
+
+            if (file.Size > maxBytes)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "File Too Large", $"{file.Name} ({FileConstants.FormatFileSize(file.Size)}) exceeds maximum allowed upload limit of {FileConstants.FormatFileSize(maxBytes)}.");
+                _isParsing = false;
+                StateHasChanged();
+                return;
+            }
+
+            using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            _parsedItems = await ExcelService.ParseImportExcelAsync(ms, SubscriptionId, Level, TargetId);
+            NotificationService.Notify(NotificationSeverity.Info, "Excel Parsed", $"Parsed {_parsedItems.Count} rows (Version 2: Master & Child support).");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to parse uploaded Excel file.");
+            NotificationService.Notify(NotificationSeverity.Error, "Parsing Error", "Failed to parse Excel file. Please ensure it is a valid .xlsx file.");
+            _parsedItems = null;
+        }
+        finally
+        {
+            _isParsing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExecuteImportAsync()
+    {
+        if (_parsedItems == null || !_parsedItems.Any(i => i.IsValid)) return;
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            int importedTopicsCount = 0;
+            int importedChildsCount = 0;
+            int skippedChildsCount = 0;
+            var validItems = _parsedItems.Where(i => i.IsValid).ToList();
+
+            using var context = await DbFactory.CreateDbContextAsync();
+
+            if (SubscriptionId <= 0)
+            {
+                var firstSub = await context.Subscriptions.Where(s => !s.IsDeleted && s.IsActive).FirstOrDefaultAsync();
+                if (firstSub != null) SubscriptionId = firstSub.Id;
+            }
+
+            // Group valid items by MasterTopicTitle
+            var topicGroups = validItems.GroupBy(i => i.MasterTopicTitle, StringComparer.OrdinalIgnoreCase).ToList();
+
+            foreach (var group in topicGroups)
+            {
+                var masterTitle = group.Key;
+                var firstItem = group.First();
+
+                // Check if master topic already exists in the system for this scope
+                var existingTopic = await context.Topics
+                    .Include(t => t.Childs.Where(c => !c.IsDeleted))
+                    .FirstOrDefaultAsync(t => t.SubscriptionId == SubscriptionId &&
+                                              t.Level == Level &&
+                                              t.TargetId == TargetId &&
+                                              t.Title == masterTitle &&
+                                              !t.IsDeleted);
+
+                // Prepare child entities
+                // กันซ้ำคู่ (ActivityGroupId, SourceId) ภายในชุดเดียวกัน ค่า EF มาจาก Emission Source Mapping จึงห้ามมี child ซ้ำ
+                var newChildEntities = new List<TbActivityTopicChild>();
+                var childKeys = new HashSet<(int, int)>();
+
+                foreach (var item in group)
+                {
+                    // Handle on-the-fly custom emission source creation if needed
+                    if (item.IsCustomSourceNeeded && (!item.EmissionSourceId.HasValue || item.EmissionSourceId.Value <= 0))
+                    {
+                        var cleanTitle = item.SourceName.Replace(" [Custom]", "").Trim();
+                        var existingCustom = await context.EmissionSources
+                            .FirstOrDefaultAsync(s => s.Title == cleanTitle && s.SubscriptionId == SubscriptionId && !s.IsDeleted);
+
+                        if (existingCustom != null)
+                        {
+                            item.EmissionSourceId = existingCustom.Id;
+                        }
+                        else
+                        {
+                            var newCustomSrc = new TbEmissionSource
+                            {
+                                Title = cleanTitle,
+                                Remark = "Auto-registered from Activity Topic Excel Import",
+                                SubscriptionId = SubscriptionId > 0 ? SubscriptionId : (int?)null,
+                                SourceType = eSourceType.Custom,
+                                UnitId = item.MatchedUnitId ?? 1,
+                                CO2 = item.MatchedEF,
+                                gwpCO2 = 1,
+                                GroupId = item.EmissionGroupId ?? 1,
+                                IsActive = true
+                            };
+                            context.EmissionSources.Add(newCustomSrc);
+                            await context.SaveChangesAsync();
+                            item.EmissionSourceId = newCustomSrc.Id;
+                        }
+                    }
+
+                    if (item.ActivityGroupId.HasValue && item.EmissionSourceId.HasValue)
+                    {
+                        if (!childKeys.Add((item.ActivityGroupId.Value, item.EmissionSourceId.Value)))
+                        {
+                            skippedChildsCount++;
+                            continue;
+                        }
+
+                        newChildEntities.Add(new TbActivityTopicChild
+                        {
+                            ActivityGroupId = item.ActivityGroupId.Value,
+                            SourceId = item.EmissionSourceId.Value,
+                            ActivityUnitId = item.MatchedUnitId,
+                            UnitConversionRatio = item.UnitConversionRatio,
+                            EmissionSharePercent = item.EmissionSharePercent,
+                            IsActive = true
+                        });
+                    }
+                }
+
+                if (existingTopic != null)
+                {
+                    // Append new child topics to existing master topic
+                    if (newChildEntities.Any())
+                    {
+                        var appended = await TopicService.AppendChildsToTopicAsync(existingTopic.Id, newChildEntities);
+                        importedChildsCount += appended.Count;
+                        skippedChildsCount += newChildEntities.Count - appended.Count;
+                    }
+                }
+                else
+                {
+                    // Create new Master Topic along with all its childs
+                    var topic = new TbActivityTopic
+                    {
+                        SubscriptionId = SubscriptionId,
+                        Level = Level,
+                        TargetId = TargetId,
+                        EmissionGroupId = firstItem.EmissionGroupId ?? 1,
+                        Title = masterTitle,
+                        Remark = firstItem.Remark,
+                        IsActive = true
+                    };
+
+                    await TopicService.SaveTopicWithChildsAsync(topic, newChildEntities);
+                    importedTopicsCount++;
+                    importedChildsCount += newChildEntities.Count;
+                }
+            }
+
+            var msg = importedTopicsCount > 0
+                ? $"Successfully imported {importedTopicsCount} topics with {importedChildsCount} emission sources."
+                : (importedChildsCount > 0
+                    ? $"Successfully appended {importedChildsCount} child emission sources to existing topics."
+                    : "No new emission source was added — every entry already exists in the target topics.");
+
+            if (skippedChildsCount > 0)
+            {
+                msg += $" Skipped {skippedChildsCount} duplicated emission sources.";
+            }
+
+            bool anyChange = importedTopicsCount > 0 || importedChildsCount > 0;
+            NotificationService.Notify(
+                anyChange ? NotificationSeverity.Success : NotificationSeverity.Warning,
+                anyChange ? "Import Successful" : "Nothing Imported",
+                msg);
+            DialogService.Close(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save imported activity topics.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save imported activity topics.");
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -1,0 +1,167 @@
+@using TU.ACAMP.WebApp.Services.Reports
+
+@* [2026-09-15][Antigravity] Step 3 Data Pre-flight Widget: Activity diagnostics, row capacity, and EF expiry check *@
+
+<RadzenStack Gap="1.25rem" Class="pt-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Pre-Flight Validation &amp; Emission Factor Checks</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                Validates emission factor validity as of report generation date and checks row capacity.
+            </RadzenText>
+        </div>
+        <div>
+            <RadzenButton Text="Re-run Pre-flight" Icon="refresh" ButtonStyle="ButtonStyle.Light"
+                          Variant="Variant.Outlined" Size="ButtonSize.Small"
+                          Click="@OnRerunPreflight" IsBusy="@IsPreflighting" Style="border-radius: 6px;" />
+        </div>
+    </div>
+
+    @if (IsPreflighting)
+    {
+        <div class="py-4 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+            <RadzenText Text="Executing data pre-flight analysis..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (CalcReport == null)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false">
+            Pre-flight has not been executed yet. Click <strong>Re-run Pre-flight</strong> to calculate activity lines.
+        </RadzenAlert>
+    }
+    else
+    {
+        <div class="row g-3">
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-primary">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Activity Lines</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@CalcReport.AuditLines.Count</RadzenText>
+                </RadzenCard>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Gross (tCO₂e)</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@CalcReport.TotalGrossEmissions_tCO2e.ToString("N3")</RadzenText>
+                </RadzenCard>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-danger">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">EF Issues</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@ExpiredEfList.Count</RadzenText>
+                </RadzenCard>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-info">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Template Rows</RadzenText>
+                    <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0 text-info">
+                        @(OverflowWarnings.Any(o => o.Count > o.Capacity) ? $"+{OverflowWarnings.Sum(o => Math.Max(0, o.Count - o.Capacity))} Dynamic" : "Standard")
+                    </RadzenText>
+                </RadzenCard>
+            </div>
+        </div>
+
+        @* [2026-09-25][Antigravity] Preflight alerts: English UI standard with dynamic row expansion status *@
+        @if (CalcReport.AuditLines.Count == 0)
+        {
+            <div class="pf-notice pf-danger" role="alert">
+                <RadzenIcon Icon="error" Class="pf-icon" />
+                <div>
+                    <div class="pf-title">No activity data found for year @SelectedCalculateYear</div>
+                    <div class="pf-text">If you generate the report now, form Fr-04.1 will be blank — check the calculate year in Setup or record activity data first.</div>
+                </div>
+            </div>
+        }
+
+        @if (OverflowWarnings.Any(o => o.Count > o.Capacity))
+        {
+            <div class="pf-notice pf-info" role="status">
+                <RadzenIcon Icon="table_rows" Class="pf-icon" />
+                <div class="flex-grow-1">
+                    <div class="pf-title">TGO Fr-04.1 Dynamic Template Row Expansion</div>
+                    <div class="pf-text mb-2">Form Fr-04.1 automatically inserts additional rows with full formula replication and updated SUM ranges. All @CalcReport.AuditLines.Count activity items will be exported with complete line-by-line detail (100% retained).</div>
+                    <ul class="pf-list">
+                        @foreach (var o in OverflowWarnings.Where(o => o.Count > o.Capacity))
+                        {
+                            <li>
+                                <span class="pf-badge">@o.Label</span>
+                                <strong>@o.Count</strong> activity lines recorded (standard template: @o.Capacity rows)
+                                &rarr; <strong>+@(o.Count - o.Capacity) extra rows automatically inserted</strong> with full line details and formulas.
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        }
+
+        @if (HasEfSourceMismatch)
+        {
+            <div class="pf-notice pf-warning" role="status">
+                <RadzenIcon Icon="compare_arrows" Class="pf-icon" />
+                <div>
+                    <div class="pf-title">Emission Factor Dataset Mismatch between Calculate Year (@SelectedCalculateYear) and Base Year (@SelectedBaseYear)</div>
+                    <div class="pf-text">Comparison in Fr-04.2 may be affected. Please verify EF sources before exporting.</div>
+                </div>
+            </div>
+        }
+
+        @if (ExpiredEfList.Any())
+        {
+            <div class="pf-notice pf-danger" role="alert">
+                <RadzenIcon Icon="event_busy" Class="pf-icon" />
+                <div class="flex-grow-1">
+                    <div class="pf-title">Found @ExpiredEfList.Count expired Emission Factor(s) — audit acknowledgment reason required</div>
+                    <ul class="pf-list mb-3">
+                        @foreach (var item in ExpiredEfList.Take(5))
+                        {
+                            <li><strong>@item.SourceName</strong> (@item.TopicTitle) — EF @item.EF.ToString("N4") @item.EfUnitName</li>
+                        }
+                        @if (ExpiredEfList.Count > 5)
+                        {
+                            <li>and @(ExpiredEfList.Count - 5) more item(s)...</li>
+                        }
+                    </ul>
+                    <RadzenFormField Text="Audit Acknowledgment Reason *" Variant="Variant.Outlined" Style="width: 100%; background-color: #FFFFFF;">
+                        <RadzenTextArea Value="@AcknowledgmentReason" ValueChanged="@AcknowledgmentReasonChanged" Rows="2"
+                                        Placeholder="e.g. Continued use approved by external verification body for baseline continuity"
+                                        Style="width: 100%;" />
+                    </RadzenFormField>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="pf-notice pf-success" role="status">
+                <RadzenIcon Icon="check_circle" Class="pf-icon" />
+                <div class="pf-title mb-0">All Emission Factors in this reporting cycle are active and valid.</div>
+            </div>
+        }
+    }
+</RadzenStack>
+
+@code {
+    // [2026-09-15][Antigravity] Parameters for Step 3 Preflight Widget
+    [Parameter] public bool IsPreflighting { get; set; }
+    [Parameter] public CfoReportService.CfoAuditReportDto? CalcReport { get; set; }
+    [Parameter] public List<CfoReportService.ActivityAuditLineDto> ExpiredEfList { get; set; } = new();
+    /// <summary>[2026-09-24][Claude] บล็อกของ Fr-04.1 ที่มีรายการเกินจำนวนแถวของแบบฟอร์ม (เลขแถวจริงของชีต)</summary>
+    [Parameter] public List<QuotaOverflow> OverflowWarnings { get; set; } = new();
+    [Parameter] public bool HasEfSourceMismatch { get; set; }
+    [Parameter] public int SelectedCalculateYear { get; set; }
+    [Parameter] public int SelectedBaseYear { get; set; }
+
+    [Parameter] public string AcknowledgmentReason { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> AcknowledgmentReasonChanged { get; set; }
+
+    [Parameter] public EventCallback OnRerunPreflight { get; set; }
+
+    /// <summary>
+    /// [2026-09-24][Claude] ข้อมูลบล็อกที่แถวไม่พอ: ถ้าเกินโควตา เขียนตรง (Capacity - 1) แถว แล้วรวมรายการที่ Capacity..Count ไว้ที่แถวสุดท้ายของบล็อก
+    /// (อัลกอริทึมเดียวกับ CfoFr041InventoryWidget.PlannedRows / PopulateScopeBlock)
+    /// </summary>
+    public sealed record QuotaOverflow(string Label, int Count, int StartRow, int EndRow)
+    {
+        public int Capacity => EndRow - StartRow + 1;
+        public int ConsolidatedCount => Count - Capacity + 1;
+    }
+}

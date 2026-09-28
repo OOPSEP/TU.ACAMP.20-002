@@ -1,0 +1,58 @@
+@using TU.ACAMP.Domain.Models.Library
+
+<RadzenFieldset Text="Data Source Origins & References" Style="width: 100%; border-radius: 8px; margin-top: 10px; margin-bottom: 10px;">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Wrap="FlexWrap.Wrap" Class="p-3">
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.SelfCollect" Name="SelfCollect" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="Self Collect" Component="SelfCollect" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.Supplier" Name="Supplier" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="Supplier" Component="Supplier" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.THLCIDB" Name="THLCIDB" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="TH LCI DB" Component="THLCIDB" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.TGOEF" Name="TGOEF" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="TGO EF" Component="TGOEF" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.ThaiRes" Name="ThaiRes" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="Thai Res." Component="ThaiRes" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.IntDB" Name="IntDB" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="Int. DB" Component="IntDB" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.Other" Name="Other" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="Other" Component="Other" Class="ms-2" />
+        </div>
+        <div class="d-flex align-items-center">
+            <RadzenCheckBox TValue="bool" @bind-Value="@Model.Substitute" Name="Substitute" Disabled="@IsReadOnly" Change="@NotifyChange" />
+            <RadzenLabel Text="Substitute" Component="Substitute" Class="ms-2" />
+        </div>
+    </RadzenStack>
+</RadzenFieldset>
+
+@code {
+    #region class field  
+    public bool IsReadOnly => Model.IsReadOnly;
+    #endregion
+
+    #region class properties 
+    [Parameter] public TbEmissionSource Model { get; set; } = new();
+    [Parameter] public EventCallback OnModelChanged { get; set; }
+    #endregion
+
+    #region class method 
+    private async Task NotifyChange(bool value)
+    {
+        #region hide [2026-08-17]
+        await OnModelChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+}

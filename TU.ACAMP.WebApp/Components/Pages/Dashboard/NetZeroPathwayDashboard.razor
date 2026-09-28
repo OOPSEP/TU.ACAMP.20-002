@@ -1,0 +1,327 @@
+@page "/dashboard/net-zero"
+@* [2026-09-26][Claude] Net-Zero Pathway Dashboard (D2) Phase 1: KPI + Pathway (Actual/Target/Projection) + Scope รายปี
+   แนวทาง: Documents/PLAN_NETZERO_DASHBOARD_2026-09-26.md *@
+
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Dashboard
+@using TU.ACAMP.WebApp.Components.Pages.Dashboard.Dialogs
+@using TU.ACAMP.WebApp.Components.Pages.Dashboard.NetZero.Widgets
+
+@attribute [Authorize]
+
+@inject NetZeroDashboardService NzService
+@inject NetZeroTargetService NetZeroService
+@inject SubscriptionService SubscriptionService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavigationManager
+@inject NotificationService NotificationService
+@inject DialogService DialogService
+@inject IJSRuntime JSRuntime
+@inject ILogger<NetZeroPathwayDashboard> Logger
+
+<PageTitle>Net-Zero Pathway - CARBON ONE</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- TITLE -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-3">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <RadzenIcon Icon="trending_down" Style="font-size: 2rem; color: #10B981;" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    Net-Zero Pathway Dashboard
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                Multi-year progress from base year to Net-Zero target year.
+            </RadzenText>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="px-2 py-1 bg-light rounded-2 border text-muted small">
+                Data as of: <strong>@_result.LastUpdatedAt.ToString("yyyy-MM-dd HH:mm:ss")</strong>
+            </div>
+            <RadzenButton Icon="settings" Text="Annual Target Settings" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                          Size="ButtonSize.Small" Click="@OpenTargetSettingsAsync" Disabled="@(_primarySubscriptionId <= 0)" Style="border-radius: 6px;" />
+            <RadzenButton Icon="refresh" Text="Refresh" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+                          Click="@(() => ReloadAsync(bypassCache: true))" Style="border-radius: 6px;" />
+        </div>
+    </div>
+
+    <!-- FILTERS -->
+    <RadzenCard Class="p-2 mb-4 shadow-sm border rounded-3 bg-white d-flex align-items-center gap-3 flex-wrap">
+        <div class="d-flex align-items-center gap-2">
+            <RadzenIcon Icon="corporate_fare" Class="text-muted" />
+            <RadzenLabel Text="Corporate:" Class="fw-semibold small m-0" />
+            <RadzenDropDown TValue="int?" Data="@_result.Corporates" TextProperty="Title" ValueProperty="Id"
+                            @bind-Value="@_selectedCorporateId" Change="@OnCorporateChangedAsync"
+                            AllowClear="true" Placeholder="All Corporates" Style="width: 200px;" Size="ButtonSize.Small" />
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <RadzenIcon Icon="business" Class="text-muted" />
+            <RadzenLabel Text="Company:" Class="fw-semibold small m-0" />
+            <RadzenDropDown TValue="int?" Data="@FilteredCompanies" TextProperty="Title" ValueProperty="Id"
+                            @bind-Value="@_selectedCompanyId" Change="@OnCompanyChangedAsync"
+                            AllowClear="true" Placeholder="All Companies" Disabled="@(!FilteredCompanies.Any())" Style="width: 200px;" Size="ButtonSize.Small" />
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <RadzenIcon Icon="factory" Class="text-muted" />
+            <RadzenLabel Text="Facility:" Class="fw-semibold small m-0" />
+            <RadzenDropDown TValue="int?" Data="@FilteredFacilities" TextProperty="Title" ValueProperty="Id"
+                            @bind-Value="@_selectedFacilityId" Change="@OnFilterChangedAsync"
+                            AllowClear="true" Placeholder="All Facilities" Disabled="@(!FilteredFacilities.Any())" Style="width: 200px;" Size="ButtonSize.Small" />
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <RadzenIcon Icon="event_repeat" Class="text-muted" />
+            <RadzenLabel Text="Fiscal Year Starts In:" Class="fw-semibold small m-0" />
+            <RadzenDropDown TValue="int" Data="@_monthOptions" TextProperty="Text" ValueProperty="Value"
+                            @bind-Value="@_fiscalStartMonth" Change="@OnFilterChangedAsync" Style="width: 140px;" Size="ButtonSize.Small" />
+        </div>
+    </RadzenCard>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center my-5">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Large" />
+        </div>
+    }
+    else if (!_allowedSubscriptionIds.Any())
+    {
+        <div class="alert alert-warning p-4 rounded-3 text-center my-4">No active subscriptions.</div>
+    }
+    else
+    {
+        <NzKpiWidget Data="@_result" />
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-xl-7">
+                <NzPathwayChartWidget Data="@_result" />
+            </div>
+            <div class="col-12 col-xl-5">
+                <NzScopeTrendWidget Data="@_result" />
+            </div>
+        </div>
+        @* [2026-09-26][Claude] Carbon Neutral (เครดิตชดเชยทั้งหมด) แยกจาก Net-Zero SBTi (ลดจริง + removal เฉพาะส่วนที่เหลือ) *@
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-xl-7">
+                <NzCarbonNeutralWidget Data="@_result" />
+            </div>
+            <div class="col-12 col-xl-5">
+                <NzResidualRemovalWidget Data="@_result" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    #region fields & query parameters
+    // [2026-09-26][Claude] State Persistence: เก็บตัวกรองใน URL
+    [SupplyParameterFromQuery(Name = "cid")] public string? SecureCid { get; set; }
+    [SupplyParameterFromQuery(Name = "cmp")] public string? SecureCmp { get; set; }
+    [SupplyParameterFromQuery(Name = "fac")] public string? SecureFac { get; set; }
+    [SupplyParameterFromQuery(Name = "fym")] public string? SecureFym { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private HashSet<int> _allowedSubscriptionIds = new();
+    private int _primarySubscriptionId = 0;
+
+    private int? _selectedCorporateId;
+    private int? _selectedCompanyId;
+    private int? _selectedFacilityId;
+    private int _fiscalStartMonth = 1;
+
+    private TbNetZeroTarget _target = new();
+    private NetZeroDashboardResult _result = new();
+
+    private sealed record MonthOption(int Value, string Text);
+    private static readonly List<MonthOption> _monthOptions = Enumerable.Range(1, 12)
+        .Select(m => new MonthOption(m, CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(m)))
+        .ToList();
+
+    private IEnumerable<TbCompany> FilteredCompanies =>
+        _selectedCorporateId.HasValue ? _result.Companies.Where(c => c.CorporateId == _selectedCorporateId.Value) : _result.Companies;
+
+    private IEnumerable<TbFacility> FilteredFacilities =>
+        _selectedCompanyId.HasValue
+            ? _result.Facilities.Where(f => f.CompanyId == _selectedCompanyId.Value)
+            : (_selectedCorporateId.HasValue
+                ? _result.Facilities.Where(f => FilteredCompanies.Select(c => c.Id).Contains(f.CompanyId))
+                : _result.Facilities);
+
+    private (eTopicLevel? Level, int? TargetId) EffectiveLevelAndTarget
+    {
+        get
+        {
+            if (_selectedFacilityId.HasValue && _selectedFacilityId.Value > 0) return (eTopicLevel.Facility, _selectedFacilityId.Value);
+            if (_selectedCompanyId.HasValue && _selectedCompanyId.Value > 0) return (eTopicLevel.Company, _selectedCompanyId.Value);
+            if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0) return (eTopicLevel.Corporate, _selectedCorporateId.Value);
+            return (null, null);
+        }
+    }
+    #endregion
+
+    #region lifecycle
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (int.TryParse(SecureCid, out var cid) && cid > 0) _selectedCorporateId = cid;
+            if (int.TryParse(SecureCmp, out var cmp) && cmp > 0) _selectedCompanyId = cmp;
+            if (int.TryParse(SecureFac, out var fac) && fac > 0) _selectedFacilityId = fac;
+            if (int.TryParse(SecureFym, out var fym) && fym is >= 1 and <= 12) _fiscalStartMonth = fym;
+
+            var user = (await AuthStateProvider.GetAuthenticationStateAsync()).User;
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.FindFirst(ClaimTypes.Name)?.Value ?? user.Identity?.Name;
+            if (!string.IsNullOrEmpty(email))
+            {
+                var subs = await SubscriptionService.GetSubscriptionsForUserAsync(email, _isAdmin);
+                _allowedSubscriptionIds = subs.Select(s => s.Id).ToHashSet();
+                _primarySubscriptionId = _allowedSubscriptionIds.FirstOrDefault();
+            }
+
+            if (_allowedSubscriptionIds.Any())
+            {
+                await LoadAsync(bypassCache: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing Net-Zero Pathway Dashboard.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error Loading Dashboard", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await SyncBrowserUrlAsync();
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var q = new Dictionary<string, object?>
+            {
+                ["cid"] = _selectedCorporateId?.ToString(),
+                ["cmp"] = _selectedCompanyId?.ToString(),
+                ["fac"] = _selectedFacilityId?.ToString(),
+                ["fym"] = _fiscalStartMonth != 1 ? _fiscalStartMonth.ToString() : null
+            };
+            var uri = NavigationManager.GetUriWithQueryParameters("/dashboard/net-zero", q);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // [2026-09-26][Claude] ข้ามช่วง prerender / circuit หลุด
+        }
+    }
+    #endregion
+
+    #region data loading & filters
+    private async Task LoadAsync(bool bypassCache)
+    {
+        if (_primarySubscriptionId > 0)
+        {
+            _target = await NetZeroService.GetAsync(_primarySubscriptionId, _selectedCorporateId);
+        }
+        var (lvl, tid) = EffectiveLevelAndTarget;
+        _result = await NzService.GetDashboardDataAsync(_allowedSubscriptionIds, lvl, tid,
+            _target.BaseYear, _target.TargetYear, _target.TargetReductionPercent, _fiscalStartMonth, bypassCache);
+    }
+
+    private async Task ReloadAsync(bool bypassCache)
+    {
+        try
+        {
+            _isLoading = true;
+            StateHasChanged();
+            await SyncBrowserUrlAsync();
+            await LoadAsync(bypassCache);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error reloading Net-Zero Pathway Dashboard.");
+            NotificationService.Notify(NotificationSeverity.Error, "Load Failed", ex.Message);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task OnFilterChangedAsync() => ReloadAsync(bypassCache: false);
+
+    private Task OnCorporateChangedAsync()
+    {
+        _selectedCompanyId = null;
+        _selectedFacilityId = null;
+        return ReloadAsync(bypassCache: false);
+    }
+
+    private Task OnCompanyChangedAsync()
+    {
+        _selectedFacilityId = null;
+        return ReloadAsync(bypassCache: false);
+    }
+    #endregion
+
+    #region target settings dialog
+    // [2026-09-26][Claude] ใช้ NetZeroSettingDialog2 ตัวเดียวกับ Executive Dashboard; ปีที่แสดงเป้า = ปีล่าสุดของหน้านี้
+    private async Task OpenTargetSettingsAsync()
+    {
+        try
+        {
+            var model = new NetZeroSettingDialog.NetZeroSettingModel
+            {
+                BaseYear = _target.BaseYear,
+                TargetYear = _target.TargetYear,
+                TargetReductionPercent = _target.TargetReductionPercent,
+                EnableAlert = _target.EnableAlert,
+                AlertThresholdPercent = _target.AlertThresholdPercent,
+                AlertEmails = _target.AlertEmails
+            };
+            var years = _result.YearlyItems.Select(i => i.Year).OrderByDescending(y => y).ToList();
+            if (!years.Contains(_target.BaseYear)) years.Add(_target.BaseYear);
+
+            var dialogParams = new Dictionary<string, object>
+            {
+                { "Model", model },
+                { "YearOptions", years },
+                { "SubscriptionId", _primarySubscriptionId },
+                { "SelectedYear", _result.LatestYear ?? AppTimeZone.LocalNow.Year },
+                { "LoadedBaseYear", _target.BaseYear },
+                { "BaseYearHasData", _result.BaseYearHasData },
+                { "BaseYearEmissionsTon", _result.BaseYearTon },
+                { "ActualEmissionsTon", _result.LatestTon }
+            };
+            if (_selectedCorporateId.HasValue) dialogParams["CorporateId"] = _selectedCorporateId.Value;
+
+            var dialogResult = await DialogService.OpenAsync<NetZeroSettingDialog2>("⚙️ Annual Target & Alert Settings", dialogParams,
+                new DialogOptions { Width = "920px", Resizable = false, Draggable = true });
+
+            if (dialogResult is NetZeroSettingDialog.NetZeroSettingModel m && _primarySubscriptionId > 0)
+            {
+                await NetZeroService.SaveAsync(_primarySubscriptionId, _selectedCorporateId, m.BaseYear, m.TargetYear,
+                    m.TargetReductionPercent, m.EnableAlert, m.AlertThresholdPercent, m.AlertEmails);
+                await ReloadAsync(bypassCache: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error opening Net-Zero target settings.");
+            NotificationService.Notify(NotificationSeverity.Error, "Settings Error", ex.Message);
+        }
+    }
+    #endregion
+}

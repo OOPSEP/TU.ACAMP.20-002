@@ -1,0 +1,42 @@
+﻿[
+  {
+    "ReportKey": "ebb7aed0e4854aaeb4e4b4d911b534d1",
+    "Title": "GHG Emissions Report Year 2026",
+    "Level": 1,
+    "TargetId": 1,
+    "OrganizationTitle": "D7-CRP-001 \u2014 \u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E40\u0E14\u0E42\u0E21\u0E48\u0E1F\u0E39\u0E49\u0E14\u0E2A\u0E4C \u0E2D\u0E34\u0E19\u0E14\u0E31\u0E2A\u0E17\u0E23\u0E35 \u0E08\u0E33\u0E01\u0E31\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E33\u0E25\u0E2D\u0E07)",
+    "OrganizationCode": "D7-CRP-001",
+    "BaseYear": 2026,
+    "CalculateYear": 2026,
+    "CreatedAt": "2026-09-25T19:08:56.6245083+07:00",
+    "CreatedBy": "Corporate GHG Team",
+    "Status": "Verified / Locked",
+    "TotalScope1_tCO2e": 584.04956476628900473430045,
+    "TotalScope2_tCO2e": 1349.3054250000000000000000,
+    "TotalScope3_tCO2e": 413.53791157578080000000000,
+    "TotalGrossEmissions_tCO2e": 2346.89290134206980473430045,
+    "HasExcelFile": true,
+    "HasWordFile": true,
+    "FileDirectory": "D:\\2026\\Projects\\ACAMP\\V20\\CODES\\TU.ACAMP.20-002\\TU.ACAMP.WebApp\\Files\\Reports\\Corporate_1\\ebb7aed0e4854aaeb4e4b4d911b534d1"
+  },
+  {
+    "ReportKey": "61e511c347964df881dd22bd4ba236bc",
+    "Title": "GHG Emissions Report Year 2026",
+    "Level": 1,
+    "TargetId": 1,
+    "OrganizationTitle": "D7-CRP-001 \u2014 \u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E40\u0E14\u0E42\u0E21\u0E48\u0E1F\u0E39\u0E49\u0E14\u0E2A\u0E4C \u0E2D\u0E34\u0E19\u0E14\u0E31\u0E2A\u0E17\u0E23\u0E35 \u0E08\u0E33\u0E01\u0E31\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E33\u0E25\u0E2D\u0E07)",
+    "OrganizationCode": "D7-CRP-001",
+    "BaseYear": 2024,
+    "CalculateYear": 2026,
+    "CreatedAt": "2026-09-25T18:52:26.3089328+07:00",
+    "CreatedBy": "Corporate GHG Team",
+    "Status": "Verified / Locked",
+    "TotalScope1_tCO2e": 584.04956476628900473430045,
+    "TotalScope2_tCO2e": 1349.3054250000000000000000,
+    "TotalScope3_tCO2e": 413.53791157578080000000000,
+    "TotalGrossEmissions_tCO2e": 2346.89290134206980473430045,
+    "HasExcelFile": true,
+    "HasWordFile": true,
+    "FileDirectory": "D:\\2026\\Projects\\ACAMP\\V20\\CODES\\TU.ACAMP.20-002\\TU.ACAMP.WebApp\\Files\\Reports\\Corporate_1\\61e511c347964df881dd22bd4ba236bc"
+  }
+]

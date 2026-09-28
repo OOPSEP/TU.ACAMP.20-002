@@ -1,0 +1,449 @@
+@page "/admin/expire-subscriptions/extend"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+
+@attribute [Authorize(Roles = SystemRoles.Administrator)]
+@inject SubscriptionService SubscriptionService
+@inject EmailSender EmailSender
+@inject NotificationService NotificationService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject ILogger<PageExtendSubscription> Logger
+
+<PageTitle>Extend Subscription - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <RadzenButton Icon="arrow_back" 
+                              ButtonStyle="ButtonStyle.Light" 
+                              Variant="Variant.Flat" 
+                              Size="ButtonSize.Small" 
+                              Click="@GoBack" 
+                              Style="border-radius: 8px;" 
+                              Title="Back to previous page" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-0" Style="color: var(--rz-text-title-color);">
+                    Extend Subscription Validity
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" class="text-muted mb-0">
+                Renew or extend the active period and expiration date of the tenant subscription.
+            </RadzenText>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading subscription details..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_subscription == null)
+    {
+        <div class="alert alert-danger d-flex align-items-center mb-4" role="alert">
+            <RadzenIcon Icon="error_outline" class="me-2 fs-5" />
+            <div>
+                <strong>Not Found:</strong> The requested subscription could not be found or has been removed.
+            </div>
+        </div>
+        <RadzenButton Text="Back to Expire Subscriptions" Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Click="@GoBack" Style="border-radius: 8px;" />
+    }
+    else
+    {
+        <div class="row g-4">
+            <!-- Left Column: Subscription Overview Card -->
+            <div class="col-12 col-lg-5">
+                <div class="shadow-sm rounded-3 p-4 h-100" style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color); border-radius: 12px;">
+                    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
+                        <RadzenIcon Icon="card_membership" Style="font-size: 1.6rem;" class="text-primary" />
+                        <RadzenText TextStyle="TextStyle.Subtitle1" class="fw-bold mb-0">Subscription Information</RadzenText>
+                    </div>
+
+                    <div class="mb-3">
+                        <span class="text-muted small d-block">Title / Organization</span>
+                        <span class="fw-bold fs-6" style="color: var(--rz-text-title-color);">@_subscription.Title</span>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <span class="text-muted small d-block">Plan</span>
+                            <RadzenBadge Text="@_subscription.SubscriptionPlan.ToString()" BadgeStyle="@GetPlanBadgeStyle(_subscription.SubscriptionPlan)" Style="border-radius: 4px;" />
+                        </div>
+                        <div class="col-6">
+                            <span class="text-muted small d-block">Owner Type</span>
+                            <span class="small fw-semibold">@(_subscription.OwnerType == eSubscriptionOwnerType.Juristic ? "Juristic Person" : "Individual")</span>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <span class="text-muted small d-block">Tax ID / Identification No.</span>
+                        <span class="font-monospace small">@(string.IsNullOrWhiteSpace(_subscription.TaxId) ? "-" : _subscription.TaxId)</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <span class="text-muted small d-block">Owner / Contact Person</span>
+                        <span class="small fw-semibold d-block">@(!string.IsNullOrWhiteSpace(_subscription.OwnerName) ? _subscription.OwnerName : _subscription.ContactPerson)</span>
+                        <span class="small text-muted">@_subscription.OwnerEmail</span>
+                    </div>
+
+                    <div class="row g-2 pt-2 border-top">
+                        <div class="col-6">
+                            <span class="text-muted small d-block">Start Date</span>
+                            <span class="small">@_subscription.StartDate.ToString("yyyy-MM-dd")</span>
+                        </div>
+                        <div class="col-6">
+                            <span class="text-muted small d-block">Current Expiry Date</span>
+                            <span class="small fw-bold @(_subscription.ExpiryDate <= DateTime.UtcNow ? "text-danger" : "text-success")">
+                                @_subscription.ExpiryDate.ToString("yyyy-MM-dd")
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        @{
+                            var days = Math.Ceiling(_subscription.GetRemainingDays());
+                            var isExp = _subscription.ExpiryDate <= DateTime.UtcNow;
+                        }
+                        @if (isExp)
+                        {
+                            <div class="alert alert-danger py-2 mb-0 d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="error" Style="font-size: 1.2rem;" />
+                                <span class="small fw-bold">This subscription has expired.</span>
+                            </div>
+                        }
+                        else if (days <= 30)
+                        {
+                            <div class="alert alert-warning py-2 mb-0 d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="timelapse" Style="font-size: 1.2rem;" />
+                                <span class="small fw-bold">Expires in @days days.</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-success py-2 mb-0 d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="check_circle" Style="font-size: 1.2rem;" />
+                                <span class="small fw-bold">Valid for @days more days.</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Extension Form -->
+            <div class="col-12 col-lg-7">
+                <div class="shadow-sm rounded-3 p-4" style="background: var(--rz-card-background-color); border: 1px solid var(--rz-border-color); border-radius: 12px;">
+                    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
+                        <RadzenIcon Icon="update" Style="font-size: 1.6rem;" class="text-success" />
+                        <RadzenText TextStyle="TextStyle.Subtitle1" class="fw-bold mb-0">Extension Settings</RadzenText>
+                    </div>
+
+                    <div class="mb-4">
+                        <RadzenText TextStyle="TextStyle.Subtitle2" class="fw-bold mb-2">1. Quick Period Selection</RadzenText>
+                        <div class="row g-2">
+                            @foreach (var opt in _periodOptions)
+                            {
+                                var val = (int)opt.Value;
+                                var isSelected = _selectedMonths == val && !_useCustomDate;
+                                <div class="col-6 col-sm-3">
+                                    <button type="button" 
+                                            class="btn w-100 py-2 text-center border rounded-3 @(isSelected ? "btn-primary text-white" : "btn-light")" 
+                                            style="font-size: 0.85rem; font-weight: 600;" 
+                                            @onclick="@(() => SelectMonths(val))">
+                                        @opt.Text
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <RadzenText TextStyle="TextStyle.Subtitle2" class="fw-bold mb-0">2. Or Set Specific Expiry Date</RadzenText>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="chkCustomDate" checked="@_useCustomDate" @onchange="@OnToggleCustomDate" />
+                                <label class="form-check-label small" for="chkCustomDate">Custom Date</label>
+                            </div>
+                        </div>
+
+                        @if (_useCustomDate)
+                        {
+                            <RadzenDatePicker TValue="DateTime?" 
+                                              @bind-Value="@_customExpiryDate" 
+                                              DateFormat="yyyy-MM-dd" 
+                                              Min="@DateTime.Today" 
+                                              Style="width: 100%;" 
+                                              Change="@OnCustomDateChanged" />
+                        }
+                    </div>
+
+                    <!-- Calculated Result Alert -->
+                    <div class="alert alert-info p-3 mb-4 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <RadzenIcon Icon="event_available" Style="font-size: 1.5rem;" class="text-primary" />
+                            <div>
+                                <span class="d-block small text-muted">New Expiry Date after extension:</span>
+                                <strong class="fs-6 text-primary">@_calculatedNewDate.ToString("yyyy-MM-dd")</strong>
+                            </div>
+                        </div>
+                        <RadzenBadge Text="@($"{Math.Ceiling((_calculatedNewDate - DateTime.UtcNow).TotalDays)} days from today")" BadgeStyle="BadgeStyle.Info" />
+                    </div>
+
+                    <!-- Additional Options -->
+                    <div class="p-3 border rounded-3 bg-light mb-4">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="chkSendEmail" @bind="@_sendEmailNotification" />
+                            <label class="form-check-label small fw-semibold" for="chkSendEmail">
+                                Send confirmation email to Owner / Contact (@_subscription.OwnerEmail)
+                            </label>
+                            <span class="text-muted small d-block mt-1">An email notification will be delivered with updated subscription validity details.</span>
+                        </div>
+                    </div>
+
+                    <!-- Form Actions -->
+                    <div class="d-flex justify-content-end gap-2 pt-2 border-top">
+                        <RadzenButton Text="Cancel" 
+                                      ButtonStyle="ButtonStyle.Light" 
+                                      Click="@GoBack" 
+                                      Disabled="@_isSaving" 
+                                      Style="min-width: 120px; border-radius: 8px;" />
+                        <RadzenButton Text="Confirm & Save Extension" 
+                                      Icon="check" 
+                                      ButtonStyle="ButtonStyle.Success" 
+                                      IsBusy="@_isSaving" 
+                                      Disabled="@_isSaving" 
+                                      Click="@HandleSaveExtensionAsync" 
+                                      Style="min-width: 180px; border-radius: 8px; font-weight: 600;" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    #region class fields
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private TbSubscription? _subscription;
+    private int _selectedMonths = 3;
+    private bool _useCustomDate = false;
+    private DateTime? _customExpiryDate;
+    private DateTime _calculatedNewDate = DateTime.UtcNow.AddMonths(3);
+    private bool _sendEmailNotification = true;
+
+    private readonly List<dynamic> _periodOptions = new()
+    {
+        new { Text = "+1 Month", Value = 1 },
+        new { Text = "+3 Months", Value = 3 },
+        new { Text = "+6 Months", Value = 6 },
+        new { Text = "+1 Year", Value = 12 }
+    };
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+
+    public int SubscriptionId { get; set; }
+    public string? ReturnUrl { get; set; }
+    #endregion
+
+    #region class methods
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-20]
+        ResolveParameters();
+        await LoadSubscriptionAsync();
+        #endregion
+    }
+
+    private void ResolveParameters()
+    {
+        #region hide [2026-08-20]
+        var protector = DataProtection.CreateProtector(nameof(LinkProtector));
+
+        // Resolve Subscription ID
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            try
+            {
+                var decrypted = protector.Unprotect(SecureId);
+                if (int.TryParse(decrypted, out var id))
+                {
+                    SubscriptionId = id;
+                }
+            }
+            catch
+            {
+                if (int.TryParse(SecureId, out var directId))
+                {
+                    SubscriptionId = directId;
+                }
+            }
+        }
+
+        // Resolve Return URL
+        if (!string.IsNullOrWhiteSpace(SecureRet))
+        {
+            try
+            {
+                ReturnUrl = protector.Unprotect(SecureRet);
+            }
+            catch
+            {
+                ReturnUrl = SecureRet;
+            }
+        }
+        #endregion
+    }
+
+    private async Task LoadSubscriptionAsync()
+    {
+        #region hide [2026-08-20]
+        if (SubscriptionId <= 0)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _isLoading = true;
+            _subscription = await SubscriptionService.GetByIdAsync(SubscriptionId, includeUsers: true, includeCorporates: true);
+            CalculateNewDate();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load subscription {Id}", SubscriptionId);
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load subscription details.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void SelectMonths(int months)
+    {
+        _selectedMonths = months;
+        _useCustomDate = false;
+        CalculateNewDate();
+    }
+
+    private void OnToggleCustomDate(ChangeEventArgs e)
+    {
+        _useCustomDate = (bool)(e.Value ?? false);
+        if (_useCustomDate && !_customExpiryDate.HasValue)
+        {
+            _customExpiryDate = _calculatedNewDate;
+        }
+        CalculateNewDate();
+    }
+
+    private void OnCustomDateChanged(DateTime? value)
+    {
+        _customExpiryDate = value;
+        CalculateNewDate();
+    }
+
+    private void CalculateNewDate()
+    {
+        if (_subscription == null) return;
+
+        if (_useCustomDate && _customExpiryDate.HasValue)
+        {
+            _calculatedNewDate = _customExpiryDate.Value;
+        }
+        else
+        {
+            var baseDate = _subscription.ExpiryDate > DateTime.UtcNow ? _subscription.ExpiryDate : DateTime.UtcNow;
+            _calculatedNewDate = baseDate.AddMonths(_selectedMonths);
+        }
+    }
+
+    private async Task HandleSaveExtensionAsync()
+    {
+        #region hide [2026-08-20]
+        if (_subscription == null) return;
+
+        _isSaving = true;
+        try
+        {
+            DateTime? specificDate = _useCustomDate ? _customExpiryDate : _calculatedNewDate;
+            var success = await SubscriptionService.ExtendSubscriptionAsync(
+                _subscription.Id, 
+                _selectedMonths, 
+                specificDate);
+
+            if (success)
+            {
+                if (_sendEmailNotification && !string.IsNullOrWhiteSpace(_subscription.OwnerEmail))
+                {
+                    try
+                    {
+                        await SubscriptionService.SendExpirationReminderAsync(_subscription.Id);
+                    }
+                    catch (Exception emailEx)
+                    {
+                        Logger.LogWarning(emailEx, "Failed to send extension confirmation email for subscription {Id}", _subscription.Id);
+                    }
+                }
+
+                NotificationService.Notify(NotificationSeverity.Success, "Extension Saved", $"Subscription '{_subscription.Title}' extended to {_calculatedNewDate:yyyy-MM-dd}.");
+                GoBack();
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Error", "Could not extend subscription.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to extend subscription {Id}", _subscription.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-20]
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/admin/expire-subscriptions");
+        }
+        #endregion
+    }
+
+    private BadgeStyle GetPlanBadgeStyle(eSubscriptionPlan plan)
+    {
+        return plan switch
+        {
+            eSubscriptionPlan.Enterprise => BadgeStyle.Danger,
+            eSubscriptionPlan.Pro => BadgeStyle.Primary,
+            _ => BadgeStyle.Secondary
+        };
+    }
+    #endregion
+}

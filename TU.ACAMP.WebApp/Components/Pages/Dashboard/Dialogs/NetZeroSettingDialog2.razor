@@ -1,0 +1,297 @@
+@* [2026-09-26][Claude] NetZeroSettingDialog V2 — จัดเลย์เอาต์แนวกว้าง แบ่งกลุ่มการตั้งค่าเป็น Tab (V1 ยังใช้โดย ExecutiveDashboard1) *@
+@* [2026-09-26][Claude] ใช้ Model ชนิดเดิม NetZeroSettingDialog.NetZeroSettingModel เพื่อให้หน้าที่เรียกและการบันทึกไม่ต้องเปลี่ยน *@
+@using Radzen
+@using TU.ACAMP.WebApp.Services.Dashboard
+@inject DialogService DialogService
+@inject GhgTargetAlertService AlertService
+@inject NotificationService NotificationService
+
+<div class="px-1 nz-settings-dialog2">
+    <RadzenText TextStyle="TextStyle.Body2" Class="text-muted mb-3">
+        Configure baseline year, long-term Net-Zero reduction targets, carbon offsets, and automated email alerts.
+    </RadzenText>
+
+    <RadzenTabs @bind-SelectedIndex="@_selectedTab" RenderMode="TabRenderMode.Client">
+        <Tabs>
+            <!-- TAB 1: PATHWAY TARGET -->
+            <RadzenTabsItem Text="Annual Target" Icon="flag">
+                @* [2026-09-26][Claude] ความสูงคงที่ทุกแท็บ (inline ไม่พึ่ง CSS class ภายในของ Radzen) *@
+                <div style="height: 300px; overflow-y: auto; overflow-x: hidden;">
+                <div class="row g-4 pt-2">
+                    <div class="col-md-7">
+                        <div class="row g-3">
+                            <div class="col-sm-6">
+                                <RadzenLabel Text="Base Year:" Class="fw-semibold small d-block mb-1" />
+                                <RadzenDropDown TValue="int" Data="@YearOptions" @bind-Value="@Model.BaseYear" Style="width: 100%;" />
+                            </div>
+                            <div class="col-sm-6">
+                                <RadzenLabel Text="Net-Zero Target Year:" Class="fw-semibold small d-block mb-1" />
+                                <RadzenNumeric TValue="int" @bind-Value="@Model.TargetYear" Min="2025" Max="2060" Step="1" Style="width: 100%;" />
+                            </div>
+                            <div class="col-sm-6">
+                                <RadzenLabel Text="Target GHG Reduction (%):" Class="fw-semibold small d-block mb-1" />
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.TargetReductionPercent" Min="0" Max="100" Step="5" Format="0.0" Style="width: 100%;" />
+                                <small class="text-muted">e.g. 50.0% reduction target by @Model.TargetYear</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <RadzenCard Class="bg-light border rounded-3 p-3 h-100">
+                            <span class="fw-bold small text-dark d-block mb-2">Target Summary</span>
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="small text-muted">Baseline Reference:</span>
+                                <span class="fw-bold small text-dark">Base Year @Model.BaseYear</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="small text-muted">Target Horizon:</span>
+                                <span class="fw-bold small text-dark">@Model.TargetYear (@Model.TargetReductionPercent.ToString("F1")% Reduction)</span>
+                            </div>
+                            @if (Model.CarbonOffsets > 0m)
+                            {
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="small text-muted">Certified Offsets:</span>
+                                    <span class="fw-bold small text-success">@Model.CarbonOffsets.ToString("N2") tCO₂e</span>
+                                </div>
+                            }
+                            @* [2026-09-26][Claude] เป้าของปีที่เลือกบน Dashboard (เส้นตรงจากปีฐานถึงปีเป้าหมาย สูตรเดียวกับ ExecutiveDashboardService2) *@
+                            <div class="border-top border-bottom py-2 my-2">
+                                <span class="fw-bold small text-dark d-block mb-1">Target for @SelectedYear</span>
+                                @if (Model.BaseYear != LoadedBaseYear)
+                                {
+                                    <small class="text-muted">Base year changed — save settings to recalculate the @SelectedYear target.</small>
+                                }
+                                else if (!BaseYearHasData || BaseYearEmissionsTon <= 0m)
+                                {
+                                    <small class="text-muted">Base year @Model.BaseYear has no activity data — annual target cannot be calculated.</small>
+                                }
+                                else
+                                {
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="small text-muted">Base Year Emissions:</span>
+                                        <span class="fw-bold small text-dark">@BaseYearEmissionsTon.ToString("N2") tCO₂e</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="small text-muted">Annual Target Cap:</span>
+                                        <span class="fw-bold small text-dark">@AnnualTargetTon.ToString("N2") tCO₂e (-@RequiredReductionPercent.ToString("F1")%)</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="small text-muted">Actual @SelectedYear:</span>
+                                        <span class="fw-bold small text-dark">@ActualEmissionsTon.ToString("N2") tCO₂e</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="small text-muted">Cap Used:</span>
+                                        <span class="fw-bold small @CapUsedCss">@CapUsedPercent.ToString("F1")%</span>
+                                    </div>
+                                }
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="small text-muted">Email Alerts:</span>
+                                <span class="fw-bold small @(Model.EnableAlert ? "text-success" : "text-muted")">
+                                    @(Model.EnableAlert ? $"On ({Model.AlertThresholdPercent:F1}%)" : "Off")
+                                </span>
+                            </div>
+                        </RadzenCard>
+                    </div>
+                </div>
+                </div>
+            </RadzenTabsItem>
+
+            <!-- TAB 2: OFFSETS & RECS -->
+            <RadzenTabsItem Text="Offsets & RECs" Icon="energy_savings_leaf">
+                @* [2026-09-26][Claude] ความสูงคงที่ทุกแท็บ (inline ไม่พึ่ง CSS class ภายในของ Radzen) *@
+                <div style="height: 300px; overflow-y: auto; overflow-x: hidden;">
+                <div class="row g-4 pt-2">
+                    <div class="col-md-6">
+                        <RadzenLabel Text="Carbon Offsets & RECs (tCO₂e):" Class="fw-semibold small d-block mb-1" />
+                        <RadzenNumeric TValue="decimal" @bind-Value="@Model.CarbonOffsets" Min="0" Max="10000000" Step="10" Format="0.00" Style="width: 100%;" />
+                    </div>
+                    <div class="col-md-6">
+                        <small class="text-muted d-block pt-md-4">Certified T-VER, carbon credits, or RECs retired in this reporting period for Net Footprint.</small>
+                    </div>
+                </div>
+                </div>
+            </RadzenTabsItem>
+
+            <!-- TAB 3: EMAIL ALERTS -->
+            <RadzenTabsItem Text="Email Alerts" Icon="notifications">
+                @* [2026-09-26][Claude] ความสูงคงที่ทุกแท็บ (inline ไม่พึ่ง CSS class ภายในของ Radzen) *@
+                <div style="height: 300px; overflow-y: auto; overflow-x: hidden;">
+                <div class="row g-4 pt-2">
+                    <!-- Alert settings -->
+                    <div class="col-md-7">
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <div>
+                                <span class="fw-bold small text-dark d-block">Automated GHG Target Email Alerts</span>
+                                <small class="text-muted">Notify team when annual cumulative emissions approach the reduction target ceiling</small>
+                            </div>
+                            <RadzenSwitch @bind-Value="@Model.EnableAlert" />
+                        </div>
+
+                        @if (Model.EnableAlert)
+                        {
+                            <div class="row g-3">
+                                <div class="col-sm-5">
+                                    <RadzenLabel Text="Alert Threshold (%):" Class="fw-semibold small d-block mb-1" />
+                                    <RadzenNumeric TValue="decimal" @bind-Value="@Model.AlertThresholdPercent" Min="50" Max="100" Step="5" Format="0.0" Style="width: 100%;" />
+                                    <small class="text-muted">% of annual target cap (Default: 80.0%)</small>
+                                </div>
+                                <div class="col-sm-7">
+                                    <RadzenLabel Text="Additional Recipients (Optional):" Class="fw-semibold small d-block mb-1" />
+                                    <RadzenTextBox @bind-Value="@Model.AlertEmails" Placeholder="e.g. esg@company.com, manager@company.com" Style="width: 100%;" />
+                                    <small class="text-muted">Comma-separated. Subscription Owner and all members always receive alerts.</small>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="p-3 bg-light rounded-3 border small text-muted">Email alerts are turned off.</div>
+                        }
+                    </div>
+
+                    <!-- Alert actions -->
+                    <div class="col-md-5">
+                        <RadzenCard Class="bg-light border rounded-3 p-3 h-100">
+                            <span class="small fw-semibold text-dark d-block mb-1">Test Email Delivery</span>
+                            <div class="d-flex gap-2 mb-3">
+                                <RadzenTextBox @bind-Value="@_testEmail" Placeholder="Recipient email..." Style="flex-grow: 1;" />
+                                <RadzenButton Text="Send Test" Icon="send" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                                              Size="ButtonSize.Small" IsBusy="@_isSendingTest" Click="@SendTestEmailAsync" Style="border-radius: 6px;" />
+                            </div>
+                            <div class="border-top pt-2">
+                                <span class="small fw-semibold text-dark d-block">Notify All Subscription Members</span>
+                                <small class="text-muted d-block mb-2">Immediately dispatches trajectory alert email to all members</small>
+                                <RadzenButton Text="Notify Members Now" Icon="mark_email_read" ButtonStyle="ButtonStyle.Warning" Variant="Variant.Outlined"
+                                              Size="ButtonSize.Small" IsBusy="@_isSendingAllMembers" Click="@SendAlertToAllMembersAsync" Style="border-radius: 6px;" />
+                            </div>
+                        </RadzenCard>
+                    </div>
+                </div>
+                </div>
+            </RadzenTabsItem>
+        </Tabs>
+    </RadzenTabs>
+
+    <!-- BUTTON ACTIONS -->
+    <div class="d-flex justify-content-end align-items-center gap-2 mt-3 pt-3 border-top">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@OnCancel" Style="border-radius: 6px;" />
+        <RadzenButton Text="Save Settings" ButtonStyle="ButtonStyle.Success" Icon="check" Click="@OnSave" Style="border-radius: 6px;" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public NetZeroSettingDialog.NetZeroSettingModel Model { get; set; } = new NetZeroSettingDialog.NetZeroSettingModel();
+
+    [Parameter]
+    public List<int> YearOptions { get; set; } = new List<int> { 2026, 2025, 2024, 2023, 2022 };
+
+    [Parameter]
+    public int SubscriptionId { get; set; }
+
+    [Parameter]
+    public int? CorporateId { get; set; }
+
+    // [2026-09-26][Claude] ข้อมูลปีที่เลือกบน Dashboard สำหรับแสดงเป้ารายปี
+    [Parameter] public int SelectedYear { get; set; }
+    [Parameter] public int LoadedBaseYear { get; set; }
+    [Parameter] public bool BaseYearHasData { get; set; }
+    [Parameter] public decimal BaseYearEmissionsTon { get; set; }
+    [Parameter] public decimal ActualEmissionsTon { get; set; }
+
+    // [2026-09-26][Claude] สัดส่วนเป้าของปีที่เลือก = 1 - (% ลด × ความคืบหน้าจากปีฐานถึงปีเป้าหมาย) — สูตรเดียวกับเส้นเป้าหมายรายเดือน
+    private decimal TargetRatio
+    {
+        get
+        {
+            decimal elapsed = Math.Max(0, SelectedYear - Model.BaseYear);
+            decimal total = Math.Max(1, Model.TargetYear - Model.BaseYear);
+            return 1.0m - (Model.TargetReductionPercent / 100.0m) * Math.Min(1.0m, elapsed / total);
+        }
+    }
+    private decimal AnnualTargetTon => BaseYearEmissionsTon * TargetRatio;
+    private decimal RequiredReductionPercent => (1.0m - TargetRatio) * 100m;
+    private decimal CapUsedPercent => AnnualTargetTon > 0m ? ActualEmissionsTon / AnnualTargetTon * 100m : 0m;
+    private string CapUsedCss => CapUsedPercent > 100m ? "text-danger" : (CapUsedPercent > Model.AlertThresholdPercent ? "text-warning" : "text-success");
+
+    private int _selectedTab = 0;
+    private string _testEmail = string.Empty;
+    private bool _isSendingTest = false;
+    private bool _isSendingAllMembers = false;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(Model.AlertEmails))
+        {
+            var firstEmail = Model.AlertEmails.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(firstEmail))
+            {
+                _testEmail = firstEmail;
+            }
+        }
+    }
+
+    private async Task SendTestEmailAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_testEmail) || !_testEmail.Contains('@'))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Invalid Email", "Please enter a valid email address for testing.");
+            return;
+        }
+
+        try
+        {
+            _isSendingTest = true;
+            await AlertService.SendTestAlertAsync(SubscriptionId, CorporateId, _testEmail.Trim());
+            NotificationService.Notify(NotificationSeverity.Success, "Test Email Sent", $"GHG target test alert email was sent to {_testEmail}.");
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Delivery Failed", ex.Message);
+        }
+        finally
+        {
+            _isSendingTest = false;
+        }
+    }
+
+    private async Task SendAlertToAllMembersAsync()
+    {
+        if (SubscriptionId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Subscription Required", "Valid subscription ID is required to notify members.");
+            return;
+        }
+
+        try
+        {
+            _isSendingAllMembers = true;
+            var (success, count, message) = await AlertService.NotifyAllSubscriptionMembersAsync(SubscriptionId, CorporateId);
+            if (success)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Alerts Sent", message);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Notice", message);
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Delivery Failed", ex.Message);
+        }
+        finally
+        {
+            _isSendingAllMembers = false;
+        }
+    }
+
+    private void OnSave()
+    {
+        DialogService.Close(Model);
+    }
+
+    private void OnCancel()
+    {
+        DialogService.Close(null);
+    }
+}

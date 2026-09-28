@@ -1,0 +1,66 @@
+@* [2026-09-26][Claude] Net-Zero (SBTi) — ประมาณการส่วนที่เหลือที่ต้องหักล้างด้วยเครดิตแบบดูดกลับ (removal) ในปีเป้าหมาย
+   และส่วนที่คาดว่าจะเกินเป้า (ต้องลดเพิ่ม ใช้เครดิตแทนไม่ได้) *@
+@using TU.ACAMP.WebApp.Services.Dashboard
+
+<RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100">
+    <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+        <h6 class="fw-bold text-dark m-0">Net-Zero: Residual Emissions &amp; Removal Credits</h6>
+        @if (Data.IsSbtiLongTermAligned)
+        {
+            <RadzenBadge Text="@($"≥{NetZeroDashboardResult.SbtiMinLongTermReductionPercent:0}% reduction")" BadgeStyle="BadgeStyle.Success" />
+        }
+        else
+        {
+            <RadzenBadge Text="@($"Below {NetZeroDashboardResult.SbtiMinLongTermReductionPercent:0}% reduction")" BadgeStyle="BadgeStyle.Warning" />
+        }
+    </div>
+    <span class="small text-muted d-block mb-3">
+        Under SBTi, credits cannot count toward reduction targets. Only residual emissions at the net-zero year are neutralized, with carbon removal credits.
+    </span>
+
+    @if (!Data.BaseYearHasData || !Data.ResidualRemovalsTon.HasValue)
+    {
+        <div class="text-center text-muted py-4 small">Base year @Data.BaseYear has no activity data — cannot estimate.</div>
+    }
+    else
+    {
+        @if (!Data.IsSbtiLongTermAligned)
+        {
+            <div class="alert alert-warning py-2 small mb-3">
+                Target reduction is @Data.TargetReductionPercent.ToString("F1")% by @Data.TargetYear. SBTi long-term net-zero requires at least
+                @NetZeroDashboardResult.SbtiMinLongTermReductionPercent.ToString("0")% — residual below is based on the current setting.
+            </div>
+        }
+        <div class="d-flex justify-content-between small py-1 border-bottom">
+            <span class="text-muted">Net-Zero Year</span><strong>@Data.TargetYear</strong>
+        </div>
+        <div class="d-flex justify-content-between small py-1 border-bottom">
+            <span class="text-muted">Allowed Residual (target level)</span><strong>@(Data.TargetYearTon?.ToString("N2")) tCO₂e</strong>
+        </div>
+        <div class="d-flex justify-content-between small py-1 border-bottom">
+            <span class="text-muted">Projected Emissions @Data.TargetYear</span>
+            <strong>@(Data.ProjectedTargetYearTon.HasValue ? $"{Data.ProjectedTargetYearTon.Value:N2} tCO₂e" : "N/A")</strong>
+        </div>
+        <div class="d-flex justify-content-between small py-1 border-bottom">
+            <span class="text-muted">Removal Credits Needed from @Data.TargetYear</span>
+            <strong class="text-primary">@Data.ResidualRemovalsTon.Value.ToString("N2") tCO₂e / year</strong>
+        </div>
+        <div class="d-flex justify-content-between small py-1 border-bottom">
+            <span class="text-muted">Additional Reduction Required (not creditable)</span>
+            <strong class="@((Data.AdditionalReductionGapTon ?? 0m) > 0m ? "text-danger" : "text-success")">
+                @(Data.AdditionalReductionGapTon.HasValue ? $"{Data.AdditionalReductionGapTon.Value:N2} tCO₂e" : "N/A")
+            </strong>
+        </div>
+        <div class="d-flex justify-content-between small py-1">
+            <span class="text-muted">First Year Projected Above Target</span>
+            <strong class="@(Data.FirstYearAboveTarget.HasValue ? "text-danger" : "text-success")">
+                @(Data.FirstYearAboveTarget?.ToString() ?? (Data.ProjectionSeries.Any() ? "None (on track)" : "N/A"))
+            </strong>
+        </div>
+        <small class="text-muted d-block mt-2">Estimates from a linear trend of complete years. Verify eligibility rules against the current SBTi Corporate Net-Zero Standard.</small>
+    }
+</RadzenCard>
+
+@code {
+    [Parameter, EditorRequired] public NetZeroDashboardResult Data { get; set; } = new();
+}

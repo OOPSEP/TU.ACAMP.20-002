@@ -1,0 +1,135 @@
+@using TU.ACAMP.WebApp.Services.Reports
+@inject CfoReportService CfoReportService
+
+@* [2026-09-15][Antigravity] View Mode Widget: Locked Report Snapshot card with SHA-256 integrity hash *@
+
+@if (Doc == null)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false">
+        Report snapshot not found. It may have been deleted from the ledger.
+    </RadzenAlert>
+}
+else
+{
+    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-3 border-start border-4 border-success">
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Report Title</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@Doc.Title</RadzenText>
+            </div>
+            <div class="col-12 col-md-6">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Organization</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@Doc.OrganizationTitle</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Calculate Year</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold text-primary mb-0">@Doc.CalculateYear</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Base Year</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@(Doc.BaseYear > 0 ? Doc.BaseYear.ToString() : "-")</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Created By</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@Doc.CreatedBy</RadzenText>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Created At</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@Doc.CreatedAt.ToString("dd MMM yyyy HH:mm")</RadzenText>
+            </div>
+            @if (Doc.InScopeChildTitles != null && Doc.InScopeChildTitles.Any())
+            {
+                <div class="col-12">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-1">In-Scope Boundary Entities</RadzenText>
+                    <div class="d-flex flex-wrap gap-1">
+                        @foreach (var title in Doc.InScopeChildTitles)
+                        {
+                            <RadzenBadge BadgeStyle="BadgeStyle.Info" IsPill="true" Text="@title" Class="px-2" />
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </RadzenCard>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-danger">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Gross Emissions</RadzenText>
+                <span class="fs-4 fw-bold text-danger">@((Doc.CalculateYearReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</span>
+                <span class="text-secondary small ms-1">tCO₂e</span>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-warning">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 1 (Direct)</RadzenText>
+                <span class="fs-4 fw-bold text-dark">@((Doc.CalculateYearReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</span>
+                <span class="text-secondary small ms-1">tCO₂e</span>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-primary">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 2 (Energy)</RadzenText>
+                <span class="fs-4 fw-bold text-primary">@((Doc.CalculateYearReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</span>
+                <span class="text-secondary small ms-1">tCO₂e</span>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-info">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 3 (Value Chain)</RadzenText>
+                <span class="fs-4 fw-bold text-info">@((Doc.CalculateYearReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</span>
+                <span class="text-secondary small ms-1">tCO₂e</span>
+            </RadzenCard>
+        </div>
+    </div>
+
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Class="mb-3">
+        @* [2026-09-24][Claude] ตัด Create Revision (BOSS สั่ง) — แก้รายงานไม่ได้ ให้สร้างรายงานใหม่จากหน้า Ledger เท่านั้น *@
+        This snapshot is locked for audit integrity and cannot be edited. To produce an updated report, create a new report from the ledger; this report stays unchanged.
+    </RadzenAlert>
+
+    @if (Doc != null)
+    {
+        <div class="mb-3">
+            <CfoFr032SignificanceWidget Categories="@GetFr032CategoriesForView(Doc)"
+                                        MaterialityThreshold="@(Doc.CalculateYearReport?.MaterialityThreshold ?? 5.0m)"
+                                        OrganizationTitle="@Doc.OrganizationTitle"
+                                        ReadOnly="true" />
+        </div>
+    }
+
+    <div class="d-flex justify-content-end gap-2">
+        <RadzenButton Text="Back to Ledger" Icon="list" ButtonStyle="ButtonStyle.Light" Variant="Variant.Outlined"
+                      Click="@OnBack" Style="border-radius: 6px;" />
+    </div>
+}
+
+@code {
+    // [2026-09-15][Antigravity] Parameters for Locked Snapshot View Widget
+    [Parameter] public CfoReportDocument? Doc { get; set; }
+    [Parameter] public EventCallback OnBack { get; set; }
+
+    // [2026-09-25][Gemini] ดึงหรือเตรียมข้อมูล Fr-03.2 Categories สำหรับแสดงในโหมด View Snapshot
+    private List<CfoReportService.CfoFr032CategoryDto> GetFr032CategoriesForView(CfoReportDocument doc)
+    {
+        if (doc.Fr032Categories != null && doc.Fr032Categories.Count > 0)
+            return doc.Fr032Categories;
+
+        var categories = CfoReportService.Fr032Rubric.CreateDefaultCategories();
+        if (doc.Scope3CheckedCategories != null && doc.Scope3CheckedCategories.Count > 0)
+        {
+            foreach (var cat in categories)
+            {
+                if (doc.Scope3CheckedCategories.Contains(cat.CategoryNo))
+                    cat.HasSource = true;
+            }
+        }
+        if (doc.CalculateYearReport != null)
+        {
+            var magnitudes = CfoReportService.GetFr032MagnitudePercents(doc.CalculateYearReport);
+            CfoReportService.Fr032Rubric.ApplyAutoSource(categories, magnitudes);
+            CfoReportService.Fr032Rubric.ApplyAutoScores(categories, doc.CalculateYearReport.MaterialityThreshold);
+        }
+        return categories;
+    }
+}

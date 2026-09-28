@@ -1,0 +1,1051 @@
+ 
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Components.Pages.Reports.Widgets
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Services.Reports
+
+@attribute [Authorize]
+
+@inject CfoReportService CfoReportService
+@inject CfoReportStorageService ReportStorageService
+@inject CorporateService CorporateService
+@inject CompanyService CompanyService
+@inject FacilityService FacilityService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<AddEditCfoReport2> Logger
+
+<PageTitle>@(_isViewMode ? "View CFO Report v2" : "New CFO Report v2") - ACAMP</PageTitle>
+
+<style>
+    /* [2026-09-15][Antigravity] Disable pointer clicks on step header items so navigation occurs strictly via Next/Back */
+    .cfo-wizard-steps .rz-steps-items {
+        pointer-events: none !important;
+    }
+</style>
+
+<div class="container-fluid py-3 px-4">
+
+    <!-- ===================== TOP HEADER ===================== -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToBack" Class="me-2" Style="border-radius: 6px;"
+                              Title="Back to Report Ledger" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isViewMode ? "View Verification Report (v2)" : "New Verification Report (v2)")
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    Modular TGO CFO (AR5) report test — testing CfoSetupWidget.
+                </RadzenText>
+                <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="TCFO_R_01 v07 (AR5)" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                <RadzenBadge BadgeStyle="BadgeStyle.Primary" Text="Widget Test: Setup" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                @if (_isViewMode && _loadedDoc != null)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="Locked Snapshot" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                }
+            </div>
+        </div>
+
+        @if (_isViewMode && _loadedDoc != null)
+        {
+            <div class="d-flex gap-2">
+                <RadzenButton Text="Back to Ledger" Icon="list" ButtonStyle="ButtonStyle.Light" Variant="Variant.Outlined"
+                              Click="@NavigateToBack" Style="border-radius: 6px;" />
+                <RadzenButton Text="Create Revision" Icon="content_copy" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                              Click="@NavigateToRevision" Style="border-radius: 6px; font-weight: 600;" />
+            </div>
+        }
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading report form..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_isViewMode)
+    {
+        <!-- ===================== VIEW MODE (LOCKED SNAPSHOT WIDGET) ===================== -->
+        <CfoSnapshotViewWidget Doc="@_loadedDoc" OnBack="@NavigateToBack" />
+    }
+    else
+    {
+        <!-- ===================== ISOLATED WIDGET TEST: CFO SETUP WIDGET ===================== -->
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" Size="AlertSize.Small" Class="mb-3">
+                @_errorMessage
+            </RadzenAlert>
+        }
+
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-3">
+            <CfoSetupWidget Level="@_level" LevelChanged="@OnLevelChangedAsync"
+                            TargetId="@_targetId" TargetIdChanged="@OnTargetChanged"
+                            Title="@_title" TitleChanged="@((string val) => _title = val)"
+                            CreatedBy="@_createdBy" CreatedByChanged="@((string val) => _createdBy = val)"
+                            SelectedCalculateYear="@_selectedCalculateYear"
+                            SelectedCalculateYearChanged="@OnCalculateYearChanged"
+                            SelectedBaseYear="@_selectedBaseYear"
+                            SelectedBaseYearChanged="@OnBaseYearChanged"
+                            ConsolidationApproach="@_consolidationApproach"
+                            ConsolidationApproachChanged="@((string val) => _consolidationApproach = val)"
+                            MaterialityThreshold="@_materialityThreshold"
+                            MaterialityThresholdChanged="@((decimal val) => _materialityThreshold = val)"
+                            LevelOptions="@_levelOptions"
+                            TargetOptions="@_targetOptions"
+                            InScopeChildOptions="@_inScopeChildOptions"
+                            SelectedInScopeChildIds="@_selectedInScopeChildIds"
+                            SelectedInScopeChildIdsChanged="@OnInScopeChildIdsChanged"
+                            CalculateYearOptions="@_calculateYearOptions"
+                            BaseYearOptions="@_baseYearOptions"
+                            ConsolidationOptions="@_consolidationOptions" />
+        </RadzenCard>
+
+        <!-- ===================== WIDGET TEST ACTION BAR ===================== -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                          Click="@NavigateToBack" Disabled="@_isSaving" Style="border-radius: 6px;" />
+
+            <RadzenButton Text="@(_isSaving ? "Exporting AR5 Excel..." : "Export AR5 Excel Report")"
+                          Icon="@(_isSaving ? "" : "file_download")"
+                          ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                          Click="@GenerateSnapshotAsync" Disabled="@_isSaving" IsBusy="@_isSaving"
+                          Style="border-radius: 6px; font-weight: 600;" />
+        </div>
+    }
+</div>
+
+@code {
+    // [2026-09-15][Antigravity] AddEditCfoReport2: Version 2 featuring decoupled, reusable widgets per wizard step.
+    //                           State persistence via encrypted query param 'tab', silent replaceState, and multi-step validation
+
+    #region Route & Query Parameters
+    [Parameter] public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureTargetId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "level")]
+    public int LevelValue { get; set; } = 1;
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSubscriptionId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? SecureTab { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cy")]
+    public string? SecureCalculateYear { get; set; }
+
+    [SupplyParameterFromQuery(Name = "by")]
+    public string? SecureBaseYear { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+    #endregion
+
+    #region Constants & Fields
+    private const int LastStepIndex = 6; // 7 steps total: 0..6
+
+    private const int Fr04Scope1Capacity = 14;   // rows 10..23
+    private const int Fr04SeparateCapacity = 5;  // rows 25..29
+    private const int Fr04Scope2Capacity = 4;    // rows 31..34
+    private const int Fr04Scope3Capacity = 7;    // rows 36..42
+
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _isPreflighting = false;
+    private bool _isViewMode = false;
+    private int _activeStep = 0;
+    private string? _errorMessage;
+    private string? _returnUrl;
+
+    private eTopicLevel _level = eTopicLevel.Corporate;
+    private int _targetId = 0;
+    private int? _selectedSubscriptionId;
+    private HashSet<int> _allowedSubscriptionIds = new();
+
+    // Step 1: Setup fields
+    private string _title = string.Empty;
+    private string _createdBy = "Corporate GHG Team";
+    private int _selectedCalculateYear = 0;
+    private int _selectedBaseYear = 0;
+    private string _consolidationApproach = "Operational Control";
+    private decimal _materialityThreshold = 5.0m;
+    private string _acknowledgmentReason = string.Empty;
+
+    // Step 2: Fr-01 Overrides
+    private string _fr01OrgTitle = string.Empty;
+    private string _fr01GhgTeam = string.Empty;
+    private string _fr01CertifierOrg = string.Empty;
+    private string _fr01Scope1Summary = "-";
+    private string _fr01Scope2Summary = "-";
+    private string _fr01Scope3Summary = "-";
+
+    // Pre-flight & Verification Data
+    private CfoReportService.CfoAuditReportDto? _calcReport;
+    private CfoReportService.CfoAuditReportDto? _baseReport;
+    private MultiYearComparisonDto? _comparisonDto;
+    private List<CfoReportService.ActivityAuditLineDto> _expiredEfList = new();
+    private List<string> _calcOverflowWarnings = new();
+    private bool _hasEfSourceMismatch = false;
+
+    // Quota counts
+    private int _calcScope1Count = 0;
+    private int _calcSepCount = 0;
+    private int _calcScope2Count = 0;
+    private int _calcScope3Count = 0;
+
+    private int _baseScope1Count = 0;
+    private int _baseSepCount = 0;
+    private int _baseScope2Count = 0;
+    private int _baseScope3Count = 0;
+
+    private CfoReportDocument? _loadedDoc;
+
+    private List<CfoSetupWidget.OptionItemDto> _levelOptions = new();
+    private List<CfoSetupWidget.OptionItemDto> _targetOptions = new();
+    // [2026-09-16][Antigravity] In-Scope Organizational Boundary (Option 1)
+    private List<CfoSetupWidget.OptionItemDto> _inScopeChildOptions = new();
+    private IEnumerable<int> _selectedInScopeChildIds = Enumerable.Empty<int>();
+
+    private List<int> _calculateYearOptions = new();
+    private List<CfoSetupWidget.OptionItemDto> _baseYearOptions = new();
+    private List<string> _consolidationOptions = new() { "Operational Control", "Financial Control", "Equity Share" };
+    #endregion
+
+    #region Lifecycle
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var isAdmin = user.IsInRole(SystemRoles.Administrator);
+            var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                     ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                     ?? user.Identity?.Name;
+
+            if (!string.IsNullOrEmpty(email))
+            {
+                var userSubs = await SubscriptionService.GetSubscriptionsForUserAsync(email, isAdmin);
+                _allowedSubscriptionIds = userSubs.Select(s => s.Id).ToHashSet();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing user subscriptions for AddEditCfoReport2.");
+        }
+
+        BuildStaticOptions();
+        #endregion
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            _isLoading = true;
+            ResolveParameters();
+
+            _isViewMode = !string.IsNullOrWhiteSpace(SecureId);
+            if (_isViewMode)
+            {
+                await LoadSnapshotAsync();
+            }
+            else
+            {
+                await LoadTargetOptionsAsync();
+                if (string.IsNullOrWhiteSpace(_title))
+                {
+                    _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error preparing AddEditCfoReport2 page.");
+            _errorMessage = "Failed to load report parameters.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void ResolveParameters()
+    {
+        #region hide [2026-09-15]
+        _level = LevelValue switch
+        {
+            2 => eTopicLevel.Company,
+            3 => eTopicLevel.Facility,
+            _ => eTopicLevel.Corporate
+        };
+
+        var decryptedTarget = DataProtection.UnprotectInt(SecureTargetId);
+        if (decryptedTarget.HasValue && decryptedTarget.Value > 0) _targetId = decryptedTarget.Value;
+
+        var decryptedSid = DataProtection.UnprotectInt(SecureSubscriptionId);
+        if (decryptedSid.HasValue && decryptedSid.Value > 0) _selectedSubscriptionId = decryptedSid.Value;
+
+        var decryptedTab = DataProtection.UnprotectInt(SecureTab);
+        if (decryptedTab.HasValue && decryptedTab.Value >= 0 && decryptedTab.Value <= LastStepIndex)
+        {
+            _activeStep = decryptedTab.Value;
+        }
+
+        var decryptedCy = DataProtection.UnprotectInt(SecureCalculateYear);
+        if (decryptedCy.HasValue && decryptedCy.Value > 0) _selectedCalculateYear = decryptedCy.Value;
+
+        var decryptedBy = DataProtection.UnprotectInt(SecureBaseYear);
+        if (decryptedBy.HasValue && decryptedBy.Value >= 0) _selectedBaseYear = decryptedBy.Value;
+
+        var decryptedRet = DataProtection.Unprotect(SecureRet);
+        if (!string.IsNullOrWhiteSpace(decryptedRet)) _returnUrl = decryptedRet;
+        #endregion
+    }
+    #endregion
+
+    #region Data Loading & Calculations
+    private void BuildStaticOptions()
+    {
+        #region hide [2026-09-15]
+        _levelOptions = new List<CfoSetupWidget.OptionItemDto>
+        {
+            new CfoSetupWidget.OptionItemDto { Value = 1, Text = "Corporate" },
+            new CfoSetupWidget.OptionItemDto { Value = 2, Text = "Company" },
+            new CfoSetupWidget.OptionItemDto { Value = 3, Text = "Facility" }
+        };
+
+        int currentYear = AppTimeZone.LocalNow.Year;
+        // [2026-09-16][Antigravity] CalculateYearOptions is populated dynamically from actual activity data
+        _calculateYearOptions = new List<int>();
+
+        _baseYearOptions = new List<CfoSetupWidget.OptionItemDto>
+        {
+            new CfoSetupWidget.OptionItemDto { Value = 0, Text = "(None / Standalone Year)" }
+        };
+        _baseYearOptions.AddRange(Enumerable.Range(currentYear - 10, 11).Reverse()
+            .Select(y => new CfoSetupWidget.OptionItemDto { Value = y, Text = $"Base Year {y}" }));
+        #endregion
+    }
+
+    private async Task LoadTargetOptionsAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            _targetOptions = new List<CfoSetupWidget.OptionItemDto>();
+
+            if (_level == eTopicLevel.Corporate)
+            {
+                var corporates = await CorporateService.GetBySubscriptionIdAsync(_selectedSubscriptionId);
+                _targetOptions = corporates
+                    .Select(c => new CfoSetupWidget.OptionItemDto { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else if (_level == eTopicLevel.Company)
+            {
+                var companies = await CompanyService.GetByCorporateIdsAsync(null, _selectedSubscriptionId);
+                _targetOptions = companies
+                    .Select(c => new CfoSetupWidget.OptionItemDto { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else
+            {
+                var facilities = await FacilityService.GetByContextAsync(_selectedSubscriptionId);
+                _targetOptions = facilities
+                    .Select(f => new CfoSetupWidget.OptionItemDto { Value = f.Id, Text = string.IsNullOrWhiteSpace(f.Code) ? f.Title : $"{f.Code} — {f.Title}" })
+                    .ToList();
+            }
+
+            if (_targetId == 0 || !_targetOptions.Any(o => o.Value == _targetId))
+            {
+                _targetId = _targetOptions.FirstOrDefault()?.Value ?? 0;
+            }
+
+            // [2026-09-16][Antigravity] Load in-scope subsidiary/facility child entities
+            await LoadInScopeChildOptionsAsync();
+
+            // [2026-09-16][Antigravity] Load calculate year options from actual activity data
+            await LoadCalculateYearOptionsAsync();
+
+            // Sync Fr-01 title default
+            if (string.IsNullOrWhiteSpace(_fr01OrgTitle))
+            {
+                _fr01OrgTitle = GetSelectedTargetTitle();
+            }
+            if (string.IsNullOrWhiteSpace(_fr01GhgTeam))
+            {
+                _fr01GhgTeam = $"{_level} GHG Team";
+            }
+            if (string.IsNullOrWhiteSpace(_fr01CertifierOrg))
+            {
+                _fr01CertifierOrg = _fr01OrgTitle;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading target organization options.");
+            _errorMessage = "Failed to load target organization list.";
+        }
+        #endregion
+    }
+
+    private async Task LoadInScopeChildOptionsAsync()
+    {
+        #region hide [2026-09-16]
+        try
+        {
+            _inScopeChildOptions = new List<CfoSetupWidget.OptionItemDto>();
+
+            if (_level == eTopicLevel.Corporate && _targetId > 0)
+            {
+                var companies = await CompanyService.GetByCorporateIdAsync(_targetId, _selectedSubscriptionId);
+                _inScopeChildOptions = companies
+                    .Select(c => new CfoSetupWidget.OptionItemDto { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else if (_level == eTopicLevel.Company && _targetId > 0)
+            {
+                var facilities = await FacilityService.GetByContextAsync(_selectedSubscriptionId, companyId: _targetId);
+                _inScopeChildOptions = facilities
+                    .Select(f => new CfoSetupWidget.OptionItemDto { Value = f.Id, Text = string.IsNullOrWhiteSpace(f.Code) ? f.Title : $"{f.Code} — {f.Title}" })
+                    .ToList();
+            }
+
+            // Default to all child entities included in scope
+            _selectedInScopeChildIds = _inScopeChildOptions.Select(o => o.Value).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading in-scope child organization options.");
+        }
+        #endregion
+    }
+
+    private async Task OnInScopeChildIdsChanged(IEnumerable<int> selectedIds)
+    {
+        #region hide [2026-09-16]
+        _selectedInScopeChildIds = selectedIds?.ToList() ?? new List<int>();
+        ResetDownstreamData();
+        // [2026-09-16][Antigravity] Reload calculate year options for updated in-scope entities
+        await LoadCalculateYearOptionsAsync();
+        #endregion
+    }
+
+    private async Task LoadCalculateYearOptionsAsync()
+    {
+        #region hide [2026-09-16]
+        try
+        {
+            if (_targetId > 0)
+            {
+                var inScopeList = _selectedInScopeChildIds?.ToList();
+                _calculateYearOptions = await CfoReportService.GetAvailableCalculateYearsAsync(
+                    _level,
+                    _targetId,
+                    _allowedSubscriptionIds,
+                    inScopeList);
+            }
+            else
+            {
+                _calculateYearOptions = new List<int>();
+            }
+
+            if (_calculateYearOptions.Any())
+            {
+                if (!_calculateYearOptions.Contains(_selectedCalculateYear))
+                {
+                    _selectedCalculateYear = _calculateYearOptions.First();
+                }
+            }
+            else
+            {
+                _selectedCalculateYear = 0;
+            }
+
+            if (_title.StartsWith("GHG Emissions Report Year", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(_title))
+            {
+                _title = _selectedCalculateYear > 0
+                    ? $"GHG Emissions Report Year {_selectedCalculateYear}"
+                    : "GHG Emissions Report";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading calculate year options from activity data.");
+            _calculateYearOptions = new List<int>();
+        }
+        #endregion
+    }
+
+    private async Task LoadSnapshotAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var reportKey = DataProtection.Unprotect(SecureId);
+            if (string.IsNullOrWhiteSpace(reportKey)) return;
+
+            _loadedDoc = await ReportStorageService.GetReportAsync(reportKey, _level, _targetId);
+            if (_loadedDoc != null)
+            {
+                _title = _loadedDoc.Title;
+                _createdBy = _loadedDoc.CreatedBy;
+                _selectedCalculateYear = _loadedDoc.CalculateYear;
+                _selectedBaseYear = _loadedDoc.BaseYear;
+                _calcReport = _loadedDoc.CalculateYearReport;
+                _baseReport = _loadedDoc.BaseYearReport;
+                _comparisonDto = _loadedDoc.Comparison;
+
+                _fr01OrgTitle = _loadedDoc.OrganizationTitle;
+                _fr01GhgTeam = _loadedDoc.GhgTeamName;
+                _fr01CertifierOrg = _loadedDoc.CertifierOrgTitle;
+
+                PopulateQuotaCounts();
+                RecalculateFr01Summaries();
+                CheckEfIntegrity();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading report snapshot for view mode.");
+            _errorMessage = "Failed to load locked report snapshot.";
+        }
+        #endregion
+    }
+
+    private async Task RunPreflightAsync()
+    {
+        #region hide [2026-09-15]
+        if (_targetId <= 0) return;
+
+        try
+        {
+            _isPreflighting = true;
+            _errorMessage = null;
+
+            var inScopeIds = _selectedInScopeChildIds?.ToList();
+
+            _calcReport = await CfoReportService.GenerateReportAsync(
+                _level, _targetId, _selectedCalculateYear, _allowedSubscriptionIds, _materialityThreshold, _acknowledgmentReason, inScopeIds);
+
+            if (_selectedBaseYear > 0)
+            {
+                _baseReport = await CfoReportService.GenerateReportAsync(
+                    _level, _targetId, _selectedBaseYear, _allowedSubscriptionIds, _materialityThreshold, null, inScopeIds);
+            }
+            else
+            {
+                _baseReport = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(_fr01OrgTitle)) _fr01OrgTitle = _calcReport.OrganizationTitle;
+            if (string.IsNullOrWhiteSpace(_fr01GhgTeam)) _fr01GhgTeam = $"{_level} GHG Team";
+            if (string.IsNullOrWhiteSpace(_fr01CertifierOrg)) _fr01CertifierOrg = _fr01OrgTitle;
+
+            PopulateQuotaCounts();
+            RecalculateFr01Summaries();
+            BuildMultiYearComparison();
+            CheckEfIntegrity();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error running CFO report pre-flight.");
+            _errorMessage = $"Pre-flight failed: {ex.Message}";
+        }
+        finally
+        {
+            _isPreflighting = false;
+        }
+        #endregion
+    }
+
+    private void PopulateQuotaCounts()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport != null)
+        {
+            _calcScope1Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope1);
+            _calcSepCount = _calcReport.AuditLines.Count(l => (int)l.ScopeNo == 4);
+            _calcScope2Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope2);
+            _calcScope3Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope3);
+
+            _calcOverflowWarnings = new List<string>();
+            void Check(string label, int count, int cap)
+            {
+                if (count > cap)
+                {
+                    _calcOverflowWarnings.Add($"{label}: {count} items exceed template quota ({cap} rows). The extra {count - cap + 1} items will be consolidated into row {cap} in Fr-04.1.");
+                }
+            }
+            Check("Scope 1", _calcScope1Count, Fr04Scope1Capacity);
+            Check("Separate report (Biogenic)", _calcSepCount, Fr04SeparateCapacity);
+            Check("Scope 2", _calcScope2Count, Fr04Scope2Capacity);
+            Check("Scope 3", _calcScope3Count, Fr04Scope3Capacity);
+        }
+
+        if (_baseReport != null)
+        {
+            _baseScope1Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope1);
+            _baseSepCount = _baseReport.AuditLines.Count(l => (int)l.ScopeNo == 4);
+            _baseScope2Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope2);
+            _baseScope3Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope3);
+        }
+        #endregion
+    }
+
+    private void RecalculateFr01Summaries()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport == null) return;
+
+        // [2026-09-16][Antigravity] Format Scope summaries with TGO Category (Option A) sorted ascending by code
+        string BuildSummary(eTgoScopeNo scope)
+        {
+            var grp = _calcReport.Scopes.FirstOrDefault(s => s.ScopeNo == scope);
+            if (grp == null || !grp.ActivityGroups.Any()) return "-";
+            var titles = grp.ActivityGroups
+                .OrderBy(ag => CfoReportService.GetSortableCodeKey(ag.Code))
+                .Select(ag => CfoReportService.FormatTgoCategory(ag.Code, ag.Title, scope))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+            return titles.Any() ? string.Join(Environment.NewLine, titles) : "-";
+        }
+
+        _fr01Scope1Summary = BuildSummary(eTgoScopeNo.Scope1);
+        _fr01Scope2Summary = BuildSummary(eTgoScopeNo.Scope2);
+        _fr01Scope3Summary = BuildSummary(eTgoScopeNo.Scope3);
+        #endregion
+    }
+
+    private void BuildMultiYearComparison()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport != null && _baseReport != null && _baseReport.TotalGrossEmissions_tCO2e > 0)
+        {
+            var baseGross = _baseReport.TotalGrossEmissions_tCO2e;
+            var calcGross = _calcReport.TotalGrossEmissions_tCO2e;
+            var grossDelta = calcGross - baseGross;
+
+            var baseS1 = _baseReport.TotalScope1_tCO2e;
+            var calcS1 = _calcReport.TotalScope1_tCO2e;
+            var s1Delta = calcS1 - baseS1;
+
+            var baseS2 = _baseReport.TotalScope2_tCO2e;
+            var calcS2 = _calcReport.TotalScope2_tCO2e;
+            var s2Delta = calcS2 - baseS2;
+
+            var baseS3 = _baseReport.TotalScope3_tCO2e;
+            var calcS3 = _calcReport.TotalScope3_tCO2e;
+            var s3Delta = calcS3 - baseS3;
+
+            var baseSep = _baseReport.TotalSeparate_tCO2e;
+            var calcSep = _calcReport.TotalSeparate_tCO2e;
+            var sepDelta = calcSep - baseSep;
+
+            _comparisonDto = new MultiYearComparisonDto
+            {
+                Scope1Delta_tCO2e = s1Delta,
+                Scope1PercentChange = baseS1 > 0 ? (s1Delta * 100m / baseS1) : 0m,
+                Scope2Delta_tCO2e = s2Delta,
+                Scope2PercentChange = baseS2 > 0 ? (s2Delta * 100m / baseS2) : 0m,
+                Scope3Delta_tCO2e = s3Delta,
+                Scope3PercentChange = baseS3 > 0 ? (s3Delta * 100m / baseS3) : 0m,
+                GrossDelta_tCO2e = grossDelta,
+                GrossPercentChange = baseGross > 0 ? (grossDelta * 100m / baseGross) : 0m,
+                SeparateDelta_tCO2e = sepDelta,
+                SeparatePercentChange = baseSep > 0 ? (sepDelta * 100m / baseSep) : 0m
+            };
+        }
+        else
+        {
+            _comparisonDto = null;
+        }
+        #endregion
+    }
+
+    private void CheckEfIntegrity()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport == null) return;
+
+        _expiredEfList = _calcReport.AuditLines
+            .Where(l => l.EfValidityStatus == "Expired")
+            .ToList();
+
+        if (_baseReport != null && _baseReport.AuditLines.Any())
+        {
+            var calcSources = _calcReport.AuditLines.Select(l => l.SourceId).Where(id => id > 0).ToHashSet();
+            var baseSources = _baseReport.AuditLines.Select(l => l.SourceId).Where(id => id > 0).ToHashSet();
+            _hasEfSourceMismatch = !calcSources.SetEquals(baseSources);
+        }
+        else
+        {
+            _hasEfSourceMismatch = false;
+        }
+        #endregion
+    }
+
+    private void ResetDownstreamData()
+    {
+        #region hide [2026-09-15]
+        _calcReport = null;
+        _baseReport = null;
+        _comparisonDto = null;
+        _expiredEfList = new();
+        _calcOverflowWarnings = new();
+        _hasEfSourceMismatch = false;
+        #endregion
+    }
+    #endregion
+
+    #region Wizard Navigation & Step Validation
+    private async Task GoNextStepAsync()
+    {
+        #region hide [2026-09-15]
+        if (!ValidateCurrentStep()) return;
+
+        _errorMessage = null;
+        _activeStep = Math.Min(_activeStep + 1, LastStepIndex);
+
+        // Auto-run pre-flight on reaching Step 3 (index 2)
+        if (_activeStep == 2 && _calcReport == null)
+        {
+            await RunPreflightAsync();
+        }
+
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private async Task GoPreviousStep()
+    {
+        #region hide [2026-09-15]
+        _errorMessage = null;
+        _activeStep = Math.Max(_activeStep - 1, 0);
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private bool ValidateCurrentStep()
+    {
+        #region hide [2026-09-15]
+        switch (_activeStep)
+        {
+            case 0: // Step 1: Setup
+                if (_targetId <= 0)
+                {
+                    _errorMessage = "Please select a target organization.";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_title))
+                {
+                    _errorMessage = "Please specify a report title.";
+                    return false;
+                }
+                if (!_calculateYearOptions.Any())
+                {
+                    _errorMessage = "No activity data found for the selected organization. Please log activity events first.";
+                    return false;
+                }
+                if (_selectedCalculateYear <= 0)
+                {
+                    _errorMessage = "Please select a calculate / reporting year.";
+                    return false;
+                }
+                if (_selectedBaseYear > 0 && _selectedBaseYear >= _selectedCalculateYear)
+                {
+                    _errorMessage = "The base year must be earlier than the calculate year.";
+                    return false;
+                }
+                return true;
+
+            case 1: // Step 2: Fr-01 Organization Details
+                if (string.IsNullOrWhiteSpace(_fr01OrgTitle))
+                {
+                    _errorMessage = "Please specify the organization name (Cell B6).";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_fr01GhgTeam))
+                {
+                    _errorMessage = "Please specify the GHG working team name (Cell G4).";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_fr01CertifierOrg))
+                {
+                    _errorMessage = "Please specify the organization for certification (Cell I32).";
+                    return false;
+                }
+                return true;
+
+            case 2: // Step 3: Data Pre-flight
+                if (_calcReport == null)
+                {
+                    _errorMessage = "Please run the data pre-flight analysis before proceeding.";
+                    return false;
+                }
+                if (_expiredEfList.Any() && string.IsNullOrWhiteSpace(_acknowledgmentReason))
+                {
+                    _errorMessage = "Please provide an audit acknowledgment reason for the expired emission factors.";
+                    return false;
+                }
+                return true;
+
+            default:
+                return true;
+        }
+        #endregion
+    }
+
+    private async Task SyncStepToUrlAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["tab"] = DataProtection.Protect(_activeStep)
+            };
+            var url = NavigationManager.GetUriWithQueryParameters(queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", url);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to sync wizard step to URL address bar.");
+        }
+        #endregion
+    }
+
+    private async Task OnLevelChangedAsync(eTopicLevel newLevel)
+    {
+        #region hide [2026-09-15]
+        _level = newLevel;
+        _targetId = 0;
+        _fr01OrgTitle = string.Empty;
+        _fr01CertifierOrg = string.Empty;
+        _fr01GhgTeam = $"{_level} GHG Team";
+        ResetDownstreamData();
+        await LoadTargetOptionsAsync();
+        #endregion
+    }
+
+    private async Task OnTargetChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _targetId = value;
+        _fr01OrgTitle = GetSelectedTargetTitle();
+        _fr01CertifierOrg = _fr01OrgTitle;
+        ResetDownstreamData();
+        await LoadInScopeChildOptionsAsync();
+        // [2026-09-16][Antigravity] Reload calculate year options for newly selected target
+        await LoadCalculateYearOptionsAsync();
+        #endregion
+    }
+
+    private void OnCalculateYearChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _selectedCalculateYear = value;
+        if (_title.StartsWith("GHG Emissions Report Year", StringComparison.OrdinalIgnoreCase))
+        {
+            _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+        }
+        ResetDownstreamData();
+        #endregion
+    }
+
+    private void OnBaseYearChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _selectedBaseYear = value;
+        ResetDownstreamData();
+        #endregion
+    }
+    #endregion
+
+    #region Snapshot Generation
+    private async Task GenerateSnapshotAsync()
+    {
+        #region hide [2026-09-16]
+        // [2026-09-16][Antigravity] Validate CfoSetupWidget inputs only for isolated widget testing
+        if (!ValidateCurrentStep())
+        {
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            _isSaving = true;
+            _errorMessage = null;
+
+            var overrides = new CfoReportService.CfoReportOverridesDto
+            {
+                OrganizationTitle = string.IsNullOrWhiteSpace(_fr01OrgTitle) ? GetSelectedTargetTitle() : _fr01OrgTitle,
+                GhgTeamName = string.IsNullOrWhiteSpace(_fr01GhgTeam) ? $"{_level} GHG Team" : _fr01GhgTeam,
+                CertifierOrgTitle = string.IsNullOrWhiteSpace(_fr01CertifierOrg) ? GetSelectedTargetTitle() : _fr01CertifierOrg
+            };
+
+            var inScopeIds = _selectedInScopeChildIds?.ToList();
+
+            // [2026-09-16][Antigravity] Bypass snapshot storage pipeline and directly export AR5 Excel workbook for verification
+            if (_calcReport == null)
+            {
+                _calcReport = await CfoReportService.GenerateReportAsync(
+                    _level,
+                    _targetId,
+                    _selectedCalculateYear,
+                    _allowedSubscriptionIds,
+                    thresholdPercent: _materialityThreshold,
+                    _acknowledgmentReason,
+                    inScopeChildIds: inScopeIds);
+            }
+
+            if (_selectedBaseYear > 0 && _baseReport == null)
+            {
+                _baseReport = await CfoReportService.GenerateReportAsync(
+                    _level,
+                    _targetId,
+                    _selectedBaseYear,
+                    _allowedSubscriptionIds,
+                    thresholdPercent: _materialityThreshold,
+                    _acknowledgmentReason,
+                    inScopeChildIds: inScopeIds);
+            }
+
+            var excelBytes = CfoReportService.ExportToExcel(
+                _calcReport,
+                _baseReport,
+                _selectedBaseYear,
+                overrides);
+
+            // [2026-09-21][Gemini] Standard Export Filename: cfo_report_{name}_{date}_{time}.xlsx
+            var contextName = $"{_selectedCalculateYear}_{GetSelectedTargetTitle()}";
+            var fileName = ExportFileNameHelper.Generate("cfo_report", contextName, fallback: "report");
+            var base64 = Convert.ToBase64String(excelBytes);
+
+            await JSRuntime.InvokeVoidAsync("downloadFile", base64, fileName, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            NotificationService.Notify(NotificationSeverity.Success, "AR5 Excel Exported",
+                $"Successfully generated and downloaded '{fileName}'.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error exporting CFO AR5 Excel report.");
+            _errorMessage = $"Failed to export Excel report: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+    #endregion
+
+    #region Helper Formatting
+    private string GetSelectedTargetTitle()
+    {
+        return _targetOptions.FirstOrDefault(o => o.Value == _targetId)?.Text ?? "-";
+    }
+
+    private string GetCalculatePeriodText()
+    {
+        return _selectedCalculateYear > 0 ? $"1 Jan {_selectedCalculateYear} - 31 Dec {_selectedCalculateYear}" : "Historical";
+    }
+
+    private string GetBasePeriodText()
+    {
+        return _selectedBaseYear > 0 ? $"1 Jan {_selectedBaseYear} - 31 Dec {_selectedBaseYear}" : "-";
+    }
+    #endregion
+
+    #region Navigation
+    private void NavigateToBack()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_returnUrl))
+            {
+                NavigationManager.NavigateTo(_returnUrl, replace: true);
+                return;
+            }
+
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["level"] = (int)_level
+            };
+
+            if (_targetId > 0)
+                queryParams["id"] = DataProtection.Protect(_targetId);
+
+            var url = NavigationManager.GetUriWithQueryParameters("/reports/cfo-reports", queryParams);
+            NavigationManager.NavigateTo(url, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error navigating back from AddEditCfoReport2.");
+            NavigationManager.NavigateTo("/reports/cfo-reports");
+        }
+        #endregion
+    }
+
+    private void NavigateToRevision()
+    {
+        #region hide [2026-09-15]
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["level"] = (int)_level,
+            ["cy"] = DataProtection.Protect(_selectedCalculateYear),
+            ["by"] = DataProtection.Protect(_selectedBaseYear)
+        };
+
+        if (_targetId > 0)
+            queryParams["id"] = DataProtection.Protect(_targetId);
+
+        if (_selectedSubscriptionId.HasValue)
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+        var url = NavigationManager.GetUriWithQueryParameters("/reports/cfo-report/add-v2", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToTopics()
+    {
+        #region hide [2026-09-15]
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["level"] = (int)_level
+        };
+        if (_targetId > 0) queryParams["id"] = DataProtection.Protect(_targetId);
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+    #endregion
+}

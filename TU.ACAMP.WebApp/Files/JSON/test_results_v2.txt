@@ -1,0 +1,3 @@
+Input: 'ดีเซล (Stationary)' -> MATCHED: Id=15, Title='Diesel' -> Mapping: 45 (Scope3ChildId=186)
+Input: 'ไฟฟ้าแบบ grid mix ปี 2022-2024; LCIA method IPCC 2013 GWP 100a V1.03 (CFO Scope2)' -> MATCHED: Id=131, Title='ไฟฟ้าแบบ grid mix ปี 2022-2024; LCIA method IPCC 2013 GWP 100a V1.03 (CFO Scope2)' -> Mapping: 32 (Scope3ChildId=132)
+Input: 'น้ำประปา' -> MATCHED: Id=189, Title='น้ำประปา-การประปานครหลวง' -> Mapping: None (Scope3ChildId=None)

@@ -1,0 +1,434 @@
+@page "/admin/confirm-emails"
+@page "/admin/user-email"
+
+@using Microsoft.AspNetCore.Authorization
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Components.Pages.Identity.Widgets
+
+@attribute [Authorize(Roles = SystemRoles.Administrator)]
+@inject IdentityAdminService IdentityAdminService
+@inject EmailSender EmailSender
+@inject NavigationManager NavigationManager
+@inject NotificationService NotificationService
+@inject DialogService DialogService
+@inject ILogger<PageConfirmEmails> Logger
+@inject IWebHostEnvironment Env
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>User Email Confirmation - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="row mb-4 align-items-center">
+        <div class="col-12 col-md-7">
+            <RadzenText Text="User Email Confirmation" TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-1" Style="color: var(--rz-text-title-color);" />
+            <RadzenText Text="Manage user email confirmation statuses and bypass email verification as an administrator." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+        </div>
+        <div class="col-12 col-md-5 text-md-end mt-3 mt-md-0 d-flex justify-content-md-end gap-2 flex-wrap">
+            <RadzenButton Text="Reload" 
+                          Icon="refresh" 
+                          ButtonStyle="ButtonStyle.Light" 
+                          Size="ButtonSize.Medium" 
+                          Click="@LoadDataAsync" 
+                          IsBusy="@_isLoading" 
+                          Style="border-radius: 8px;" 
+                          Title="Reload user email list" />
+            <RadzenButton Text="Confirm All" 
+                          Icon="verified" 
+                          ButtonStyle="ButtonStyle.Success" 
+                          Size="ButtonSize.Medium" 
+                          Click="@ConfirmAllPendingEmailsHandlerAsync" 
+                          IsBusy="@_isBatchProcessing" 
+                          Disabled="@(_allUsers.Count(u => !u.EmailConfirmed) == 0)" 
+                          Style="border-radius: 8px;" 
+                          Title="Bypass & Confirm email addresses for all pending users" />
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4 col-sm-6">
+            <RadzenCard Class="p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="text-muted fw-bold">TOTAL USERS</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4" class="fw-bold mb-0 text-dark">@_allUsers.Count</RadzenText>
+                    </div>
+                    <RadzenIcon Icon="people" Style="font-size: 2.2rem;" class="text-primary opacity-75" />
+                </div>
+            </RadzenCard>
+        </div>
+
+        <div class="col-md-4 col-sm-6">
+            <RadzenCard Class="p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="text-muted fw-bold">CONFIRMED</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4" class="fw-bold mb-0 text-success">@_allUsers.Count(u => u.EmailConfirmed)</RadzenText>
+                    </div>
+                    <RadzenIcon Icon="mark_email_read" Style="font-size: 2.2rem;" class="text-success opacity-75" />
+                </div>
+            </RadzenCard>
+        </div>
+
+        <div class="col-md-4 col-sm-6">
+            <RadzenCard Class="p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="text-muted fw-bold">PENDING CONFIRMATION</RadzenText>
+                        <RadzenText TextStyle="TextStyle.H4" class="fw-bold mb-0 text-warning">@_allUsers.Count(u => !u.EmailConfirmed)</RadzenText>
+                    </div>
+                    <RadzenIcon Icon="mark_email_unread" Style="font-size: 2.2rem;" class="text-warning opacity-75" />
+                </div>
+            </RadzenCard>
+        </div>
+    </div>
+
+    <!-- Filters & Search Widget -->
+    <ConfirmEmailsFilterWidget @bind-SearchQuery="@_searchQuery"
+                               @bind-SelectedStatusFilter="@_selectedStatusFilter"
+                               @bind-RegisterDateFrom="@_registerDateFrom"
+                               @bind-RegisterDateTo="@_registerDateTo"
+                               FilteredCount="@_filteredUsers.Count"
+                               TotalCount="@_allUsers.Count"
+                               OnFilterChanged="@OnFilterChangedHandler" />
+
+    <!-- DataGrid Container -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading user email records..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <div class="shadow-sm rounded-3 p-3" style="background-color: var(--rz-card-background-color); border: 1px solid var(--rz-border-color); border-radius: 12px;">
+            @if (!_filteredUsers.Any())
+            {
+                <div class="p-5 text-center text-muted">
+                    <RadzenIcon Icon="mail_lock" Style="font-size: 48px; opacity: 0.5;" class="mb-2" />
+                    <RadzenText Text="No user accounts found matching the search criteria." TextStyle="TextStyle.Body1" class="text-muted mb-0" />
+                </div>
+            }
+            else
+            {
+                <RadzenDataGrid @ref="_grid" Data="@_filteredUsers" TItem="ApplicationUser"
+                                AllowColumnResize="true"
+                                AllowPaging="true" PageSize="@_pageSize" PageSizeOptions="@_pageSizeOptions"
+                                AllowSorting="true" ColumnWidth="180px" PagerHorizontalAlign="HorizontalAlign.Right" ShowPagingSummary="true"
+                                RowDoubleClick="@((DataGridRowMouseEventArgs<ApplicationUser> args) => ConfirmEmailByAdminHandlerAsync(args.Data))"
+                                Style="@GridStyles.Default">
+                    <Columns>
+                        @if (Env.IsDevelopment() || _isAdmin)
+                        {
+                            <RadzenDataGridColumn TItem="ApplicationUser" Property="Id" Title="ID" Width="60px" TextAlign="TextAlign.Center" />
+                        }
+
+                        <RadzenDataGridColumn TItem="ApplicationUser" Title="#" Width="55px" TextAlign="TextAlign.Center" Sortable="false">
+                            <Template Context="user">
+                                @(_filteredUsers.IndexOf(user) + 1)
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 1. Email Column -->
+                        <RadzenDataGridColumn TItem="ApplicationUser" Property="Email" Title="Email" MinWidth="260px">
+                            <Template Context="user">
+                                <div class="d-flex align-items-center gap-2">
+                                    <RadzenIcon Icon="alternate_email" class="text-primary" Style="font-size: 1.5rem;" />
+                                    <div>
+                                        <div class="fw-bold text-dark text-break">@user.Email</div>
+                                        @if (!string.IsNullOrEmpty(user.UserName) && !string.Equals(user.UserName, user.Email, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span class="text-muted small d-block">Username: @user.UserName</span>
+                                        }
+                                    </div>
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 2. Register (date) Column -->
+                        <RadzenDataGridColumn TItem="ApplicationUser" Title="Registration Date" Width="180px" Sortable="false">
+                            <Template Context="user">
+                                @{
+                                    var regDate = GetUserRegisterDate(user.Email);
+                                }
+                                <div class="d-flex align-items-center gap-2">
+                                    <RadzenIcon Icon="calendar_today" class="text-muted" Style="font-size: 1.1rem;" />
+                                    @if (regDate.HasValue)
+                                    {
+                                        <span class="text-dark fw-semibold">@TU.ACAMP.Domain.Tools.AppTimeZone.ToLocal(regDate.Value).ToString("dd/MM/yyyy")</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small fst-italic">-</span>
+                                    }
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <!-- 3. Email (Confirmation / Bypass Confirm Button) Column -->
+                        <RadzenDataGridColumn TItem="ApplicationUser" Property="EmailConfirmed" Title="Email" Width="200px" TextAlign="TextAlign.Center">
+                            <Template Context="user">
+                                @if (user.EmailConfirmed)
+                                {
+                                    <RadzenBadge Text="Confirmed" BadgeStyle="BadgeStyle.Success" IsPill="true" class="px-3 py-2">
+                                        <RadzenIcon Icon="check_circle" class="me-1" Style="font-size: 0.85rem;" />Confirmed
+                                    </RadzenBadge>
+                                }
+                                else
+                                {
+                                    <RadzenButton Text="Bypass Confirm" 
+                                                  Icon="verified_user" 
+                                                  Size="ButtonSize.Small" 
+                                                  ButtonStyle="ButtonStyle.Warning" 
+                                                  Variant="Variant.Filled" 
+                                                  Title="Bypass Email Confirmation by Admin" 
+                                                  IsBusy="@(_confirmingEmails.Contains(user.Email ?? ""))"
+                                                  Click="@(() => ConfirmEmailByAdminHandlerAsync(user))" 
+                                                  Style="border-radius: 6px;" />
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    #region class field
+    private RadzenDataGrid<ApplicationUser>? _grid;
+    private List<ApplicationUser> _allUsers = new();
+    private List<ApplicationUser> _filteredUsers = new();
+    private Dictionary<string, DateTime?> _registerDatesMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _confirmingEmails = new(StringComparer.OrdinalIgnoreCase);
+
+    private string _searchQuery = string.Empty;
+    private string _selectedStatusFilter = "All";
+    private DateTime? _registerDateFrom;
+    private DateTime? _registerDateTo;
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _isBatchProcessing = false;
+
+    private int _pageSize = 10;
+    private IEnumerable<int> _pageSizeOptions = new[] { 10, 25, 50 };
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole(SystemRoles.Administrator);
+        #region hide [2026-08-16]
+        await LoadDataAsync();
+        #endregion
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-16]
+        _isLoading = true;
+        try
+        {
+            _allUsers = await IdentityAdminService.GetSystemUsersAsync();
+            _registerDatesMap = await IdentityAdminService.GetUserRegisterDatesMapAsync();
+            FilterUsers();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load user accounts in PageConfirmEmails.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load user accounts.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void FilterUsers()
+    {
+        #region hide [2026-08-16]
+        var result = _allUsers.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var q = _searchQuery.Trim();
+            result = result.Where(u =>
+                (!string.IsNullOrEmpty(u.Email) && u.Email.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(u.UserName) && u.UserName.Contains(q, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (_selectedStatusFilter == "Confirmed")
+        {
+            result = result.Where(u => u.EmailConfirmed);
+        }
+        else if (_selectedStatusFilter == "Pending")
+        {
+            result = result.Where(u => !u.EmailConfirmed);
+        }
+
+        // Registration date range (inclusive, compared on local calendar day)
+        if (_registerDateFrom.HasValue || _registerDateTo.HasValue)
+        {
+            var fromDate = _registerDateFrom?.Date;
+            var toDate = _registerDateTo?.Date;
+
+            result = result.Where(u =>
+            {
+                var regDate = GetUserRegisterDate(u.Email);
+                if (!regDate.HasValue) return false;
+
+                var localDate = TU.ACAMP.Domain.Tools.AppTimeZone.ToLocal(regDate.Value).Date;
+                if (fromDate.HasValue && localDate < fromDate.Value) return false;
+                if (toDate.HasValue && localDate > toDate.Value) return false;
+                return true;
+            });
+        }
+
+        _filteredUsers = result.ToList();
+        #endregion
+    }
+
+    private DateTime? GetUserRegisterDate(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        return _registerDatesMap.TryGetValue(email.Trim(), out var date) ? date : null;
+    }
+
+    private void OnFilterChangedHandler()
+    {
+        #region hide [2026-08-16]
+        FilterUsers();
+        StateHasChanged();
+        #endregion
+    }
+
+    private async Task ConfirmEmailByAdminHandlerAsync(ApplicationUser user)
+    {
+        #region hide [2026-08-16]
+        if (string.IsNullOrWhiteSpace(user.Email)) return;
+
+        _confirmingEmails.Add(user.Email);
+        try
+        {
+            await IdentityAdminService.ConfirmEmailByAdminAsync(user.Email);
+            user.EmailConfirmed = true;
+            FilterUsers();
+
+            var loginUrl = NavigationManager.ToAbsoluteUri("Account/Login").AbsoluteUri;
+            bool emailSent = false;
+            try
+            {
+                await EmailSender.SendEmailConfirmedByAdminNotificationAsync(user, user.Email, loginUrl);
+                emailSent = true;
+            }
+            catch (Exception emailEx)
+            {
+                Logger.LogWarning(emailEx, "User email confirmed in database, but failed to dispatch notification email to {Email}", user.Email);
+            }
+
+            if (emailSent)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Email Confirmed & Notified", $"Email for {user.Email} successfully confirmed and notification email dispatched.");
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Email Confirmed (No Email Sent)", $"Email for {user.Email} confirmed by Administrator. (Notification email could not be delivered, check SMTP configuration).");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to confirm email for {Email}", user.Email);
+            NotificationService.Notify(NotificationSeverity.Error, "Confirmation Failed", $"Failed to confirm email: {ex.Message}");
+        }
+        finally
+        {
+            _confirmingEmails.Remove(user.Email);
+        }
+        #endregion
+    }
+
+    private async Task ConfirmAllPendingEmailsHandlerAsync()
+    {
+        #region hide [2026-08-16]
+        var pendingUsers = _allUsers.Where(u => !u.EmailConfirmed && !string.IsNullOrWhiteSpace(u.Email)).ToList();
+        if (!pendingUsers.Any())
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "No Pending Emails", "All users already have confirmed email addresses.");
+            return;
+        }
+
+        bool? confirm = await DialogService.Confirm(
+            $"Confirm email addresses for all {pendingUsers.Count} pending user(s)?",
+            "Confirm All Pending Emails",
+            new ConfirmOptions { OkButtonText = "Confirm All", CancelButtonText = "Cancel" });
+
+        if (confirm != true) return;
+
+        _isBatchProcessing = true;
+        try
+        {
+            int successCount = await IdentityAdminService.ConfirmAllPendingEmailsAsync();
+            await LoadDataAsync();
+
+            bool? sendEmailConfirm = await DialogService.Confirm(
+                $"Successfully confirmed {successCount} user(s). Would you like to send email notifications to all confirmed users?",
+                "Send Email Notifications",
+                new ConfirmOptions { OkButtonText = "Send All Emails", CancelButtonText = "Skip Email Dispatch" });
+
+            if (sendEmailConfirm == true)
+            {
+                var loginUrl = NavigationManager.ToAbsoluteUri("Account/Login").AbsoluteUri;
+                int emailSuccess = 0;
+                int emailFailed = 0;
+
+                foreach (var user in pendingUsers)
+                {
+                    try
+                    {
+                        await EmailSender.SendEmailConfirmedByAdminNotificationAsync(user, user.Email!, loginUrl);
+                        emailSuccess++;
+                    }
+                    catch (Exception ex)
+                    {
+                        emailFailed++;
+                        Logger.LogError(ex, "Failed to send confirmation email to {Email}", user.Email);
+                    }
+                }
+
+                if (emailFailed > 0)
+                {
+                    NotificationService.Notify(NotificationSeverity.Warning, "Batch Confirmation Completed",
+                        $"Confirmed {successCount} user(s) | Emails sent: {emailSuccess}, Failed: {emailFailed}");
+                }
+                else
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Batch Confirmation Completed",
+                        $"Confirmed {successCount} user(s) and sent {emailSuccess} notification email(s) successfully.");
+                }
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Batch Confirm Success", $"Successfully confirmed email addresses for {successCount} user(s) (Skipped email notification).");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to batch confirm pending emails.");
+            NotificationService.Notify(NotificationSeverity.Error, "Batch Confirm Failed", $"Error confirming emails: {ex.Message}");
+        }
+        finally
+        {
+            _isBatchProcessing = false;
+        }
+        #endregion
+    }
+    #endregion
+}

@@ -1,0 +1,166 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Reports
+
+@* [2026-09-15][Antigravity] Step 5 Fr-04.2 Base Year Inventory Widget: Baseline activity grid & comparison stats *@
+
+<RadzenStack Gap="1.25rem" Class="pt-3">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">
+            Sheet Fr-04.2: Base Year GHG Inventory @(SelectedBaseYear > 0 ? $"({SelectedBaseYear})" : "")
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Baseline activity lines mapped to sheet Fr-04.2 for historical comparison.
+        </RadzenText>
+    </div>
+
+    @if (SelectedBaseYear <= 0)
+    {
+        <div class="py-5 text-center bg-light rounded-3 border border-dashed">
+            <RadzenIcon Icon="info" Style="font-size: 2.5rem; color: #94a3b8;" />
+            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-dark mt-2 mb-1">
+                No base year selected
+            </RadzenText>
+            <p class="text-muted small mb-0">
+                Sheet Fr-04.2 will be cleared in the exported Excel workbook. Proceed to next step.
+            </p>
+        </div>
+    }
+    else if (BaseReport?.AuditLines != null && BaseReport.AuditLines.Any())
+    {
+        @if (IsAutoBaseYear)
+        {
+            <!-- [2026-09-18][Claude] แจ้งผู้ใช้ว่าปีฐานถูกตั้งอัตโนมัติเท่ากับปีคำนวณ -->
+            <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter"
+                         AllowClose="false" Icon="info" Class="mb-0">
+                No base year was selected, so the calculate year (@SelectedBaseYear) is used as the base year.
+                Sheet Fr-04.2 mirrors sheet Fr-04.1 and the year-on-year comparison shows no change.
+            </RadzenAlert>
+        }
+        <!-- Quota Indicators for Base Year -->
+        <div class="row g-3">
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="@GetQuotaCardClass(Scope1Count, Fr04Scope1Capacity)">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 1</RadzenText>
+                    <div class="d-flex align-items-baseline gap-1">
+                        <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@Scope1Count</RadzenText>
+                        <span class="text-muted small">/ @Fr04Scope1Capacity quota</span>
+                    </div>
+                </RadzenCard>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="@GetQuotaCardClass(SepCount, Fr04SeparateCapacity)">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Separate</RadzenText>
+                    <div class="d-flex align-items-baseline gap-1">
+                        <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@SepCount</RadzenText>
+                        <span class="text-muted small">/ @Fr04SeparateCapacity quota</span>
+                    </div>
+                </RadzenCard>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="@GetQuotaCardClass(Scope2Count, Fr04Scope2Capacity)">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 2</RadzenText>
+                    <div class="d-flex align-items-baseline gap-1">
+                        <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@Scope2Count</RadzenText>
+                        <span class="text-muted small">/ @Fr04Scope2Capacity quota</span>
+                    </div>
+                </RadzenCard>
+            </div>
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="@GetQuotaCardClass(Scope3Count, Fr04Scope3Capacity)">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 3</RadzenText>
+                    <div class="d-flex align-items-baseline gap-1">
+                        <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@Scope3Count</RadzenText>
+                        <span class="text-muted small">/ @Fr04Scope3Capacity quota</span>
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+
+        <RadzenDataGrid Data="@BaseReport.AuditLines" TItem="CfoReportService.ActivityAuditLineDto"
+                        AllowPaging="true" PageSize="15" AllowSorting="true" Style="@GridStyles.Default">
+            <Columns>
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                    <Template Context="item">
+                        @(BaseReport.AuditLines.IndexOf(item) + 1)
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="ScopeNo" Title="Scope" Width="100px" TextAlign="TextAlign.Center">
+                    <Template Context="item">
+                        <span class="badge @GetScopeBadgeClass(item.ScopeNo)">@item.ScopeNo.ToString()</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="TopicTitle" Title="Topic / Emission Source" MinWidth="220px">
+                    <Template Context="item">
+                        <span class="fw-bold text-dark d-block">@item.TopicTitle</span>
+                        <small class="text-muted">Source: @item.SourceName (@item.ActivityGroupTitle)</small>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="UnitName" Title="Unit" Width="90px" TextAlign="TextAlign.Center" />
+
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="Quantity" Title="Quantity" Width="120px" TextAlign="TextAlign.Right">
+                    <Template Context="item">
+                        <span class="font-monospace">@item.Quantity.ToString("N2")</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="EF" Title="EF (kgCO₂e/Unit)" Width="130px" TextAlign="TextAlign.Right">
+                    <Template Context="item">
+                        <span class="font-monospace">@item.EF.ToString("N4")</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="Total_tCO2e" Title="Emissions (tCO₂e)" Width="140px" TextAlign="TextAlign.Right">
+                    <Template Context="item">
+                        <span class="fw-bold text-danger font-monospace">@item.Total_tCO2e.ToString("N3")</span>
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+    }
+    else
+    {
+        <div class="py-4 text-center bg-light rounded-3 border border-dashed">
+            <p class="text-muted mb-0">No activity data found for Base Year @SelectedBaseYear.</p>
+        </div>
+    }
+</RadzenStack>
+
+@code {
+    // [2026-09-15][Antigravity] Parameters for Step 5 Fr-04.2 Base Year Inventory Widget
+    private const int Fr04Scope1Capacity = 14;
+    private const int Fr04SeparateCapacity = 5;
+    private const int Fr04Scope2Capacity = 4;
+    private const int Fr04Scope3Capacity = 7;
+
+    [Parameter] public int SelectedBaseYear { get; set; }
+    [Parameter] public CfoReportService.CfoAuditReportDto? BaseReport { get; set; }
+    [Parameter] public int Scope1Count { get; set; }
+    [Parameter] public int SepCount { get; set; }
+    [Parameter] public int Scope2Count { get; set; }
+    [Parameter] public int Scope3Count { get; set; }
+    // [2026-09-18][Claude] true = ผู้ใช้ไม่ได้เลือกปีฐาน ระบบใช้ปีคำนวณเป็นปีฐานอัตโนมัติ
+    [Parameter] public bool IsAutoBaseYear { get; set; }
+
+    private string GetQuotaCardClass(int count, int quota)
+    {
+        bool isOverflow = count > quota;
+        return isOverflow
+            ? "shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-warning bg-warning-subtle"
+            : "shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success bg-white";
+    }
+
+    private string GetScopeBadgeClass(eTgoScopeNo scope)
+    {
+        return scope switch
+        {
+            eTgoScopeNo.Scope1 => "bg-danger-subtle text-danger border",
+            eTgoScopeNo.Scope2 => "bg-primary-subtle text-primary border",
+            eTgoScopeNo.Scope3 => "bg-info-subtle text-info border",
+            _ => "bg-secondary-subtle text-secondary border"
+        };
+    }
+}

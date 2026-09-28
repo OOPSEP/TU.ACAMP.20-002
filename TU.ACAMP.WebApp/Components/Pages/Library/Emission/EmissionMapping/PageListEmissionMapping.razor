@@ -1,0 +1,855 @@
+@page "/library/emission-mappings"
+@page "/emissions/mappings"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Emissions
+@using TU.ACAMP.WebApp.Services.Identity
+
+@attribute [Authorize(Roles = SystemRoles.Administrator)]
+
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@inject AuthenticationStateProvider AuthStateProvider
+@inject EmissionMappingService EmissionMappingService
+@inject EmissionSourceService EmissionSourceService
+@inject EmissionGroupService EmissionGroupService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+@inject ILogger<PageListEmissionMapping> Logger
+
+<PageTitle>Emission Mappings Library (Admin) - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="row mb-4 align-items-center">
+        <div class="col-12 col-md-8">
+            <RadzenText Text="Default Emission Mappings Library (Admin Only)" TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-1" Style="color: var(--rz-text-title-color);" />
+            <RadzenText Text="Manage default system-wide emission source mappings between Scope 1/2 master sources and Scope 3 or Biogenic counterparts." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+        </div>
+        <div class="col-12 col-md-4 text-md-end mt-3 mt-md-0">
+            <RadzenButton Text="Add Mapping" Icon="add_circle" ButtonStyle="ButtonStyle.Primary"
+                          Click="@StartInsert" Disabled="@_isNewRow" Class="shadow-sm" Style="border-radius: 8px; font-weight: 600;" />
+        </div>
+    </div>
+
+    @if (_isNewRow)
+    {
+        <RadzenCard Class="mb-4 shadow-sm border-0 rounded-3 border-start border-4 border-primary">
+            <RadzenText Text="New Default Mapping" TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-2" />
+            <RadzenRow Gap="0.4rem">
+                <RadzenColumn Size="12" SM="6" MD="3">
+                    <RadzenFormField Text="Scope 1 Source" Style="width:100%;">
+                        <RadzenDropDown TValue="int" @bind-Value="_newMapping.Scope1ChildId" Data="@_scope1Sources"
+                                        TextProperty="DisplayName" ValueProperty="Id" AllowClear="true" AllowFiltering="true"
+                                        Placeholder="None" Style="width:100%;" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn Size="12" SM="6" MD="3">
+                    <RadzenFormField Text="Scope 2 Source" Style="width:100%;">
+                        <RadzenDropDown TValue="int" @bind-Value="_newMapping.Scope2ChildId" Data="@_scope2Sources"
+                                        TextProperty="DisplayName" ValueProperty="Id" AllowClear="true" AllowFiltering="true"
+                                        Placeholder="None" Style="width:100%;" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn Size="12" SM="6" MD="3">
+                    <RadzenFormField Text="Scope 3 Source" Style="width:100%;">
+                        <RadzenDropDown TValue="int" @bind-Value="_newMapping.Scope3ChildId" Data="@_scope3Sources"
+                                        TextProperty="DisplayName" ValueProperty="Id" AllowClear="true" AllowFiltering="true"
+                                        Placeholder="None" Style="width:100%;" />
+                    </RadzenFormField>
+                </RadzenColumn>
+                <RadzenColumn Size="12" SM="6" MD="3">
+                    <RadzenFormField Text="Biogenic Source" Style="width:100%;">
+                        <RadzenDropDown TValue="int" @bind-Value="_newMapping.BiogenicChildId" Data="@_biogenicSources"
+                                        TextProperty="DisplayName" ValueProperty="Id" AllowClear="true" AllowFiltering="true"
+                                        Placeholder="None" Style="width:100%;" />
+                    </RadzenFormField>
+                </RadzenColumn>
+            </RadzenRow>
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.4rem" Class="mt-3">
+                <div class="ms-auto d-flex gap-2">
+                    <RadzenButton Text="Save" Icon="check" ButtonStyle="ButtonStyle.Success" Click="@SaveNewMapping" />
+                    <RadzenButton Text="Cancel" Icon="close" ButtonStyle="ButtonStyle.Light" Click="@CancelNewMapping" />
+                </div>
+            </RadzenStack>
+        </RadzenCard>
+    }
+
+    <!-- [2026-09-13][Antigravity] Search & Filter Card with .acamp-filter-bar and spring search -->
+    <RadzenCard Class="mb-4 p-3 shadow-sm" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+        <div class="acamp-filter-bar justify-content-between">
+            <div class="acamp-filter-search">
+                <RadzenFormField Text="Search Mappings">
+                    <ChildContent>
+                        <RadzenTextBox @bind-Value="SearchText" Placeholder="Search by ID or Source Title..." Style="width: 100%;" />
+                    </ChildContent>
+                    <Start>
+                        <RadzenIcon Icon="search" />
+                    </Start>
+                </RadzenFormField>
+            </div>
+            <div class="d-flex align-items-center ms-auto text-muted small" style="height: 40px;">
+                Showing <b>@_filteredItems.Count</b> default mapping record(s)
+            </div>
+        </div>
+    </RadzenCard>
+
+    @if (_isLoading)
+    {
+        <RadzenProgressBar Value="100" ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+    }
+    else
+    {
+        <RadzenTabs RenderMode="TabRenderMode.Client" Class="shadow-sm rounded-3 mb-4"
+                    SelectedIndex="@_activeTabIndex" Change="@OnTabChanged">
+            <Tabs>
+                <RadzenTabsItem Text="Scope 1 (Direct GHG)">
+                    <div class="pt-3">
+                        @RenderAccordionForScope(eTgoScopeNo.Scope1)
+                    </div>
+                </RadzenTabsItem>
+                <RadzenTabsItem Text="Scope 2 (Indirect Energy)">
+                    <div class="pt-3">
+                        @RenderAccordionForScope(eTgoScopeNo.Scope2)
+                    </div>
+                </RadzenTabsItem>
+            </Tabs>
+        </RadzenTabs>
+    }
+</div>
+
+@code {
+    #region class field
+    public class SourceDropdownItem
+    {
+        public int Id { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public int GroupId { get; set; }
+        public eTgoScopeNo TgoScopeNo { get; set; }
+    }
+
+    private readonly Dictionary<(eTgoScopeNo Scope, int GroupId), RadzenDataGrid<TbEmissionMapping>> _grids = new();
+    private readonly int _pageSize = 15;
+    private readonly IEnumerable<int> _pageSizeOptions = new int[] { 15, 25, 50, 100 };
+
+    private List<TbEmissionMapping> _allItems = new();
+    private List<TbEmissionMapping> _filteredItems = new();
+    private List<TbEmissionGroup> _allGroups = new();
+    private List<TbEmissionSource> _rawSources = new();
+    private Dictionary<int, TbEmissionSource> _sourceById = new();
+    private List<SourceDropdownItem> _sources = new();
+    private List<SourceDropdownItem> _scope1Sources = new();
+    private List<SourceDropdownItem> _scope2Sources = new();
+    private List<SourceDropdownItem> _scope3Sources = new();
+    private List<SourceDropdownItem> _biogenicSources = new();
+
+    private bool _isLoading = true;
+    private bool _isNewRow = false;
+    private TbEmissionMapping _newMapping = new();
+    private TbEmissionMapping? _editingItemBackup;
+    private int _activeTabIndex = 0;
+    private int _activeAccordionIndex = -1;
+    private HashSet<int> _expandedGroupIds = new();
+    private string _searchText = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "tab")] public string? SecureTab { get; set; }
+    [SupplyParameterFromQuery(Name = "sac")] public string? SecureSac { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? SecureSearchText { get; set; }
+
+    private string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (_searchText != value)
+            {
+                _searchText = value;
+                OnFilterChanged();
+                _ = SyncBrowserUrlAsync();
+            }
+        }
+    }
+    #endregion
+
+    #region class method
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-21]
+        _isLoading = true;
+        try
+        {
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to initialize PageListEmissionMapping");
+            NotificationService.Notify(NotificationSeverity.Error, "Initialization Error", "Failed to load emission mappings.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    protected override void OnParametersSet()
+    {
+        RestoreStateParameters();
+    }
+
+    private void RestoreStateParameters()
+    {
+        if (!string.IsNullOrWhiteSpace(SecureTab) && int.TryParse(SecureTab, out var tabIdx))
+            _activeTabIndex = tabIdx;
+
+        if (!string.IsNullOrWhiteSpace(SecureSac))
+        {
+            var sacVal = DataProtection.UnprotectInt(SecureSac);
+            if (sacVal.HasValue && sacVal.Value >= 0)
+                _activeAccordionIndex = sacVal.Value;
+            else if (int.TryParse(SecureSac, out var rawSac) && rawSac >= 0)
+                _activeAccordionIndex = rawSac;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureSearchText))
+            _searchText = SecureSearchText;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncBrowserUrlAsync();
+        }
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var queryParams = new Dictionary<string, object?>();
+
+            if (_activeTabIndex > 0)
+                queryParams["tab"] = _activeTabIndex.ToString();
+
+            if (_activeAccordionIndex >= 0)
+                queryParams["sac"] = DataProtection.Protect(_activeAccordionIndex);
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                queryParams["q"] = _searchText;
+
+            var url = NavigationManager.GetUriWithQueryParameters("/library/emission-mappings", queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", url);
+        }
+        catch
+        {
+            // Ignore during prerender or if JS interop not ready
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-21]
+        try
+        {
+            _isLoading = true;
+
+            // Mappings are for Default system-wide sources only (SubscriptionId == null)
+            _allItems = await EmissionMappingService.GetAllAsync(null);
+            _allGroups = await EmissionGroupService.GetAllAsync();
+            var allSources = await EmissionSourceService.GetAllAsync();
+
+            // Filter to Default sources only
+            _rawSources = allSources.Where(x => x.SourceType == eSourceType.Default || x.SubscriptionId == null).ToList();
+
+            _sourceById = _rawSources.ToDictionary(x => x.Id);
+            _sources = _rawSources.Select(x => new SourceDropdownItem
+            {
+                Id = x.Id,
+                DisplayName = $"[{x.Id}] {x.Title}",
+                GroupId = x.GroupId,
+                TgoScopeNo = x.Group?.TgoScopeNo ?? eTgoScopeNo.Scope1
+            }).OrderBy(x => x.Id).ToList();
+
+            _scope1Sources = _sources.Where(x => x.TgoScopeNo == eTgoScopeNo.Scope1).ToList();
+            _scope2Sources = _sources.Where(x => x.TgoScopeNo == eTgoScopeNo.Scope2).ToList();
+            _scope3Sources = _sources.Where(x => x.TgoScopeNo == eTgoScopeNo.Scope3).ToList();
+            _biogenicSources = _sources.Where(x => x.TgoScopeNo == eTgoScopeNo.SeparateReport).ToList();
+
+            OnFilterChanged();
+
+            var currentScope = (eTgoScopeNo)(_activeTabIndex + 1);
+            var groupsInScope = _allGroups.Where(g => g.TgoScopeNo == currentScope).OrderBy(g => g.Id).ToList();
+
+            if (_activeAccordionIndex >= 0 && _activeAccordionIndex < groupsInScope.Count)
+            {
+                _expandedGroupIds.Add(groupsInScope[_activeAccordionIndex].Id);
+            }
+            else if (_expandedGroupIds.Count == 0 && groupsInScope.Any())
+            {
+                _expandedGroupIds.Add(groupsInScope.First().Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading emission mappings.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load mapping data.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private string GetSourceName(int id)
+    {
+        #region hide [2026-08-21]
+        if (id == 0) return "-";
+        return _sourceById.TryGetValue(id, out var source)
+            ? $"[{id}] {source.Title}"
+            : $"Unknown (ID: {id})";
+        #endregion
+    }
+
+    private decimal? GetSourceEF(int id)
+    {
+        if (id == 0) return null;
+        return _sourceById.TryGetValue(id, out var source) ? source.EF : null;
+    }
+
+    private string GetSourceUnit(int id)
+    {
+        if (id == 0) return "-";
+        if (_sourceById.TryGetValue(id, out var source))
+        {
+            var unitTitle = source.Unit?.Title;
+            return !string.IsNullOrWhiteSpace(unitTitle) ? unitTitle : "-";
+        }
+        return "-";
+    }
+
+    private bool IsSameUnit(TbEmissionMapping item, eTgoScopeNo scope)
+    {
+        int masterId = scope == eTgoScopeNo.Scope1 ? item.Scope1ChildId : item.Scope2ChildId;
+        if (masterId == 0 && item.Scope1ChildId != 0) masterId = item.Scope1ChildId;
+        if (masterId == 0 && item.Scope2ChildId != 0) masterId = item.Scope2ChildId;
+
+        int childId = item.Scope3ChildId != 0 ? item.Scope3ChildId : item.BiogenicChildId;
+
+        if (masterId == 0 || childId == 0) return true;
+
+        var masterUnit = GetSourceUnit(masterId);
+        var childUnit = GetSourceUnit(childId);
+
+        if (masterUnit == "-" || childUnit == "-") return true;
+
+        return string.Equals(masterUnit, childUnit, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetConversionUnitText(TbEmissionMapping item, eTgoScopeNo scope)
+    {
+        int masterId = scope == eTgoScopeNo.Scope1 ? item.Scope1ChildId : item.Scope2ChildId;
+        if (masterId == 0 && item.Scope1ChildId != 0) masterId = item.Scope1ChildId;
+        if (masterId == 0 && item.Scope2ChildId != 0) masterId = item.Scope2ChildId;
+
+        int childId = item.Scope3ChildId != 0 ? item.Scope3ChildId : item.BiogenicChildId;
+
+        var masterUnit = GetSourceUnit(masterId);
+        var childUnit = GetSourceUnit(childId);
+
+        if (masterUnit == "-" && childUnit == "-") return "Unit conversion";
+
+        return $"Convert unit from {masterUnit} to {childUnit}";
+    }
+
+    private void OnChildSourceChanged(TbEmissionMapping item, eTgoScopeNo scope)
+    {
+        if (IsSameUnit(item, scope))
+        {
+            item.UnitConversionRatio = 1;
+        }
+        StateHasChanged();
+    }
+
+    private int? GetChildIdForScope(TbEmissionMapping m, eTgoScopeNo scope) => scope switch
+    {
+        eTgoScopeNo.Scope1 => m.Scope1ChildId != 0 ? m.Scope1ChildId : null,
+        eTgoScopeNo.Scope2 => m.Scope2ChildId != 0 ? m.Scope2ChildId : null,
+        eTgoScopeNo.Scope3 => m.Scope3ChildId != 0 ? m.Scope3ChildId : null,
+        eTgoScopeNo.SeparateReport => m.BiogenicChildId != 0 ? m.BiogenicChildId : null,
+        _ => null
+    };
+
+    private int? GetGroupIdForScope(TbEmissionMapping m, eTgoScopeNo scope)
+    {
+        var childId = GetChildIdForScope(m, scope);
+        if (childId == null) return null;
+        return _sourceById.TryGetValue(childId.Value, out var source) ? source.GroupId : null;
+    }
+
+    private void OnFilterChanged()
+    {
+        #region hide [2026-08-21]
+        IEnumerable<TbEmissionMapping> query = _allItems;
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var keyword = _searchText.Trim();
+            query = query.Where(x =>
+                x.Id.ToString().Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                GetSourceName(x.Scope1ChildId).Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                GetSourceName(x.Scope2ChildId).Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                GetSourceName(x.Scope3ChildId).Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                GetSourceName(x.BiogenicChildId).Contains(keyword, StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        _filteredItems = query.ToList();
+        #endregion
+    }
+
+    private async Task OnTabChanged(int index)
+    {
+        #region hide [2026-08-21]
+        _activeTabIndex = index;
+        _activeAccordionIndex = 0;
+        await SyncBrowserUrlAsync();
+        #endregion
+    }
+
+    private async Task OnAccordionItemSelectChanged(int groupId, bool isExpanded)
+    {
+        #region hide [2026-08-21]
+        if (isExpanded)
+        {
+            _expandedGroupIds.Add(groupId);
+        }
+        else
+        {
+            _expandedGroupIds.Remove(groupId);
+        }
+
+        var scopeNo = (eTgoScopeNo)(_activeTabIndex + 1);
+        var groupsInScope = _allGroups.Where(g => g.TgoScopeNo == scopeNo).OrderBy(g => g.Id).ToList();
+        var idx = groupsInScope.FindIndex(g => g.Id == groupId);
+        if (idx >= 0)
+        {
+            _activeAccordionIndex = isExpanded ? idx : -1;
+        }
+
+        await SyncBrowserUrlAsync();
+        #endregion
+    }
+
+    private void StartInsert()
+    {
+        #region hide [2026-08-21]
+        _newMapping = new TbEmissionMapping { SourceType = eSourceType.Default, SubscriptionId = null };
+        _isNewRow = true;
+        #endregion
+    }
+
+    private void CancelNewMapping()
+    {
+        #region hide [2026-08-21]
+        _isNewRow = false;
+        _newMapping = new TbEmissionMapping();
+        #endregion
+    }
+
+    private async Task SaveNewMapping()
+    {
+        #region hide [2026-08-21]
+        if (_newMapping.Scope1ChildId == 0 && _newMapping.Scope2ChildId == 0 &&
+            _newMapping.Scope3ChildId == 0 && _newMapping.BiogenicChildId == 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Incomplete Mapping", "Select at least one source before saving.");
+            return;
+        }
+
+        _newMapping.SourceType = eSourceType.Default;
+        _newMapping.SubscriptionId = null;
+
+        try
+        {
+            var created = await EmissionMappingService.CreateAsync(_newMapping);
+            NotificationService.Notify(NotificationSeverity.Success, "Created", $"Emission mapping ID {created.Id} created successfully.");
+            _isNewRow = false;
+            _newMapping = new TbEmissionMapping();
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating mapping.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+        }
+        #endregion
+    }
+
+    private async Task EditRow(TbEmissionMapping item, eTgoScopeNo scope, int groupId)
+    {
+        #region hide [2026-08-21]
+        _editingItemBackup = new TbEmissionMapping
+        {
+            Id = item.Id,
+            Scope1ChildId = item.Scope1ChildId,
+            Scope2ChildId = item.Scope2ChildId,
+            Scope3ChildId = item.Scope3ChildId,
+            BiogenicChildId = item.BiogenicChildId,
+            UnitConversionRatio = item.UnitConversionRatio
+        };
+
+        if (IsSameUnit(item, scope))
+        {
+            item.UnitConversionRatio = 1;
+        }
+
+        if (_grids.TryGetValue((scope, groupId), out var grid) && grid != null)
+        {
+            await grid.EditRow(item);
+        }
+        #endregion
+    }
+
+    private async Task SaveRow(TbEmissionMapping item, eTgoScopeNo scope, int groupId)
+    {
+        #region hide [2026-08-21]
+        if (IsSameUnit(item, scope))
+        {
+            item.UnitConversionRatio = 1;
+        }
+
+        if (_grids.TryGetValue((scope, groupId), out var grid) && grid != null)
+        {
+            await grid.UpdateRow(item);
+        }
+        #endregion
+    }
+
+    private void CancelEdit(TbEmissionMapping item, eTgoScopeNo scope, int groupId)
+    {
+        #region hide [2026-08-21]
+        if (_editingItemBackup != null)
+        {
+            item.Scope1ChildId = _editingItemBackup.Scope1ChildId;
+            item.Scope2ChildId = _editingItemBackup.Scope2ChildId;
+            item.Scope3ChildId = _editingItemBackup.Scope3ChildId;
+            item.BiogenicChildId = _editingItemBackup.BiogenicChildId;
+            item.UnitConversionRatio = _editingItemBackup.UnitConversionRatio;
+        }
+        _editingItemBackup = null;
+
+        if (_grids.TryGetValue((scope, groupId), out var grid) && grid != null)
+        {
+            grid.CancelEditRow(item);
+        }
+        #endregion
+    }
+
+    private async Task OnUpdateRow(TbEmissionMapping item)
+    {
+        #region hide [2026-08-21]
+        try
+        {
+            item.SourceType = eSourceType.Default;
+            item.SubscriptionId = null;
+            var updated = await EmissionMappingService.UpdateAsync(item);
+            NotificationService.Notify(NotificationSeverity.Success, "Updated", $"Emission mapping ID {updated.Id} updated successfully.");
+            _editingItemBackup = null;
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating mapping {Id}", item.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+        }
+        #endregion
+    }
+
+    private async Task ConfirmDelete(TbEmissionMapping item)
+    {
+        #region hide [2026-08-21]
+        var confirmed = await DialogService.Confirm(
+            "Are you sure you want to delete this mapping relationship?",
+            "Delete Confirmation",
+            new ConfirmOptions { OkButtonText = "Delete", CancelButtonText = "Cancel" });
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var success = await EmissionMappingService.DeleteAsync(item.Id);
+                if (success)
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Deleted", "Deleted successfully.");
+                    await LoadDataAsync();
+                }
+                else
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to delete from database.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error deleting mapping.");
+            }
+        }
+        #endregion
+    }
+    #endregion
+
+    #region Render UI helper
+    private RenderFragment RenderAccordionForScope(eTgoScopeNo scope)
+    {
+        #region hide [2026-08-21]
+        var groupsInScope = _allGroups
+            .Where(g => g.TgoScopeNo == scope)
+            .OrderBy(g => g.Id)
+            .ToList();
+
+        if (!groupsInScope.Any())
+        {
+            return @<div class="alert alert-info text-center py-4 border rounded-3 bg-white">
+                <RadzenIcon Icon="info" Style="font-size: 2rem;" Class="text-muted mb-2 d-block" />
+                No groups configured for this Scope.
+            </div>;
+        }
+
+        return __builder =>
+        {
+            <RadzenCard Class="shadow-sm border-0 rounded-3 bg-white p-2">
+                <RadzenAccordion Multiple="true" Class="w-100 border-0 bg-transparent">
+                    <Items>
+                        @{
+                            int groupIndex = 1;
+                            foreach (var group in groupsInScope)
+                            {
+                                var currentGroup = group;
+                                var groupTitle = currentGroup.Title;
+                                var specificMappings = _filteredItems.Where(m => GetGroupIdForScope(m, scope) == currentGroup.Id).ToList();
+                                var recordCount = specificMappings.Count;
+                                var displayIndex = groupIndex;
+                                groupIndex++;
+
+                                <RadzenAccordionItem Icon="folder" Class="mb-2 shadow-sm border rounded-2"
+                                                     Style="background-color: var(--rz-card-background-color); border-color: var(--rz-border-color);"
+                                                     Selected="@_expandedGroupIds.Contains(currentGroup.Id)"
+                                                     SelectedChanged="@(val => OnAccordionItemSelectChanged(currentGroup.Id, val))">
+                                    <Template>
+                                        <span class="d-flex align-items-center">
+                                            @displayIndex. @groupTitle
+                                            @if (recordCount > 0)
+                                            {
+                                                @(" ")
+                                                <span>(<strong>@recordCount</strong> @(recordCount > 1 ? "records" : "record"))</span>
+                                            }
+                                        </span>
+                                    </Template>
+                                    <ChildContent>
+                                        <RadzenCard Style="min-height:150px; overflow: auto;" Class="p-2 border-0 bg-transparent">
+                                            @if (_expandedGroupIds.Contains(currentGroup.Id) && recordCount > 0)
+                                            {
+                                                @RenderGridForGroupData(specificMappings, currentGroup.Id, scope)
+                                            }
+                                            else if (recordCount == 0)
+                                            {
+                                                <div class="p-3 text-center text-muted small">No mapping records reference this group.</div>
+                                            }
+                                        </RadzenCard>
+                                    </ChildContent>
+                                </RadzenAccordionItem>
+                            }
+                        }
+                    </Items>
+                </RadzenAccordion>
+            </RadzenCard>
+        };
+        #endregion
+    }
+
+    private RenderFragment RenderGridForGroupData(List<TbEmissionMapping> data, int groupId, eTgoScopeNo scope)
+    {
+        #region hide [2026-08-21]
+        return __builder =>
+        {
+            <RadzenDataGrid @ref="_grids[(scope, groupId)]"
+                            Data="@data" TItem="TbEmissionMapping" AllowColumnResize="true"
+                            AllowPaging="true" PageSize="@_pageSize" PageSizeOptions="@_pageSizeOptions"
+                            AllowSorting="true" ColumnWidth="200px" PagerHorizontalAlign="HorizontalAlign.Right" ShowPagingSummary="true"
+                            EditMode="DataGridEditMode.Single" RowUpdate="@OnUpdateRow"
+                            Style="@(GridStyles.Default)">
+                <Columns>
+                    <RadzenDataGridColumn TItem="TbEmissionMapping" Title="#" Width="50px" TextAlign="TextAlign.Center" Sortable="false" Filterable="false">
+                        <Template Context="d">
+                            @(data.IndexOf(d) + 1)
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="TbEmissionMapping" Property="Id" Title="ID" Width="70px" TextAlign="TextAlign.Center" />
+
+                    @if (scope == eTgoScopeNo.Scope1)
+                    {
+                        <RadzenDataGridColumn TItem="TbEmissionMapping" Title="Scope 1 Source (Master)" MinWidth="240px">
+                            <Template Context="item">
+                                <div class="fw-bold text-primary">@GetSourceName(item.Scope1ChildId)</div>
+                                @if (item.Scope1ChildId != 0)
+                                {
+                                    <div class="small text-success fw-bold">EF: @(GetSourceEF(item.Scope1ChildId)?.ToString("N6")) | Unit: @GetSourceUnit(item.Scope1ChildId)</div>
+                                }
+                            </Template>
+                            <EditTemplate Context="item">
+                                <div class="fw-bold text-muted">@GetSourceName(item.Scope1ChildId)</div>
+                                @if (item.Scope1ChildId != 0)
+                                {
+                                    <div class="small text-muted fw-bold">EF: @(GetSourceEF(item.Scope1ChildId)?.ToString("N6")) | Unit: @GetSourceUnit(item.Scope1ChildId)</div>
+                                }
+                            </EditTemplate>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TbEmissionMapping" Property="UnitConversionRatio" Title="Conversion Ratio" MinWidth="180px" TextAlign="TextAlign.Center">
+                            <Template Context="item">
+                                @if (IsSameUnit(item, scope))
+                                {
+                                    <span class="badge bg-light text-secondary border font-monospace px-2 py-1">1 (Same Unit)</span>
+                                    <div class="small text-muted mt-1" style="font-size: 11px;">
+                                        @GetConversionUnitText(item, scope)
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div>
+                                        <span class="fw-bold text-primary">@(item.UnitConversionRatio.HasValue ? item.UnitConversionRatio.Value.ToString("0.######") : "1")</span>
+                                    </div>
+                                    <div class="small text-muted mt-1" style="font-size: 11px;">
+                                        @GetConversionUnitText(item, scope)
+                                    </div>
+                                }
+                            </Template>
+                            <EditTemplate Context="item">
+                                @if (IsSameUnit(item, scope))
+                                {
+                                    <div class="small text-muted text-center fw-bold bg-light py-1 border rounded">1 (Read-Only)</div>
+                                }
+                                else
+                                {
+                                    <RadzenNumeric TValue="decimal?" @bind-Value="item.UnitConversionRatio" Format="0.######" Step="0.0001" Placeholder="1.0" Class="w-100" />
+                                }
+                            </EditTemplate>
+                        </RadzenDataGridColumn>
+                    }
+                    else if (scope == eTgoScopeNo.Scope2)
+                    {
+                        <RadzenDataGridColumn TItem="TbEmissionMapping" Title="Scope 2 Source (Master)" MinWidth="240px">
+                            <Template Context="item">
+                                <div class="fw-bold text-primary">@GetSourceName(item.Scope2ChildId)</div>
+                                @if (item.Scope2ChildId != 0)
+                                {
+                                    <div class="small text-success fw-bold">EF: @(GetSourceEF(item.Scope2ChildId)?.ToString("N6")) | Unit: @GetSourceUnit(item.Scope2ChildId)</div>
+                                }
+                            </Template>
+                            <EditTemplate Context="item">
+                                <div class="fw-bold text-muted">@GetSourceName(item.Scope2ChildId)</div>
+                                @if (item.Scope2ChildId != 0)
+                                {
+                                    <div class="small text-muted fw-bold">EF: @(GetSourceEF(item.Scope2ChildId)?.ToString("N6")) | Unit: @GetSourceUnit(item.Scope2ChildId)</div>
+                                }
+                            </EditTemplate>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TbEmissionMapping" Property="UnitConversionRatio" Title="Conversion Ratio" MinWidth="180px" TextAlign="TextAlign.Center">
+                            <Template Context="item">
+                                @if (IsSameUnit(item, scope))
+                                {
+                                    <span class="badge bg-light text-secondary border font-monospace px-2 py-1">1 (Same Unit)</span>
+                                    <div class="small text-muted mt-1" style="font-size: 11px;">
+                                        @GetConversionUnitText(item, scope)
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div>
+                                        <span class="fw-bold text-primary">@(item.UnitConversionRatio.HasValue ? item.UnitConversionRatio.Value.ToString("0.######") : "1")</span>
+                                    </div>
+                                    <div class="small text-muted mt-1" style="font-size: 11px;">
+                                        @GetConversionUnitText(item, scope)
+                                    </div>
+                                }
+                            </Template>
+                            <EditTemplate Context="item">
+                                @if (IsSameUnit(item, scope))
+                                {
+                                    <div class="small text-muted text-center fw-bold bg-light py-1 border rounded">1 (Read-Only)</div>
+                                }
+                                else
+                                {
+                                    <RadzenNumeric TValue="decimal?" @bind-Value="item.UnitConversionRatio" Format="0.######" Step="0.0001" Placeholder="1.0" Class="w-100" />
+                                }
+                            </EditTemplate>
+                        </RadzenDataGridColumn>
+                    }
+
+                    <RadzenDataGridColumn TItem="TbEmissionMapping" Title="Scope 3 Source (Child)" MinWidth="240px">
+                        <Template Context="item">
+                            <div>@GetSourceName(item.Scope3ChildId)</div>
+                            @if (item.Scope3ChildId != 0)
+                            {
+                                <div class="small text-success fw-bold">EF: @(GetSourceEF(item.Scope3ChildId)?.ToString("N6")) | Unit: @GetSourceUnit(item.Scope3ChildId)</div>
+                            }
+                        </Template>
+                        <EditTemplate Context="item">
+                            <RadzenDropDown TValue="int" @bind-Value="item.Scope3ChildId" Data="@_scope3Sources"
+                                            TextProperty="DisplayName" ValueProperty="Id"
+                                            Placeholder="None" AllowClear="true" Class="w-100" AllowFiltering="true"
+                                            Change="@(args => OnChildSourceChanged(item, scope))" />
+                        </EditTemplate>
+                    </RadzenDataGridColumn>
+
+                    @if (scope == eTgoScopeNo.Scope1)
+                    {
+                        <RadzenDataGridColumn TItem="TbEmissionMapping" Title="Biogenic Source (Child)" MinWidth="240px">
+                            <Template Context="item">
+                                <div>@GetSourceName(item.BiogenicChildId)</div>
+                                @if (item.BiogenicChildId != 0)
+                                {
+                                    <div class="small text-success fw-bold">EF: @(GetSourceEF(item.BiogenicChildId)?.ToString("N6")) | Unit: @GetSourceUnit(item.BiogenicChildId)</div>
+                                    @if (item.BiogenicSharePercent > 0)
+                                    {
+                                        <div class="small text-muted">Biogenic Share: <b class="text-primary">@item.BiogenicSharePercent.ToString("N2")%</b></div>
+                                    }
+                                }
+                            </Template>
+                            <EditTemplate Context="item">
+                                <RadzenDropDown TValue="int" @bind-Value="item.BiogenicChildId" Data="@_biogenicSources"
+                                                TextProperty="DisplayName" ValueProperty="Id"
+                                                Placeholder="None" AllowClear="true" Class="w-100" AllowFiltering="true"
+                                                Change="@(args => OnChildSourceChanged(item, scope))" />
+                            </EditTemplate>
+                        </RadzenDataGridColumn>
+                    }
+
+                    <RadzenDataGridColumn TItem="TbEmissionMapping" Title="Actions" Width="120px" TextAlign="TextAlign.Center" Sortable="false" Filterable="false" Frozen="true" FrozenPosition="FrozenColumnPosition.Right">
+                        <Template Context="item">
+                            <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small" Click="@(args => EditRow(item, scope, groupId))" @onclick:stopPropagation="true" />
+                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="@(args => ConfirmDelete(item))" @onclick:stopPropagation="true" />
+                        </Template>
+                        <EditTemplate Context="item">
+                            <RadzenButton Icon="check" ButtonStyle="ButtonStyle.Success" Size="ButtonSize.Small" Click="@(args => SaveRow(item, scope, groupId))" />
+                            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small" Click="@(args => CancelEdit(item, scope, groupId))" />
+                        </EditTemplate>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        };
+        #endregion
+    }
+    #endregion
+}

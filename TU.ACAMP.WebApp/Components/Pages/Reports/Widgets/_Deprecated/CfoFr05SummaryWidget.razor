@@ -1,0 +1,174 @@
+@using TU.ACAMP.WebApp.Services.Reports
+
+@* [2026-09-15][Antigravity] Step 6 Fr-05 Executive Summary Widget: Scopes, 7 GHG Matrix, and multi-year comparison *@
+
+<RadzenStack Gap="1.25rem" Class="pt-3">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-05: Executive GHG Emissions Summary</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Calculated totals across Scope 1, Scope 2, Scope 3, and 7 greenhouse gases.
+        </RadzenText>
+    </div>
+
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        <strong>Formula Notice:</strong> Sheet Fr-05 in the final AR5 Excel workbook is calculated automatically by template formulas (e.g. <code>=ROUNDUP('Fr-04.1'...)</code>). The system does not overwrite Fr-05 formula cells.
+    </RadzenAlert>
+
+    <!-- Stat Cards -->
+    <div class="row g-3">
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-danger">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Gross Emissions</RadzenText>
+                <div class="d-flex align-items-baseline gap-1">
+                    <span class="fs-4 fw-bold text-danger">@((CalcReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</span>
+                    <span class="text-secondary small">tCO₂e</span>
+                </div>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-warning">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 1 (Direct)</RadzenText>
+                <div class="d-flex align-items-baseline gap-1">
+                    <span class="fs-4 fw-bold text-dark">@((CalcReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</span>
+                    <span class="text-secondary small">tCO₂e</span>
+                </div>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-primary">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 2 (Energy)</RadzenText>
+                <div class="d-flex align-items-baseline gap-1">
+                    <span class="fs-4 fw-bold text-primary">@((CalcReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</span>
+                    <span class="text-secondary small">tCO₂e</span>
+                </div>
+            </RadzenCard>
+        </div>
+        <div class="col-12 col-sm-6 col-md-3">
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-info">
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 3 (Value Chain)</RadzenText>
+                <div class="d-flex align-items-baseline gap-1">
+                    <span class="fs-4 fw-bold text-info">@((CalcReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</span>
+                    <span class="text-secondary small">tCO₂e</span>
+                </div>
+            </RadzenCard>
+        </div>
+    </div>
+
+    <!-- 7 GHG Gas Inventory Matrix -->
+    <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mt-2 mb-0">7 Greenhouse Gases Matrix (AR5 Standard)</RadzenText>
+    <div class="table-responsive border rounded-3">
+        <table class="table table-bordered table-hover align-middle mb-0" style="font-size: 0.85rem;">
+            <thead class="table-light">
+                <tr>
+                    <th>Gas Name</th>
+                    <th style="width: 90px;" class="text-center">Formula</th>
+                    <th style="width: 110px;" class="text-end">GWP (AR5)</th>
+                    <th style="width: 130px;" class="text-end">Scope 1 (tCO₂e)</th>
+                    <th style="width: 130px;" class="text-end">Scope 2 (tCO₂e)</th>
+                    <th style="width: 130px;" class="text-end">Scope 3 (tCO₂e)</th>
+                    <th style="width: 110px;" class="text-end">Share %</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (CalcReport?.GasInventory != null)
+                {
+                    @foreach (var gas in CalcReport.GasInventory)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@gas.GasName</td>
+                            <td class="text-center font-monospace">@gas.ChemicalFormula</td>
+                            <td class="text-end font-monospace">@gas.GwpFactor.ToString("N1")</td>
+                            <td class="text-end font-monospace">@gas.Scope1_tCO2e.ToString("N3")</td>
+                            <td class="text-end font-monospace">@gas.Scope2_tCO2e.ToString("N3")</td>
+                            <td class="text-end font-monospace">@gas.Scope3_tCO2e.ToString("N3")</td>
+                            <td class="text-end fw-bold text-primary font-monospace">@gas.SharePercent.ToString("F1")%</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Multi-Year Alignment Comparison (if Base Year is set) -->
+    @if (SelectedBaseYear > 0 && ComparisonDto != null)
+    {
+        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mt-2 mb-0">
+            Multi-Year Comparison (Calculate Year @SelectedCalculateYear vs Base Year @SelectedBaseYear)
+        </RadzenText>
+        <div class="table-responsive border rounded-3">
+            <table class="table table-bordered table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                <thead class="table-light">
+                    <tr>
+                        <th>Emissions Category</th>
+                        <th style="width: 150px;" class="text-end">Base Year (@SelectedBaseYear)</th>
+                        <th style="width: 150px;" class="text-end">Calculate Year (@SelectedCalculateYear)</th>
+                        <th style="width: 140px;" class="text-end">Delta (tCO₂e)</th>
+                        <th style="width: 120px;" class="text-end">Change %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="fw-semibold">Scope 1 (Direct)</td>
+                        <td class="text-end font-monospace">@((BaseReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace">@((CalcReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.Scope1Delta_tCO2e)">
+                            @ComparisonDto.Scope1Delta_tCO2e.ToString("+0.00;-0.00;0.00")
+                        </td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.Scope1PercentChange)">
+                            @ComparisonDto.Scope1PercentChange.ToString("+0.0;-0.0;0.0") %
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="fw-semibold">Scope 2 (Energy)</td>
+                        <td class="text-end font-monospace">@((BaseReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace">@((CalcReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.Scope2Delta_tCO2e)">
+                            @ComparisonDto.Scope2Delta_tCO2e.ToString("+0.00;-0.00;0.00")
+                        </td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.Scope2PercentChange)">
+                            @ComparisonDto.Scope2PercentChange.ToString("+0.0;-0.0;0.0") %
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="fw-semibold">Scope 3 (Value Chain)</td>
+                        <td class="text-end font-monospace">@((BaseReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace">@((CalcReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.Scope3Delta_tCO2e)">
+                            @ComparisonDto.Scope3Delta_tCO2e.ToString("+0.00;-0.00;0.00")
+                        </td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.Scope3PercentChange)">
+                            @ComparisonDto.Scope3PercentChange.ToString("+0.0;-0.0;0.0") %
+                        </td>
+                    </tr>
+                    <tr class="table-light fw-bold">
+                        <td>Total Gross Emissions</td>
+                        <td class="text-end font-monospace">@((BaseReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace">@((CalcReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.GrossDelta_tCO2e)">
+                            @ComparisonDto.GrossDelta_tCO2e.ToString("+0.00;-0.00;0.00")
+                        </td>
+                        <td class="text-end font-monospace @GetDeltaColorClass(ComparisonDto.GrossPercentChange)">
+                            @ComparisonDto.GrossPercentChange.ToString("+0.0;-0.0;0.0") %
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    }
+</RadzenStack>
+
+@code {
+    // [2026-09-15][Antigravity] Parameters for Step 6 Fr-05 Summary Widget
+    [Parameter] public int SelectedCalculateYear { get; set; }
+    [Parameter] public int SelectedBaseYear { get; set; }
+    [Parameter] public CfoReportService.CfoAuditReportDto? CalcReport { get; set; }
+    [Parameter] public CfoReportService.CfoAuditReportDto? BaseReport { get; set; }
+    [Parameter] public MultiYearComparisonDto? ComparisonDto { get; set; }
+
+    private string GetDeltaColorClass(decimal value)
+    {
+        if (value > 0) return "text-danger fw-bold";
+        if (value < 0) return "text-success fw-bold";
+        return "text-secondary";
+    }
+}

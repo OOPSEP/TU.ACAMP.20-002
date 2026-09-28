@@ -1,0 +1,5 @@
+Input: 'ดีเซล (Stationary)' -> Matched Source: Id=19 Title='Diesel B7 (แบบคิด EF ของ Biofuel ด้วย)' -> Mapping: Id=1 (S3=186, Bio=21)
+Input: 'ไฟฟ้าแบบ grid mix ปี 2022-2024; LCIA method IPCC 2013 GWP 100a V1.03 (CFO Scope2)' -> Matched Source: Id=131 Title='ไฟฟ้าแบบ grid mix ปี 2022-2024; LCIA method IPCC 2013 GWP 100a V1.03 (CFO Scope2)' -> Mapping: Id=32 (S3=132, Bio=0)
+Input: 'LPG' -> Matched Source: Id=5 Title='LPG' -> Mapping: Id=37 (S3=182, Bio=0)
+Input: 'Gasohol (E10)' -> Matched Source: Id=25 Title='Gasohol (E10)' -> Mapping: Id=3 (S3=183, Bio=27)
+Input: 'ชานอ้อย' -> Matched Source: Id=50 Title='Baggasse' -> Mapping: Id=27 (S3=0, Bio=52)

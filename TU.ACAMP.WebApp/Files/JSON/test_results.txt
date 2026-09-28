@@ -1,0 +1,3 @@
+Input: 'ดีเซล (Stationary)' -> Matched Source: Id=15, Title='Diesel', GroupId=1 -> Mapping: 45 (Scope3ChildId=186)
+Input: 'ไฟฟ้าแบบ grid mix ปี 2022-2024; LCIA method IPCC 2013 GWP 100a V1.03 (CFO Scope2)' -> Matched Source: Id=131, Title='ไฟฟ้าแบบ grid mix ปี 2022-2024; LCIA method IPCC 2013 GWP 100a V1.03 (CFO Scope2)', GroupId=5 -> Mapping: 32 (Scope3ChildId=132)
+Input: 'น้ำประปา' -> NO MATCH

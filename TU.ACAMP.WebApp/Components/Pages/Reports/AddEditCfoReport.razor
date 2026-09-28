@@ -1,0 +1,1799 @@
+
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Services.Reports
+
+@attribute [Authorize]
+
+@inject CfoReportService CfoReportService
+@inject CfoReportStorageService ReportStorageService
+@inject CorporateService CorporateService
+@inject CompanyService CompanyService
+@inject FacilityService FacilityService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<AddEditCfoReport> Logger
+
+<PageTitle>@(_isViewMode ? "View CFO Report" : "New CFO Report") - ACAMP</PageTitle>
+
+<style>
+    /* [2026-09-15][Antigravity] Disable pointer clicks on step header items so navigation occurs strictly via Next/Back */
+    .cfo-wizard-steps .rz-steps-items {
+        pointer-events: none !important;
+    }
+</style>
+
+<div class="container-fluid py-3 px-4">
+
+    <!-- ===================== TOP HEADER ===================== -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToBack" Class="me-2" Style="border-radius: 6px;"
+                              Title="Back to Report Ledger" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isViewMode ? "View Verification Report" : "New Verification Report")
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    TGO CFO (AR5) verification wizard — sequential step-by-step audit inspection.
+                </RadzenText>
+                <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="TCFO_R_01 v07 (AR5)" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                @if (_isViewMode && _loadedDoc != null)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="Locked Snapshot" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                }
+            </div>
+        </div>
+
+        @if (_isViewMode && _loadedDoc != null)
+        {
+            <div class="d-flex gap-2">
+                <RadzenButton Text="Back to Ledger" Icon="list" ButtonStyle="ButtonStyle.Light" Variant="Variant.Outlined"
+                              Click="@NavigateToBack" Style="border-radius: 6px;" />
+                <RadzenButton Text="Create Revision" Icon="content_copy" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                              Click="@NavigateToRevision" Style="border-radius: 6px; font-weight: 600;" />
+            </div>
+        }
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading report form..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_isViewMode)
+    {
+        <!-- ===================== VIEW MODE (LOCKED SNAPSHOT) ===================== -->
+        @if (_loadedDoc == null)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false">
+                Report snapshot not found. It may have been deleted from the ledger.
+            </RadzenAlert>
+        }
+        else
+        {
+            <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-3 border-start border-4 border-success">
+                <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Report Title</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_loadedDoc.Title</RadzenText>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Organization</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_loadedDoc.OrganizationTitle</RadzenText>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Calculate Year</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold text-primary mb-0">@_loadedDoc.CalculateYear</RadzenText>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Base Year</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@(_loadedDoc.BaseYear > 0 ? _loadedDoc.BaseYear.ToString() : "-")</RadzenText>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Created By</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_loadedDoc.CreatedBy</RadzenText>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Created At</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_loadedDoc.CreatedAt.ToString("dd MMM yyyy HH:mm")</RadzenText>
+                    </div>
+                </div>
+            </RadzenCard>
+
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-sm-6 col-md-3">
+                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-danger">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Gross Emissions</RadzenText>
+                        <span class="fs-4 fw-bold text-danger">@((_loadedDoc.CalculateYearReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</span>
+                        <span class="text-secondary small ms-1">tCO₂e</span>
+                    </RadzenCard>
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-warning">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 1 (Direct)</RadzenText>
+                        <span class="fs-4 fw-bold text-dark">@((_loadedDoc.CalculateYearReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</span>
+                        <span class="text-secondary small ms-1">tCO₂e</span>
+                    </RadzenCard>
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-primary">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 2 (Energy)</RadzenText>
+                        <span class="fs-4 fw-bold text-primary">@((_loadedDoc.CalculateYearReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</span>
+                        <span class="text-secondary small ms-1">tCO₂e</span>
+                    </RadzenCard>
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-info">
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 3 (Value Chain)</RadzenText>
+                        <span class="fs-4 fw-bold text-info">@((_loadedDoc.CalculateYearReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</span>
+                        <span class="text-secondary small ms-1">tCO₂e</span>
+                    </RadzenCard>
+                </div>
+            </div>
+
+            <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Class="mb-3">
+                This snapshot is locked for audit integrity and cannot be edited. Use <strong>Create Revision</strong> to generate a new report with the same settings.
+            </RadzenAlert>
+
+            <div class="d-flex justify-content-end gap-2">
+                <RadzenButton Text="Back to Ledger" Icon="list" ButtonStyle="ButtonStyle.Light" Variant="Variant.Outlined"
+                              Click="@NavigateToBack" Style="border-radius: 6px;" />
+                <RadzenButton Text="Create Revision" Icon="content_copy" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                              Click="@NavigateToRevision" Style="border-radius: 6px; font-weight: 600;" />
+            </div>
+        }
+    }
+    else
+    {
+        <!-- ===================== WIZARD (ADD / EDIT MODE) ===================== -->
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" Size="AlertSize.Small" Class="mb-3">
+                @_errorMessage
+            </RadzenAlert>
+        }
+
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-3">
+            <RadzenSteps @bind-SelectedIndex="@_activeStep" ShowStepsButtons="false" Class="cfo-wizard-steps">
+                <Steps>
+
+                    <!-- STEP 1 (Index 0): SETUP -->
+                    <RadzenStepsItem Text="1. Setup">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div>
+                                <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Report Scope &amp; Target Organization</RadzenText>
+                                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                    Specify the target organization level, reporting periods, and consolidation approach.
+                                </RadzenText>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-4">
+                                    <RadzenFormField Text="Organization Level *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenDropDown Data="@_levelOptions" TextProperty="Text" ValueProperty="Value"
+                                                        Value="@((int)_level)"
+                                                        ValueChanged="@((int v) => OnLevelChangedAsync(v))"
+                                                        TValue="int" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12 col-md-8">
+                                    <RadzenFormField Text="Target Organization *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenDropDown Data="@_targetOptions" TextProperty="Text" ValueProperty="Value"
+                                                        Value="@_targetId"
+                                                        ValueChanged="@((int v) => OnTargetChanged(v))"
+                                                        AllowFiltering="true" TValue="int" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-7">
+                                    <RadzenFormField Text="Report Title *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox @bind-Value="@_title" Placeholder="e.g. GHG Emissions Report Year 2026" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12 col-md-5">
+                                    <RadzenFormField Text="Preparer / Lead Verifier" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox @bind-Value="@_createdBy" Placeholder="e.g. Lead GHG Auditor" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Calculate Year *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenDropDown Data="@_calculateYearOptions"
+                                                        Value="@_selectedCalculateYear"
+                                                        ValueChanged="@((int v) => OnCalculateYearChanged(v))"
+                                                        TValue="int" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Base Year" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenDropDown Data="@_baseYearOptions" TextProperty="Text" ValueProperty="Value"
+                                                        Value="@_selectedBaseYear"
+                                                        ValueChanged="@((int v) => OnBaseYearChanged(v))"
+                                                        TValue="int" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Consolidation Approach" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenDropDown Data="@_consolidationOptions" @bind-Value="@_consolidationApproach"
+                                                        TValue="string" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Materiality Threshold (%)" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenNumeric @bind-Value="@_materialityThreshold" Min="0" Max="100" Step="0.5" TValue="decimal" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                    <!-- STEP 2 (Index 1): FR-01 ORGANIZATION DETAILS -->
+                    <RadzenStepsItem Text="2. Fr-01 Organization">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div>
+                                <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-01: Organization Details</RadzenText>
+                                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                    Values entered here are populated directly into sheet Fr-01 of the official TGO AR5 workbook.
+                                </RadzenText>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Cell B6 — Organization Name *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox @bind-Value="@_fr01OrgTitle" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Cell G4 — GHG Working Team *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox @bind-Value="@_fr01GhgTeam" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Cell H22 — Reporting Period (Calculate Year)" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox Value="@GetCalculatePeriodText()" ReadOnly="true" Style="width: 100%; background-color: #f8fafc;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <RadzenFormField Text="Cell H24 — Reporting Period (Base Year)" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox Value="@GetBasePeriodText()" ReadOnly="true" Style="width: 100%; background-color: #f8fafc;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <RadzenFormField Text="Cell I32 — Organization (Certification Target) *" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextBox @bind-Value="@_fr01CertifierOrg" Style="width: 100%;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <hr class="my-2" />
+
+                            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-1">Operational Activity Summaries [GHG-04]</RadzenText>
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <RadzenFormField Text="Cell H9 — Scope 1 Activities" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextArea Value="@_fr01Scope1Summary" ReadOnly="true" Rows="2" Style="width: 100%; background-color: #f8fafc;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12">
+                                    <RadzenFormField Text="Cell H18 — Scope 2 Activities" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextArea Value="@_fr01Scope2Summary" ReadOnly="true" Rows="2" Style="width: 100%; background-color: #f8fafc;" />
+                                    </RadzenFormField>
+                                </div>
+                                <div class="col-12">
+                                    <RadzenFormField Text="Cell H21 — Scope 3 Activities" Variant="Variant.Outlined" Style="width: 100%;">
+                                        <RadzenTextArea Value="@_fr01Scope3Summary" ReadOnly="true" Rows="2" Style="width: 100%; background-color: #f8fafc;" />
+                                    </RadzenFormField>
+                                </div>
+                            </div>
+
+                            <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                <strong>Diagrams notice:</strong> Worksheets <code>Fr-02</code> (Process Boundary Diagram) and <code>Fr-03.1</code> (Organizational Structure) are graphical objects to be completed in Excel after export. The system preserves them untouched.
+                            </RadzenAlert>
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                    <!-- STEP 3 (Index 2): DATA PRE-FLIGHT -->
+                    <RadzenStepsItem Text="3. Data Pre-flight">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <div>
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Pre-Flight Validation &amp; Emission Factor Checks</RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                        Validates emission factor validity as of report generation date and checks row capacity.
+                                    </RadzenText>
+                                </div>
+                                <div>
+                                    <RadzenButton Text="Re-run Pre-flight" Icon="refresh" ButtonStyle="ButtonStyle.Light"
+                                                  Variant="Variant.Outlined" Size="ButtonSize.Small"
+                                                  Click="@RunPreflightAsync" IsBusy="@_isPreflighting" Style="border-radius: 6px;" />
+                                </div>
+                            </div>
+
+                            @if (_isPreflighting)
+                            {
+                                <div class="py-4 text-center">
+                                    <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Small" />
+                                    <RadzenText Text="Executing data pre-flight analysis..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+                                </div>
+                            }
+                            else if (_calcReport == null)
+                            {
+                                <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false">
+                                    Pre-flight has not been executed yet. Click <strong>Re-run Pre-flight</strong> to calculate activity lines.
+                                </RadzenAlert>
+                            }
+                            else
+                            {
+                                <div class="row g-3">
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-primary">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Activity Lines</RadzenText>
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcReport.AuditLines.Count</RadzenText>
+                                        </RadzenCard>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Gross (tCO₂e)</RadzenText>
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcReport.TotalGrossEmissions_tCO2e.ToString("N3")</RadzenText>
+                                        </RadzenCard>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-danger">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">EF Issues</RadzenText>
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_expiredEfList.Count</RadzenText>
+                                        </RadzenCard>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-warning">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Row Overflow</RadzenText>
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcOverflowWarnings.Count</RadzenText>
+                                        </RadzenCard>
+                                    </div>
+                                </div>
+
+                                @if (_calcReport.AuditLines.Count == 0)
+                                {
+                                    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                        No activity data found for Calculate Year @_selectedCalculateYear. Generating a snapshot will produce an empty report.
+                                    </RadzenAlert>
+                                }
+
+                                @foreach (var warn in _calcOverflowWarnings)
+                                {
+                                    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                        @warn
+                                    </RadzenAlert>
+                                }
+
+                                @if (_hasEfSourceMismatch)
+                                {
+                                    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                        <strong>Emission Factor Mismatch Warning:</strong> Calculate Year (@_selectedCalculateYear) and Base Year (@_selectedBaseYear) utilize differing sets of emission factor sources. Historical delta comparison may be impacted.
+                                    </RadzenAlert>
+                                }
+
+                                @if (_expiredEfList.Any())
+                                {
+                                    <div class="alert alert-warning border border-warning rounded-3 p-3">
+                                        <div class="d-flex align-items-center gap-2 mb-2">
+                                            <RadzenIcon Icon="warning" Class="text-warning" />
+                                            <strong class="text-dark">Expired emission factors detected (@_expiredEfList.Count items)</strong>
+                                        </div>
+                                        <ul class="small text-danger mb-3 ps-3">
+                                            @foreach (var item in _expiredEfList.Take(5))
+                                            {
+                                                <li><strong>@item.SourceName</strong> (@item.TopicTitle) — Factor: @item.EF.ToString("N4") @item.EfUnitName</li>
+                                            }
+                                            @if (_expiredEfList.Count > 5)
+                                            {
+                                                <li>and @(_expiredEfList.Count - 5) more item(s)</li>
+                                            }
+                                        </ul>
+                                        <RadzenFormField Text="Audit Acknowledgment Reason *" Variant="Variant.Outlined" Style="width: 100%;">
+                                            <RadzenTextArea @bind-Value="@_acknowledgmentReason" Rows="2"
+                                                            Placeholder="e.g. Continued use approved by external verification body for baseline continuity"
+                                                            Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <RadzenAlert AlertStyle="AlertStyle.Success" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                        All emission factors in this reporting period are active and valid.
+                                    </RadzenAlert>
+                                }
+                            }
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                    <!-- STEP 4 (Index 3): FR-04.1 INVENTORY (CALCULATE YEAR) -->
+                    <RadzenStepsItem Text="4. Fr-04.1 Inventory">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <div>
+                                    <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">
+                                        Sheet Fr-04.1: GHG Inventory — Calculate Year (@_selectedCalculateYear)
+                                    </RadzenText>
+                                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                        Activity data and emissions mapped to template row quotas. Excess rows will be consolidated in Excel.
+                                    </RadzenText>
+                                </div>
+                                <RadzenButton Text="Manage Topics" Icon="open_in_new" ButtonStyle="ButtonStyle.Light"
+                                              Variant="Variant.Outlined" Size="ButtonSize.Small"
+                                              Click="@NavigateToTopics" Style="border-radius: 6px;" />
+                            </div>
+
+                            <!-- Quota Indicators -->
+                            <div class="row g-3">
+                                <div class="col-6 col-md-3">
+                                    <RadzenCard Class="@GetQuotaCardClass(_calcScope1Count, Fr04Scope1Capacity)">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 1 (Rows 10–23)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcScope1Count</RadzenText>
+                                            <span class="text-muted small">/ @Fr04Scope1Capacity quota</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <RadzenCard Class="@GetQuotaCardClass(_calcSepCount, Fr04SeparateCapacity)">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Separate (Rows 25–29)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcSepCount</RadzenText>
+                                            <span class="text-muted small">/ @Fr04SeparateCapacity quota</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <RadzenCard Class="@GetQuotaCardClass(_calcScope2Count, Fr04Scope2Capacity)">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 2 (Rows 31–34)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcScope2Count</RadzenText>
+                                            <span class="text-muted small">/ @Fr04Scope2Capacity quota</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <RadzenCard Class="@GetQuotaCardClass(_calcScope3Count, Fr04Scope3Capacity)">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 3 (Rows 36–42)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_calcScope3Count</RadzenText>
+                                            <span class="text-muted small">/ @Fr04Scope3Capacity quota</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                            </div>
+
+                            @if (_calcReport?.AuditLines != null && _calcReport.AuditLines.Any())
+                            {
+                                <RadzenDataGrid Data="@_calcReport.AuditLines" TItem="CfoReportService.ActivityAuditLineDto"
+                                                AllowPaging="true" PageSize="15" AllowSorting="true" Style="@GridStyles.Default">
+                                    <Columns>
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                                            <Template Context="item">
+                                                @(_calcReport.AuditLines.IndexOf(item) + 1)
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="ScopeNo" Title="Scope" Width="100px" TextAlign="TextAlign.Center">
+                                            <Template Context="item">
+                                                <span class="badge @GetScopeBadgeClass(item.ScopeNo)">@item.ScopeNo.ToString()</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="TopicTitle" Title="Topic / Emission Source" MinWidth="220px">
+                                            <Template Context="item">
+                                                <span class="fw-bold text-dark d-block">@item.TopicTitle</span>
+                                                <small class="text-muted">Source: @item.SourceName (@item.ActivityGroupTitle)</small>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="UnitName" Title="Unit" Width="90px" TextAlign="TextAlign.Center" />
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="Quantity" Title="Quantity" Width="120px" TextAlign="TextAlign.Right">
+                                            <Template Context="item">
+                                                <span class="font-monospace">@item.Quantity.ToString("N2")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="EF" Title="EF (kgCO₂e/Unit)" Width="130px" TextAlign="TextAlign.Right">
+                                            <Template Context="item">
+                                                <span class="font-monospace">@item.EF.ToString("N4")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="Total_tCO2e" Title="Emissions (tCO₂e)" Width="140px" TextAlign="TextAlign.Right">
+                                            <Template Context="item">
+                                                <span class="fw-bold text-danger font-monospace">@item.Total_tCO2e.ToString("N3")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Title="Quota Slot" Width="130px" TextAlign="TextAlign.Center">
+                                            <Template Context="item">
+                                                @if (IsLineOverflow(item, _calcReport.AuditLines))
+                                                {
+                                                    <span class="badge bg-warning text-dark border">Consolidated</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-light text-secondary border">Direct Row</span>
+                                                }
+                                            </Template>
+                                        </RadzenDataGridColumn>
+                                    </Columns>
+                                </RadzenDataGrid>
+                            }
+                            else
+                            {
+                                <div class="py-4 text-center bg-light rounded-3 border border-dashed">
+                                    <p class="text-muted mb-0">No activity data recorded for Calculate Year @_selectedCalculateYear.</p>
+                                </div>
+                            }
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                    <!-- STEP 5 (Index 4): FR-04.2 INVENTORY (BASE YEAR) -->
+                    <RadzenStepsItem Text="5. Fr-04.2 Base Year">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div>
+                                <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">
+                                    Sheet Fr-04.2: Base Year GHG Inventory @(_selectedBaseYear > 0 ? $"({_selectedBaseYear})" : "")
+                                </RadzenText>
+                                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                    Baseline activity lines mapped to sheet Fr-04.2 for historical comparison.
+                                </RadzenText>
+                            </div>
+
+                            @if (_selectedBaseYear <= 0)
+                            {
+                                <div class="py-5 text-center bg-light rounded-3 border border-dashed">
+                                    <RadzenIcon Icon="info" Style="font-size: 2.5rem; color: #94a3b8;" />
+                                    <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold text-dark mt-2 mb-1">
+                                        No base year selected
+                                    </RadzenText>
+                                    <p class="text-muted small mb-0">
+                                        Sheet Fr-04.2 will be cleared in the exported Excel workbook. Proceed to next step.
+                                    </p>
+                                </div>
+                            }
+                            else if (_baseReport?.AuditLines != null && _baseReport.AuditLines.Any())
+                            {
+                                <!-- Quota Indicators for Base Year -->
+                                <div class="row g-3">
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="@GetQuotaCardClass(_baseScope1Count, Fr04Scope1Capacity)">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 1</RadzenText>
+                                            <div class="d-flex align-items-baseline gap-1">
+                                                <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_baseScope1Count</RadzenText>
+                                                <span class="text-muted small">/ @Fr04Scope1Capacity quota</span>
+                                            </div>
+                                        </RadzenCard>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="@GetQuotaCardClass(_baseSepCount, Fr04SeparateCapacity)">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Separate</RadzenText>
+                                            <div class="d-flex align-items-baseline gap-1">
+                                                <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_baseSepCount</RadzenText>
+                                                <span class="text-muted small">/ @Fr04SeparateCapacity quota</span>
+                                            </div>
+                                        </RadzenCard>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="@GetQuotaCardClass(_baseScope2Count, Fr04Scope2Capacity)">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 2</RadzenText>
+                                            <div class="d-flex align-items-baseline gap-1">
+                                                <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_baseScope2Count</RadzenText>
+                                                <span class="text-muted small">/ @Fr04Scope2Capacity quota</span>
+                                            </div>
+                                        </RadzenCard>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenCard Class="@GetQuotaCardClass(_baseScope3Count, Fr04Scope3Capacity)">
+                                            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Scope 3</RadzenText>
+                                            <div class="d-flex align-items-baseline gap-1">
+                                                <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@_baseScope3Count</RadzenText>
+                                                <span class="text-muted small">/ @Fr04Scope3Capacity quota</span>
+                                            </div>
+                                        </RadzenCard>
+                                    </div>
+                                </div>
+
+                                <RadzenDataGrid Data="@_baseReport.AuditLines" TItem="CfoReportService.ActivityAuditLineDto"
+                                                AllowPaging="true" PageSize="15" AllowSorting="true" Style="@GridStyles.Default">
+                                    <Columns>
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                                            <Template Context="item">
+                                                @(_baseReport.AuditLines.IndexOf(item) + 1)
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="ScopeNo" Title="Scope" Width="100px" TextAlign="TextAlign.Center">
+                                            <Template Context="item">
+                                                <span class="badge @GetScopeBadgeClass(item.ScopeNo)">@item.ScopeNo.ToString()</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="TopicTitle" Title="Topic / Emission Source" MinWidth="220px">
+                                            <Template Context="item">
+                                                <span class="fw-bold text-dark d-block">@item.TopicTitle</span>
+                                                <small class="text-muted">Source: @item.SourceName (@item.ActivityGroupTitle)</small>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="UnitName" Title="Unit" Width="90px" TextAlign="TextAlign.Center" />
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="Quantity" Title="Quantity" Width="120px" TextAlign="TextAlign.Right">
+                                            <Template Context="item">
+                                                <span class="font-monospace">@item.Quantity.ToString("N2")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="EF" Title="EF (kgCO₂e/Unit)" Width="130px" TextAlign="TextAlign.Right">
+                                            <Template Context="item">
+                                                <span class="font-monospace">@item.EF.ToString("N4")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+
+                                        <RadzenDataGridColumn TItem="CfoReportService.ActivityAuditLineDto" Property="Total_tCO2e" Title="Emissions (tCO₂e)" Width="140px" TextAlign="TextAlign.Right">
+                                            <Template Context="item">
+                                                <span class="fw-bold text-danger font-monospace">@item.Total_tCO2e.ToString("N3")</span>
+                                            </Template>
+                                        </RadzenDataGridColumn>
+                                    </Columns>
+                                </RadzenDataGrid>
+                            }
+                            else
+                            {
+                                <div class="py-4 text-center bg-light rounded-3 border border-dashed">
+                                    <p class="text-muted mb-0">No activity data found for Base Year @_selectedBaseYear.</p>
+                                </div>
+                            }
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                    <!-- STEP 6 (Index 5): FR-05 SUMMARY -->
+                    <RadzenStepsItem Text="6. Fr-05 Summary">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div>
+                                <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Sheet Fr-05: Executive GHG Emissions Summary</RadzenText>
+                                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                    Calculated totals across Scope 1, Scope 2, Scope 3, and 7 greenhouse gases.
+                                </RadzenText>
+                            </div>
+
+                            <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                <strong>Formula Notice:</strong> Sheet Fr-05 in the final AR5 Excel workbook is calculated automatically by template formulas (e.g. <code>=ROUNDUP('Fr-04.1'...)</code>). The system does not overwrite Fr-05 formula cells.
+                            </RadzenAlert>
+
+                            <!-- Stat Cards -->
+                            <div class="row g-3">
+                                <div class="col-12 col-sm-6 col-md-3">
+                                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-danger">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Gross Emissions</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <span class="fs-4 fw-bold text-danger">@((_calcReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</span>
+                                            <span class="text-secondary small">tCO₂e</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-12 col-sm-6 col-md-3">
+                                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-warning">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 1 (Direct)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <span class="fs-4 fw-bold text-dark">@((_calcReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</span>
+                                            <span class="text-secondary small">tCO₂e</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-12 col-sm-6 col-md-3">
+                                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-primary">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 2 (Energy)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <span class="fs-4 fw-bold text-primary">@((_calcReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</span>
+                                            <span class="text-secondary small">tCO₂e</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-12 col-sm-6 col-md-3">
+                                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100 border-start border-4 border-info">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted fw-semibold d-block">Scope 3 (Value Chain)</RadzenText>
+                                        <div class="d-flex align-items-baseline gap-1">
+                                            <span class="fs-4 fw-bold text-info">@((_calcReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</span>
+                                            <span class="text-secondary small">tCO₂e</span>
+                                        </div>
+                                    </RadzenCard>
+                                </div>
+                            </div>
+
+                            <!-- 7 GHG Gas Inventory Matrix -->
+                            <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mt-2 mb-0">7 Greenhouse Gases Matrix (AR5 Standard)</RadzenText>
+                            <div class="table-responsive border rounded-3">
+                                <table class="table table-bordered table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Gas Name</th>
+                                            <th style="width: 90px;" class="text-center">Formula</th>
+                                            <th style="width: 110px;" class="text-end">GWP (AR5)</th>
+                                            <th style="width: 130px;" class="text-end">Scope 1 (tCO₂e)</th>
+                                            <th style="width: 130px;" class="text-end">Scope 2 (tCO₂e)</th>
+                                            <th style="width: 130px;" class="text-end">Scope 3 (tCO₂e)</th>
+                                            <th style="width: 110px;" class="text-end">Share %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (_calcReport?.GasInventory != null)
+                                        {
+                                            @foreach (var gas in _calcReport.GasInventory)
+                                            {
+                                                <tr>
+                                                    <td class="fw-semibold">@gas.GasName</td>
+                                                    <td class="text-center font-monospace">@gas.ChemicalFormula</td>
+                                                    <td class="text-end font-monospace">@gas.GwpFactor.ToString("N1")</td>
+                                                    <td class="text-end font-monospace">@gas.Scope1_tCO2e.ToString("N3")</td>
+                                                    <td class="text-end font-monospace">@gas.Scope2_tCO2e.ToString("N3")</td>
+                                                    <td class="text-end font-monospace">@gas.Scope3_tCO2e.ToString("N3")</td>
+                                                    <td class="text-end fw-bold text-primary font-monospace">@gas.SharePercent.ToString("F1")%</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Multi-Year Alignment Comparison (if Base Year is set) -->
+                            @if (_selectedBaseYear > 0 && _comparisonDto != null)
+                            {
+                                <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mt-2 mb-0">
+                                    Multi-Year Comparison (Calculate Year @_selectedCalculateYear vs Base Year @_selectedBaseYear)
+                                </RadzenText>
+                                <div class="table-responsive border rounded-3">
+                                    <table class="table table-bordered table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Emissions Category</th>
+                                                <th style="width: 150px;" class="text-end">Base Year (@_selectedBaseYear)</th>
+                                                <th style="width: 150px;" class="text-end">Calculate Year (@_selectedCalculateYear)</th>
+                                                <th style="width: 140px;" class="text-end">Delta (tCO₂e)</th>
+                                                <th style="width: 120px;" class="text-end">Change %</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td class="fw-semibold">Scope 1 (Direct)</td>
+                                                <td class="text-end font-monospace">@((_baseReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace">@((_calcReport?.TotalScope1_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.Scope1Delta_tCO2e)">
+                                                    @_comparisonDto.Scope1Delta_tCO2e.ToString("+0.00;-0.00;0.00")
+                                                </td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.Scope1PercentChange)">
+                                                    @_comparisonDto.Scope1PercentChange.ToString("+0.0;-0.0;0.0") %
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="fw-semibold">Scope 2 (Energy)</td>
+                                                <td class="text-end font-monospace">@((_baseReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace">@((_calcReport?.TotalScope2_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.Scope2Delta_tCO2e)">
+                                                    @_comparisonDto.Scope2Delta_tCO2e.ToString("+0.00;-0.00;0.00")
+                                                </td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.Scope2PercentChange)">
+                                                    @_comparisonDto.Scope2PercentChange.ToString("+0.0;-0.0;0.0") %
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td class="fw-semibold">Scope 3 (Value Chain)</td>
+                                                <td class="text-end font-monospace">@((_baseReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace">@((_calcReport?.TotalScope3_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.Scope3Delta_tCO2e)">
+                                                    @_comparisonDto.Scope3Delta_tCO2e.ToString("+0.00;-0.00;0.00")
+                                                </td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.Scope3PercentChange)">
+                                                    @_comparisonDto.Scope3PercentChange.ToString("+0.0;-0.0;0.0") %
+                                                </td>
+                                            </tr>
+                                            <tr class="table-light fw-bold">
+                                                <td>Total Gross Emissions</td>
+                                                <td class="text-end font-monospace">@((_baseReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace">@((_calcReport?.TotalGrossEmissions_tCO2e ?? 0m).ToString("N2"))</td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.GrossDelta_tCO2e)">
+                                                    @_comparisonDto.GrossDelta_tCO2e.ToString("+0.00;-0.00;0.00")
+                                                </td>
+                                                <td class="text-end font-monospace @GetDeltaColorClass(_comparisonDto.GrossPercentChange)">
+                                                    @_comparisonDto.GrossPercentChange.ToString("+0.0;-0.0;0.0") %
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                    <!-- STEP 7 (Index 6): REVIEW & GENERATE -->
+                    <RadzenStepsItem Text="7. Review &amp; Generate">
+                        <RadzenStack Gap="1.25rem" Class="pt-3">
+                            <div>
+                                <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Final Verification &amp; Snapshot Creation</RadzenText>
+                                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                                    Review report configuration, verify checklist readiness, and generate locked audit ledger snapshot.
+                                </RadzenText>
+                            </div>
+
+                            <!-- Setup Review Summary -->
+                            <RadzenCard Class="shadow-sm border rounded-3 bg-light p-3">
+                                <div class="row g-3">
+                                    <div class="col-12 col-md-6">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Report Title</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_title</RadzenText>
+                                    </div>
+                                    <div class="col-12 col-md-6">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Target Organization (B6)</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_fr01OrgTitle</RadzenText>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">GHG Working Team (G4)</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_fr01GhgTeam</RadzenText>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Calculate Year (H22)</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold text-primary mb-0">@_selectedCalculateYear</RadzenText>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Base Year (H24)</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@(_selectedBaseYear > 0 ? _selectedBaseYear.ToString() : "-")</RadzenText>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">Consolidation / Threshold</RadzenText>
+                                        <RadzenText TextStyle="TextStyle.Body1" Class="fw-bold mb-0">@_consolidationApproach (@_materialityThreshold%)</RadzenText>
+                                    </div>
+                                </div>
+                            </RadzenCard>
+
+                            <!-- Readiness Checklist -->
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success">
+                                        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-2 text-success">
+                                            <RadzenIcon Icon="check_circle" Class="me-1" /> Filled by System
+                                        </RadzenText>
+                                        <ul class="small mb-0 ps-3 text-secondary">
+                                            <li>Fr-01: Organization name, GHG team, certifier, activity summaries</li>
+                                            <li>Fr-03.2: Scope 3 magnitude % and data-driven source checkmarks</li>
+                                            <li>Fr-04.1: Calculate year activity audit lines (@(_calcReport?.AuditLines.Count ?? 0) items)</li>
+                                            <li>Fr-04.2: Base year baseline activity audit lines</li>
+                                            <li>Fr-05: Dynamic formula verification and gross breakdown</li>
+                                        </ul>
+                                    </RadzenCard>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-warning">
+                                        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-2 text-warning">
+                                            <RadzenIcon Icon="edit" Class="me-1" /> Post-Export Manual Entries
+                                        </RadzenText>
+                                        <ul class="small mb-0 ps-3 text-secondary">
+                                            <li>3.1 Organization structure and site boundary diagrams</li>
+                                            <li>3.2.5 / 3.2.7 / 3.2.8 External supply, carbon sink, credits</li>
+                                            <li>5.5 Carbon intensity denominator</li>
+                                            <li>7.1 – 7.3 Data quality management and calibration records</li>
+                                            <li>8. Uncertainty assessment, appendix, and revision log</li>
+                                        </ul>
+                                    </RadzenCard>
+                                </div>
+                            </div>
+
+                            <!-- Emission Factor Notice -->
+                            <div class="d-flex align-items-center gap-2">
+                                <RadzenIcon Icon="verified" Class="text-success" />
+                                <span class="small text-muted">
+                                    Emission Factor Standard: <strong>IPCC AR5 (100-year GWP - TGO Standard)</strong> | Validated against active library status.
+                                </span>
+                            </div>
+
+                            <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+                                Once generated, the report is registered in the ledger as a report item together with its Excel snapshot file.
+                            </RadzenAlert>
+                        </RadzenStack>
+                    </RadzenStepsItem>
+
+                </Steps>
+            </RadzenSteps>
+        </RadzenCard>
+
+        <!-- ===================== WIZARD NAVIGATION BAR ===================== -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                          Click="@NavigateToBack" Disabled="@(_isSaving || _isPreflighting)" Style="border-radius: 6px;" />
+
+            <div class="d-flex gap-2">
+                <RadzenButton Text="Back" Icon="chevron_left" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                              Click="@GoPreviousStep" Disabled="@(_activeStep == 0 || _isSaving || _isPreflighting)" Style="border-radius: 6px;" />
+
+                @if (_activeStep < LastStepIndex)
+                {
+                    <RadzenButton Text="Next" Icon="chevron_right" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Flat"
+                                  Click="@GoNextStepAsync" Disabled="@(_isSaving || _isPreflighting)" Style="border-radius: 6px; font-weight: 600;" />
+                }
+                else
+                {
+                    <RadzenButton Text="@(_isSaving ? "Generating Snapshot..." : "Generate &amp; Lock Snapshot")"
+                                  Icon="@(_isSaving ? "" : "verified")"
+                                  ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                                  Click="@GenerateSnapshotAsync" Disabled="@(_isSaving || _isPreflighting)" IsBusy="@_isSaving"
+                                  Style="border-radius: 6px; font-weight: 600;" />
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    // [2026-09-15][Antigravity] Sequential 7-step Wizard (Next/Back) mirroring TGO AR5 workbook sheets
+    //                           State persistence via encrypted query param 'tab', silent replaceState, and multi-step validation
+
+    #region Route & Query Parameters
+    [Parameter] public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureTargetId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "level")]
+    public int LevelValue { get; set; } = 1;
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSubscriptionId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? SecureTab { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cy")]
+    public string? SecureCalculateYear { get; set; }
+
+    [SupplyParameterFromQuery(Name = "by")]
+    public string? SecureBaseYear { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+    #endregion
+
+    #region Constants & Fields
+    private const int LastStepIndex = 6; // 7 steps total: 0..6
+
+    private const int Fr04Scope1Capacity = 14;   // rows 10..23
+    private const int Fr04SeparateCapacity = 5;  // rows 25..29
+    private const int Fr04Scope2Capacity = 4;    // rows 31..34
+    private const int Fr04Scope3Capacity = 7;    // rows 36..42
+
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _isPreflighting = false;
+    private bool _isViewMode = false;
+    private int _activeStep = 0;
+    private string? _errorMessage;
+    private string? _returnUrl;
+
+    private eTopicLevel _level = eTopicLevel.Corporate;
+    private int _targetId = 0;
+    private int? _selectedSubscriptionId;
+    private HashSet<int> _allowedSubscriptionIds = new();
+
+    // Step 1: Setup fields
+    private string _title = string.Empty;
+    private string _createdBy = "Corporate GHG Team";
+    private int _selectedCalculateYear = AppTimeZone.LocalNow.Year;
+    private int _selectedBaseYear = 0;
+    private string _consolidationApproach = "Operational Control";
+    private decimal _materialityThreshold = 5.0m;
+    private string _acknowledgmentReason = string.Empty;
+
+    // Step 2: Fr-01 Overrides
+    private string _fr01OrgTitle = string.Empty;
+    private string _fr01GhgTeam = string.Empty;
+    private string _fr01CertifierOrg = string.Empty;
+    private string _fr01Scope1Summary = "-";
+    private string _fr01Scope2Summary = "-";
+    private string _fr01Scope3Summary = "-";
+
+    // Pre-flight & Verification Data
+    private CfoReportService.CfoAuditReportDto? _calcReport;
+    private CfoReportService.CfoAuditReportDto? _baseReport;
+    private MultiYearComparisonDto? _comparisonDto;
+    private List<CfoReportService.ActivityAuditLineDto> _expiredEfList = new();
+    private List<string> _calcOverflowWarnings = new();
+    private bool _hasEfSourceMismatch = false;
+
+    // Quota counts
+    private int _calcScope1Count = 0;
+    private int _calcSepCount = 0;
+    private int _calcScope2Count = 0;
+    private int _calcScope3Count = 0;
+
+    private int _baseScope1Count = 0;
+    private int _baseSepCount = 0;
+    private int _baseScope2Count = 0;
+    private int _baseScope3Count = 0;
+
+    private CfoReportDocument? _loadedDoc;
+
+    private List<OptionItem> _levelOptions = new();
+    private List<OptionItem> _targetOptions = new();
+    private List<int> _calculateYearOptions = new();
+    private List<OptionItem> _baseYearOptions = new();
+    private List<string> _consolidationOptions = new() { "Operational Control", "Financial Control", "Equity Share" };
+    #endregion
+
+    #region Lifecycle
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var isAdmin = user.IsInRole(SystemRoles.Administrator);
+            var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                     ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                     ?? user.Identity?.Name;
+
+            if (!string.IsNullOrEmpty(email))
+            {
+                var userSubs = await SubscriptionService.GetSubscriptionsForUserAsync(email, isAdmin);
+                _allowedSubscriptionIds = userSubs.Select(s => s.Id).ToHashSet();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing user subscriptions for AddEditCfoReport.");
+        }
+
+        BuildStaticOptions();
+        #endregion
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            _isLoading = true;
+            ResolveParameters();
+
+            _isViewMode = !string.IsNullOrWhiteSpace(SecureId);
+            if (_isViewMode)
+            {
+                await LoadSnapshotAsync();
+            }
+            else
+            {
+                await LoadTargetOptionsAsync();
+                if (string.IsNullOrWhiteSpace(_title))
+                {
+                    _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error preparing AddEditCfoReport page.");
+            _errorMessage = "Failed to load report parameters.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private void ResolveParameters()
+    {
+        #region hide [2026-09-15]
+        _level = LevelValue switch
+        {
+            2 => eTopicLevel.Company,
+            3 => eTopicLevel.Facility,
+            _ => eTopicLevel.Corporate
+        };
+
+        var decryptedTarget = DataProtection.UnprotectInt(SecureTargetId);
+        if (decryptedTarget.HasValue && decryptedTarget.Value > 0) _targetId = decryptedTarget.Value;
+
+        var decryptedSid = DataProtection.UnprotectInt(SecureSubscriptionId);
+        if (decryptedSid.HasValue && decryptedSid.Value > 0) _selectedSubscriptionId = decryptedSid.Value;
+
+        var decryptedTab = DataProtection.UnprotectInt(SecureTab);
+        if (decryptedTab.HasValue && decryptedTab.Value >= 0 && decryptedTab.Value <= LastStepIndex)
+        {
+            _activeStep = decryptedTab.Value;
+        }
+
+        var decryptedCy = DataProtection.UnprotectInt(SecureCalculateYear);
+        if (decryptedCy.HasValue && decryptedCy.Value > 0) _selectedCalculateYear = decryptedCy.Value;
+
+        var decryptedBy = DataProtection.UnprotectInt(SecureBaseYear);
+        if (decryptedBy.HasValue && decryptedBy.Value >= 0) _selectedBaseYear = decryptedBy.Value;
+
+        var decryptedRet = DataProtection.Unprotect(SecureRet);
+        if (!string.IsNullOrWhiteSpace(decryptedRet)) _returnUrl = decryptedRet;
+        #endregion
+    }
+    #endregion
+
+    #region Data Loading & Calculations
+    private void BuildStaticOptions()
+    {
+        #region hide [2026-09-15]
+        _levelOptions = new List<OptionItem>
+        {
+            new OptionItem { Value = 1, Text = "Corporate" },
+            new OptionItem { Value = 2, Text = "Company" },
+            new OptionItem { Value = 3, Text = "Facility" }
+        };
+
+        int currentYear = AppTimeZone.LocalNow.Year;
+        _calculateYearOptions = Enumerable.Range(currentYear - 5, 7).Reverse().ToList();
+
+        _baseYearOptions = new List<OptionItem>
+        {
+            new OptionItem { Value = 0, Text = "(None / Standalone Year)" }
+        };
+        _baseYearOptions.AddRange(Enumerable.Range(currentYear - 10, 11).Reverse()
+            .Select(y => new OptionItem { Value = y, Text = $"Base Year {y}" }));
+        #endregion
+    }
+
+    private async Task LoadTargetOptionsAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            _targetOptions = new List<OptionItem>();
+
+            if (_level == eTopicLevel.Corporate)
+            {
+                var corporates = await CorporateService.GetBySubscriptionIdAsync(_selectedSubscriptionId);
+                _targetOptions = corporates
+                    .Select(c => new OptionItem { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else if (_level == eTopicLevel.Company)
+            {
+                var companies = await CompanyService.GetByCorporateIdsAsync(null, _selectedSubscriptionId);
+                _targetOptions = companies
+                    .Select(c => new OptionItem { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else
+            {
+                var facilities = await FacilityService.GetByContextAsync(_selectedSubscriptionId);
+                _targetOptions = facilities
+                    .Select(f => new OptionItem { Value = f.Id, Text = string.IsNullOrWhiteSpace(f.Code) ? f.Title : $"{f.Code} — {f.Title}" })
+                    .ToList();
+            }
+
+            if (_targetId == 0 || !_targetOptions.Any(o => o.Value == _targetId))
+            {
+                _targetId = _targetOptions.FirstOrDefault()?.Value ?? 0;
+            }
+
+            // Sync Fr-01 title default
+            if (string.IsNullOrWhiteSpace(_fr01OrgTitle))
+            {
+                _fr01OrgTitle = GetSelectedTargetTitle();
+            }
+            if (string.IsNullOrWhiteSpace(_fr01GhgTeam))
+            {
+                _fr01GhgTeam = $"{_level} GHG Team";
+            }
+            if (string.IsNullOrWhiteSpace(_fr01CertifierOrg))
+            {
+                _fr01CertifierOrg = _fr01OrgTitle;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading target organization options.");
+            _errorMessage = "Failed to load target organization list.";
+        }
+        #endregion
+    }
+
+    private async Task LoadSnapshotAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var reportKey = DataProtection.Unprotect(SecureId);
+            if (string.IsNullOrWhiteSpace(reportKey)) return;
+
+            _loadedDoc = await ReportStorageService.GetReportAsync(reportKey, _level, _targetId);
+            if (_loadedDoc != null)
+            {
+                _title = _loadedDoc.Title;
+                _createdBy = _loadedDoc.CreatedBy;
+                _selectedCalculateYear = _loadedDoc.CalculateYear;
+                _selectedBaseYear = _loadedDoc.BaseYear;
+                _calcReport = _loadedDoc.CalculateYearReport;
+                _baseReport = _loadedDoc.BaseYearReport;
+                _comparisonDto = _loadedDoc.Comparison;
+
+                _fr01OrgTitle = _loadedDoc.OrganizationTitle;
+                _fr01GhgTeam = _loadedDoc.GhgTeamName;
+                _fr01CertifierOrg = _loadedDoc.CertifierOrgTitle;
+
+                PopulateQuotaCounts();
+                RecalculateFr01Summaries();
+                CheckEfIntegrity();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading report snapshot for view mode.");
+            _errorMessage = "Failed to load locked report snapshot.";
+        }
+        #endregion
+    }
+
+    private async Task RunPreflightAsync()
+    {
+        #region hide [2026-09-15]
+        if (_targetId <= 0) return;
+
+        try
+        {
+            _isPreflighting = true;
+            _errorMessage = null;
+
+            _calcReport = await CfoReportService.GenerateReportAsync(
+                _level, _targetId, _selectedCalculateYear, _allowedSubscriptionIds, _materialityThreshold, _acknowledgmentReason);
+
+            if (_selectedBaseYear > 0)
+            {
+                _baseReport = await CfoReportService.GenerateReportAsync(
+                    _level, _targetId, _selectedBaseYear, _allowedSubscriptionIds, _materialityThreshold);
+            }
+            else
+            {
+                _baseReport = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(_fr01OrgTitle)) _fr01OrgTitle = _calcReport.OrganizationTitle;
+            if (string.IsNullOrWhiteSpace(_fr01GhgTeam)) _fr01GhgTeam = $"{_level} GHG Team";
+            if (string.IsNullOrWhiteSpace(_fr01CertifierOrg)) _fr01CertifierOrg = _fr01OrgTitle;
+
+            PopulateQuotaCounts();
+            RecalculateFr01Summaries();
+            BuildMultiYearComparison();
+            CheckEfIntegrity();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error running CFO report pre-flight.");
+            _errorMessage = $"Pre-flight failed: {ex.Message}";
+        }
+        finally
+        {
+            _isPreflighting = false;
+        }
+        #endregion
+    }
+
+    private void PopulateQuotaCounts()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport != null)
+        {
+            _calcScope1Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope1);
+            _calcSepCount = _calcReport.AuditLines.Count(l => (int)l.ScopeNo == 4);
+            _calcScope2Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope2);
+            _calcScope3Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope3);
+
+            _calcOverflowWarnings = new List<string>();
+            void Check(string label, int count, int cap)
+            {
+                if (count > cap)
+                {
+                    _calcOverflowWarnings.Add($"{label}: {count} items exceed template quota ({cap} rows). The extra {count - cap + 1} items will be consolidated into row {cap} in Fr-04.1.");
+                }
+            }
+            Check("Scope 1", _calcScope1Count, Fr04Scope1Capacity);
+            Check("Separate report (Biogenic)", _calcSepCount, Fr04SeparateCapacity);
+            Check("Scope 2", _calcScope2Count, Fr04Scope2Capacity);
+            Check("Scope 3", _calcScope3Count, Fr04Scope3Capacity);
+        }
+
+        if (_baseReport != null)
+        {
+            _baseScope1Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope1);
+            _baseSepCount = _baseReport.AuditLines.Count(l => (int)l.ScopeNo == 4);
+            _baseScope2Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope2);
+            _baseScope3Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope3);
+        }
+        #endregion
+    }
+
+    private void RecalculateFr01Summaries()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport == null) return;
+
+        // [2026-09-16][Antigravity] Format Scope summaries with TGO Category (Option A) sorted ascending by code
+        string BuildSummary(eTgoScopeNo scope)
+        {
+            var grp = _calcReport.Scopes.FirstOrDefault(s => s.ScopeNo == scope);
+            if (grp == null || !grp.ActivityGroups.Any()) return "-";
+            var titles = grp.ActivityGroups
+                .OrderBy(ag => CfoReportService.GetSortableCodeKey(ag.Code))
+                .Select(ag => CfoReportService.FormatTgoCategory(ag.Code, ag.Title, scope))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+            return titles.Any() ? string.Join(Environment.NewLine, titles) : "-";
+        }
+
+        _fr01Scope1Summary = BuildSummary(eTgoScopeNo.Scope1);
+        _fr01Scope2Summary = BuildSummary(eTgoScopeNo.Scope2);
+        _fr01Scope3Summary = BuildSummary(eTgoScopeNo.Scope3);
+        #endregion
+    }
+
+    private void BuildMultiYearComparison()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport != null && _baseReport != null && _baseReport.TotalGrossEmissions_tCO2e > 0)
+        {
+            var baseGross = _baseReport.TotalGrossEmissions_tCO2e;
+            var calcGross = _calcReport.TotalGrossEmissions_tCO2e;
+            var grossDelta = calcGross - baseGross;
+
+            var baseS1 = _baseReport.TotalScope1_tCO2e;
+            var calcS1 = _calcReport.TotalScope1_tCO2e;
+            var s1Delta = calcS1 - baseS1;
+
+            var baseS2 = _baseReport.TotalScope2_tCO2e;
+            var calcS2 = _calcReport.TotalScope2_tCO2e;
+            var s2Delta = calcS2 - baseS2;
+
+            var baseS3 = _baseReport.TotalScope3_tCO2e;
+            var calcS3 = _calcReport.TotalScope3_tCO2e;
+            var s3Delta = calcS3 - baseS3;
+
+            var baseSep = _baseReport.TotalSeparate_tCO2e;
+            var calcSep = _calcReport.TotalSeparate_tCO2e;
+            var sepDelta = calcSep - baseSep;
+
+            _comparisonDto = new MultiYearComparisonDto
+            {
+                Scope1Delta_tCO2e = s1Delta,
+                Scope1PercentChange = baseS1 > 0 ? (s1Delta * 100m / baseS1) : 0m,
+                Scope2Delta_tCO2e = s2Delta,
+                Scope2PercentChange = baseS2 > 0 ? (s2Delta * 100m / baseS2) : 0m,
+                Scope3Delta_tCO2e = s3Delta,
+                Scope3PercentChange = baseS3 > 0 ? (s3Delta * 100m / baseS3) : 0m,
+                GrossDelta_tCO2e = grossDelta,
+                GrossPercentChange = baseGross > 0 ? (grossDelta * 100m / baseGross) : 0m,
+                SeparateDelta_tCO2e = sepDelta,
+                SeparatePercentChange = baseSep > 0 ? (sepDelta * 100m / baseSep) : 0m
+            };
+        }
+        else
+        {
+            _comparisonDto = null;
+        }
+        #endregion
+    }
+
+    private void CheckEfIntegrity()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport == null) return;
+
+        // [2026-09-15][Antigravity] Evaluate EF expiration using current active status (EfValidityStatus == "Expired")
+        _expiredEfList = _calcReport.AuditLines
+            .Where(l => l.EfValidityStatus == "Expired")
+            .ToList();
+
+        // Check if base year and calculate year share the same EF sources
+        if (_baseReport != null && _baseReport.AuditLines.Any())
+        {
+            var calcSources = _calcReport.AuditLines.Select(l => l.SourceId).Where(id => id > 0).ToHashSet();
+            var baseSources = _baseReport.AuditLines.Select(l => l.SourceId).Where(id => id > 0).ToHashSet();
+            _hasEfSourceMismatch = !calcSources.SetEquals(baseSources);
+        }
+        else
+        {
+            _hasEfSourceMismatch = false;
+        }
+        #endregion
+    }
+
+    private void ResetDownstreamData()
+    {
+        #region hide [2026-09-15]
+        _calcReport = null;
+        _baseReport = null;
+        _comparisonDto = null;
+        _expiredEfList = new();
+        _calcOverflowWarnings = new();
+        _hasEfSourceMismatch = false;
+        #endregion
+    }
+    #endregion
+
+    #region Wizard Navigation & Step Validation
+    private async Task GoNextStepAsync()
+    {
+        #region hide [2026-09-15]
+        if (!ValidateCurrentStep()) return;
+
+        _errorMessage = null;
+        _activeStep = Math.Min(_activeStep + 1, LastStepIndex);
+
+        // Auto-run pre-flight on reaching Step 3 (index 2)
+        if (_activeStep == 2 && _calcReport == null)
+        {
+            await RunPreflightAsync();
+        }
+
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private async Task GoPreviousStep()
+    {
+        #region hide [2026-09-15]
+        _errorMessage = null;
+        _activeStep = Math.Max(_activeStep - 1, 0);
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private bool ValidateCurrentStep()
+    {
+        #region hide [2026-09-15]
+        switch (_activeStep)
+        {
+            case 0: // Step 1: Setup
+                if (_targetId <= 0)
+                {
+                    _errorMessage = "Please select a target organization.";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_title))
+                {
+                    _errorMessage = "Please specify a report title.";
+                    return false;
+                }
+                if (_selectedCalculateYear <= 0)
+                {
+                    _errorMessage = "Please select a calculate / reporting year.";
+                    return false;
+                }
+                if (_selectedBaseYear > 0 && _selectedBaseYear >= _selectedCalculateYear)
+                {
+                    _errorMessage = "The base year must be earlier than the calculate year.";
+                    return false;
+                }
+                return true;
+
+            case 1: // Step 2: Fr-01 Organization Details
+                if (string.IsNullOrWhiteSpace(_fr01OrgTitle))
+                {
+                    _errorMessage = "Please specify the organization name (Cell B6).";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_fr01GhgTeam))
+                {
+                    _errorMessage = "Please specify the GHG working team name (Cell G4).";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_fr01CertifierOrg))
+                {
+                    _errorMessage = "Please specify the organization for certification (Cell I32).";
+                    return false;
+                }
+                return true;
+
+            case 2: // Step 3: Data Pre-flight
+                if (_calcReport == null)
+                {
+                    _errorMessage = "Please run the data pre-flight analysis before proceeding.";
+                    return false;
+                }
+                if (_expiredEfList.Any() && string.IsNullOrWhiteSpace(_acknowledgmentReason))
+                {
+                    _errorMessage = "Please provide an audit acknowledgment reason for the expired emission factors.";
+                    return false;
+                }
+                return true;
+
+            default:
+                return true;
+        }
+        #endregion
+    }
+
+    private async Task SyncStepToUrlAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["tab"] = DataProtection.Protect(_activeStep)
+            };
+            var url = NavigationManager.GetUriWithQueryParameters(queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", url);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to sync wizard step to URL address bar.");
+        }
+        #endregion
+    }
+
+    private async Task OnLevelChangedAsync(int value)
+    {
+        #region hide [2026-09-15]
+        _level = value switch
+        {
+            2 => eTopicLevel.Company,
+            3 => eTopicLevel.Facility,
+            _ => eTopicLevel.Corporate
+        };
+        _targetId = 0;
+        _fr01OrgTitle = string.Empty;
+        _fr01CertifierOrg = string.Empty;
+        _fr01GhgTeam = $"{_level} GHG Team";
+        ResetDownstreamData();
+        await LoadTargetOptionsAsync();
+        #endregion
+    }
+
+    private void OnTargetChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _targetId = value;
+        _fr01OrgTitle = GetSelectedTargetTitle();
+        _fr01CertifierOrg = _fr01OrgTitle;
+        ResetDownstreamData();
+        #endregion
+    }
+
+    private void OnCalculateYearChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _selectedCalculateYear = value;
+        if (_title.StartsWith("GHG Emissions Report Year", StringComparison.OrdinalIgnoreCase))
+        {
+            _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+        }
+        ResetDownstreamData();
+        #endregion
+    }
+
+    private void OnBaseYearChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _selectedBaseYear = value;
+        ResetDownstreamData();
+        #endregion
+    }
+    #endregion
+
+    #region Snapshot Generation
+    private async Task GenerateSnapshotAsync()
+    {
+        #region hide [2026-09-15]
+        // Re-validate all prior steps before generating
+        var originalStep = _activeStep;
+        for (int i = 0; i <= 2; i++)
+        {
+            _activeStep = i;
+            if (!ValidateCurrentStep())
+            {
+                StateHasChanged();
+                await SyncStepToUrlAsync();
+                return;
+            }
+        }
+        _activeStep = originalStep;
+
+        try
+        {
+            _isSaving = true;
+            _errorMessage = null;
+
+            var overrides = new CfoReportService.CfoReportOverridesDto
+            {
+                OrganizationTitle = _fr01OrgTitle,
+                GhgTeamName = _fr01GhgTeam,
+                CertifierOrgTitle = _fr01CertifierOrg
+            };
+
+            var doc = await ReportStorageService.CreateReportSnapshotAsync(
+                _level,
+                _targetId,
+                _title,
+                _selectedBaseYear,
+                _selectedCalculateYear,
+                _createdBy,
+                _allowedSubscriptionIds,
+                _acknowledgmentReason,
+                overrides);
+
+            NotificationService.Notify(NotificationSeverity.Success, "Snapshot Verified & Locked",
+                $"Successfully generated and locked audit report snapshot '{doc.Title}'.");
+
+            NavigateToBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating CFO report snapshot.");
+            _errorMessage = $"Failed to create report snapshot: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+    #endregion
+
+    #region Helper Formatting
+    private string GetSelectedTargetTitle()
+    {
+        return _targetOptions.FirstOrDefault(o => o.Value == _targetId)?.Text ?? "-";
+    }
+
+    private string GetCalculatePeriodText()
+    {
+        return _selectedCalculateYear > 0 ? $"1 Jan {_selectedCalculateYear} - 31 Dec {_selectedCalculateYear}" : "Historical";
+    }
+
+    private string GetBasePeriodText()
+    {
+        return _selectedBaseYear > 0 ? $"1 Jan {_selectedBaseYear} - 31 Dec {_selectedBaseYear}" : "-";
+    }
+
+    private string GetQuotaCardClass(int count, int quota)
+    {
+        bool isOverflow = count > quota;
+        return isOverflow
+            ? "shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-warning bg-warning-subtle"
+            : "shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success bg-white";
+    }
+
+    private string GetScopeBadgeClass(eTgoScopeNo scope)
+    {
+        return scope switch
+        {
+            eTgoScopeNo.Scope1 => "bg-danger-subtle text-danger border",
+            eTgoScopeNo.Scope2 => "bg-primary-subtle text-primary border",
+            eTgoScopeNo.Scope3 => "bg-info-subtle text-info border",
+            _ => "bg-secondary-subtle text-secondary border"
+        };
+    }
+
+    private bool IsLineOverflow(CfoReportService.ActivityAuditLineDto item, List<CfoReportService.ActivityAuditLineDto> allLines)
+    {
+        var scopeLines = allLines.Where(l => l.ScopeNo == item.ScopeNo).ToList();
+        int capacity = item.ScopeNo switch
+        {
+            eTgoScopeNo.Scope1 => Fr04Scope1Capacity,
+            eTgoScopeNo.Scope2 => Fr04Scope2Capacity,
+            eTgoScopeNo.Scope3 => Fr04Scope3Capacity,
+            _ => Fr04SeparateCapacity
+        };
+        int indexInScope = scopeLines.IndexOf(item);
+        return scopeLines.Count > capacity && indexInScope >= (capacity - 1);
+    }
+
+    private string GetDeltaColorClass(decimal value)
+    {
+        if (value > 0) return "text-danger fw-bold";
+        if (value < 0) return "text-success fw-bold";
+        return "text-secondary";
+    }
+    #endregion
+
+    #region Navigation
+    private void NavigateToBack()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_returnUrl))
+            {
+                NavigationManager.NavigateTo(_returnUrl, replace: true);
+                return;
+            }
+
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["level"] = (int)_level
+            };
+
+            if (_targetId > 0)
+                queryParams["id"] = DataProtection.Protect(_targetId);
+
+            var url = NavigationManager.GetUriWithQueryParameters("/reports/cfo-reports", queryParams);
+            NavigationManager.NavigateTo(url, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error navigating back from AddEditCfoReport.");
+            NavigationManager.NavigateTo("/reports/cfo-reports");
+        }
+        #endregion
+    }
+
+    private void NavigateToRevision()
+    {
+        #region hide [2026-09-15]
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["level"] = (int)_level,
+            ["cy"] = DataProtection.Protect(_selectedCalculateYear),
+            ["by"] = DataProtection.Protect(_selectedBaseYear)
+        };
+
+        if (_targetId > 0)
+            queryParams["id"] = DataProtection.Protect(_targetId);
+
+        if (_selectedSubscriptionId.HasValue)
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+        var url = NavigationManager.GetUriWithQueryParameters("/reports/cfo-report/add", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void NavigateToTopics()
+    {
+        #region hide [2026-09-15]
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["level"] = (int)_level
+        };
+        if (_targetId > 0) queryParams["id"] = DataProtection.Protect(_targetId);
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+    #endregion
+
+    private class OptionItem
+    {
+        public int Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+}

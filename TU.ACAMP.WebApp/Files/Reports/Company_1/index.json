@@ -1,0 +1,24 @@
+﻿[
+  {
+    "ReportKey": "7a1d8b257e4746e2bdbd0abe1ae871bc",
+    "Title": "GHG Emissions Report Year 2026",
+    "Level": 2,
+    "TargetId": 1,
+    "OrganizationTitle": "COM-001 \u2014 \u0E1A\u0E23\u0E34\u0E29\u0E31\u0E17 \u0E01\u0E23\u0E35\u0E19\u0E40\u0E17\u0E04 \u0E41\u0E21\u0E19\u0E39\u0E41\u0E1F\u0E04\u0E40\u0E08\u0E2D\u0E23\u0E34\u0E48\u0E07 (\u0E1B\u0E23\u0E30\u0E40\u0E17\u0E28\u0E44\u0E17\u0E22) \u0E08\u0E33\u0E01\u0E31\u0E14",
+    "OrganizationCode": "COM-001",
+    "BaseYear": 0,
+    "CalculateYear": 2026,
+    "CreatedAt": "2026-09-16T11:23:43.1029673+07:00",
+    "CreatedBy": "Corporate GHG Team",
+    "Status": "Verified / Locked",
+    "TotalScope1_tCO2e": 0,
+    "TotalScope2_tCO2e": 0,
+    "TotalScope3_tCO2e": 0,
+    "TotalGrossEmissions_tCO2e": 0,
+    "HasExcelFile": true,
+    "HasWordFile": false,
+    "FileDirectory": "D:\\2026\\Projects\\ACAMP\\V20\\CODES\\TU.ACAMP.20-002\\TU.ACAMP.WebApp\\Files\\Reports\\Company_1\\7a1d8b257e4746e2bdbd0abe1ae871bc",
+    "Sha256Checksum": "C990B0CC7CCC5CAA4C5C37C82CD7FE59E5D6DEBE207F70D18AB38B415155765E",
+    "ExcelSha256Checksum": "6924CC684EDEB86445720ACDF902386213ABF4A5CE2C5A2CCA0BBE0D4DE7504C"
+  }
+]

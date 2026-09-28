@@ -1,0 +1,84 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+
+<div class="p-4">
+    <div class="row g-3 align-items-center">
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Subscription Plan *" Style="width: 100%;">
+                <RadzenDropDown TValue="eSubscriptionPlan"
+                                Data="@_planOptions"
+                                TextProperty="Text"
+                                ValueProperty="Value"
+                                @bind-Value="@Model.SubscriptionPlan"
+                                Change="@OnPlanChanged"
+                                Disabled="@(!IsAdmin || IsFieldDisabled)" />
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Start / Activated Date" Style="width: 100%;">
+                <RadzenDatePicker @bind-Value="@Model.StartDate" DateFormat="dd/MM/yyyy" Change="@OnFieldValueChanged" Disabled="@(!IsAdmin || IsFieldDisabled)" />
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Expiry Date *" Style="width: 100%;">
+                <RadzenDatePicker @bind-Value="@Model.ExpiryDate" DateFormat="dd/MM/yyyy" Change="@OnFieldValueChanged" Disabled="@(!IsAdmin || IsFieldDisabled)" />
+            </RadzenFormField>
+        </div>
+
+        <div class="col-12 col-md-6 d-flex align-items-center gap-3 mt-3">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="chkIsActive" @bind="@Model.IsActive" @bind:after="@(() => OnFieldValueChanged.InvokeAsync())" disabled="@(!IsAdmin || IsFieldDisabled)" />
+                <label class="form-check-label fw-bold text-dark ms-1" for="chkIsActive">Subscription Active</label>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6 text-md-end mt-3">
+            <span class="text-muted me-2">Time Left:</span>
+            @if (Model.IsExpired)
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="Expired" IsPill="true" />
+            }
+            else
+            {
+                var days = (int)Model.GetRemainingDays();
+                <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="@($"{days} days remaining")" IsPill="true" />
+            }
+        </div>
+    </div>
+
+    <div class="mt-4 p-3 bg-light rounded-3 border">
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="fw-bold mb-2 text-primary">
+            <RadzenIcon Icon="tune" class="me-1" /> Quick Plan Quota Overview (@Model.SubscriptionPlan)
+        </RadzenText>
+        <div class="row g-2 text-muted small">
+            <div class="col-6 col-md-3">Corporates: <b>@Model.AllowCorporateCount max</b></div>
+            <div class="col-6 col-md-3">Companies: <b>@Model.AllowCompanyCount max</b></div>
+            <div class="col-6 col-md-3">Facilities: <b>@Model.AllowFacilityCount max</b></div>
+            <div class="col-6 col-md-3">Users: <b>@Model.AllowUserCount max</b></div>
+            <div class="col-6 col-md-3">Data Upload: <b>@Model.AllowDataUploadCount MB</b></div>
+            <div class="col-6 col-md-3">Data Download: <b>@Model.AllowDataDownloadCount MB</b></div>
+            <div class="col-6 col-md-3">Data Store: <b>@Model.AllowDataStoreCount MB</b></div>
+            <div class="col-6 col-md-3">Events: <b>@Model.AllowEventCount max</b></div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TbSubscription Model { get; set; } = null!;
+    [Parameter] public bool IsAdmin { get; set; }
+    [Parameter] public bool IsFieldDisabled { get; set; }
+    [Parameter] public EventCallback OnFieldValueChanged { get; set; }
+    [Parameter] public EventCallback<object> OnPlanChanged { get; set; }
+
+    private record DropdownOption<T>(T Value, string Text);
+
+    private readonly List<DropdownOption<eSubscriptionPlan>> _planOptions = new()
+    {
+        new(eSubscriptionPlan.Basic, "Basic"),
+        new(eSubscriptionPlan.Pro, "Pro"),
+        new(eSubscriptionPlan.Premium, "Premium"),
+        new(eSubscriptionPlan.Enterprise, "Enterprise")
+    };
+}

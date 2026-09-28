@@ -1,0 +1,212 @@
+[
+  {
+    "Title": "การใช้น้ำมันดีเซลสำหรับเครื่องกำเนิดไฟฟ้าสำรอง (Emergency Generator Diesel)",
+    "GroupCode": "0101",
+    "SourceKeywords": [ "Diesel B7", "Diesel" ],
+    "MonthlyBaseQty": 1200.0,
+    "MonthlyVariance": 300.0
+  },
+  {
+    "Title": "การใช้ก๊าซ LPG สำหรับหม้อต้มไอน้ำและกระบวนการทำความร้อน (Process Boiler LPG)",
+    "GroupCode": "0101",
+    "SourceKeywords": [ "LPG" ],
+    "MonthlyBaseQty": 4500.0,
+    "MonthlyVariance": 800.0
+  },
+  {
+    "Title": "การใช้น้ำมันเตา C สำหรับเตาเผาอุตสาหกรรม (Industrial Heavy Fuel Oil C Boiler)",
+    "GroupCode": "0101",
+    "SourceKeywords": [ "Fuel Oil C", "Fuel Oil" ],
+    "MonthlyBaseQty": 6000.0,
+    "MonthlyVariance": 1200.0
+  },
+  {
+    "Title": "การใช้ก๊าซธรรมชาติในระบบอบความร้อน (Natural Gas Heat Treatment)",
+    "GroupCode": "0101",
+    "SourceKeywords": [ "Natural Gas (HHV)", "Natural Gas (NCV)", "Natural Gas" ],
+    "MonthlyBaseQty": 2500.0,
+    "MonthlyVariance": 500.0
+  },
+  {
+    "Title": "การใช้น้ำมันดีเซลสำหรับรถขนส่งสินค้าและโลจิสติกส์ (Outbound Freight Fleet Diesel)",
+    "GroupCode": "0102",
+    "SourceKeywords": [ "Diesel B7", "Diesel" ],
+    "MonthlyBaseQty": 8500.0,
+    "MonthlyVariance": 1500.0
+  },
+  {
+    "Title": "การใช้น้ำมันเบนซินรถผู้บริหารและยานพาหนะส่วนกลาง (Executive & Office Fleet Gasoline)",
+    "GroupCode": "0102",
+    "SourceKeywords": [ "Gasoline" ],
+    "MonthlyBaseQty": 2800.0,
+    "MonthlyVariance": 400.0
+  },
+  {
+    "Title": "การใช้น้ำมันดีเซลสำหรับรถโฟล์คลิฟท์ในคลังสินค้า (Warehouse Forklift Diesel)",
+    "GroupCode": "0102",
+    "SourceKeywords": [ "Diesel B7", "Diesel" ],
+    "MonthlyBaseQty": 1600.0,
+    "MonthlyVariance": 350.0
+  },
+  {
+    "Title": "การใช้น้ำมันดีเซลรถรับส่งพนักงานและเจ้าหน้าที่ (Staff Shuttle Bus Diesel)",
+    "GroupCode": "0102",
+    "SourceKeywords": [ "Diesel B7", "Diesel" ],
+    "MonthlyBaseQty": 3200.0,
+    "MonthlyVariance": 600.0
+  },
+  {
+    "Title": "การใช้ก๊าซ CO2 ในกระบวนการผลิตและทดสอบแรงดัน (Industrial Process CO2 Testing)",
+    "GroupCode": "0103",
+    "SourceKeywords": [ "CO2", "Carbon Dioxide", "LPG" ],
+    "MonthlyBaseQty": 1500.0,
+    "MonthlyVariance": 300.0
+  },
+  {
+    "Title": "การใช้ก๊าซอะเซทิลีนในงานเชื่อมและซ่อมบำรุงโครงสร้าง (Maintenance Welding Gas)",
+    "GroupCode": "0103",
+    "SourceKeywords": [ "LPG", "Natural Gas" ],
+    "MonthlyBaseQty": 450.0,
+    "MonthlyVariance": 100.0
+  },
+  {
+    "Title": "การเติมสารทำความเย็น R-134a ในระบบปรับอากาศอาคาร (HVAC Refrigerant R-134a Refill)",
+    "GroupCode": "0104",
+    "SourceKeywords": [ "R-134a", "R-134" ],
+    "MonthlyBaseQty": 25.0,
+    "MonthlyVariance": 10.0
+  },
+  {
+    "Title": "การเติมสารทำความเย็น R-410a ในระบบห้องเย็นและ Chiller (Cold Storage R-410a Refill)",
+    "GroupCode": "0104",
+    "SourceKeywords": [ "R-410a", "R-404a" ],
+    "MonthlyBaseQty": 35.0,
+    "MonthlyVariance": 12.0
+  },
+  {
+    "Title": "การเติมสารทำความเย็น R-404a ในระบบทำความเย็นอุตสาหกรรม (Industrial Chiller R-404a Refill)",
+    "GroupCode": "0104",
+    "SourceKeywords": [ "R-404a", "R-407C" ],
+    "MonthlyBaseQty": 45.0,
+    "MonthlyVariance": 15.0
+  },
+  {
+    "Title": "การใช้ก๊าซ CO2 สำหรับเติมเครื่องดับเพลิง (Fire Extinguisher CO2 Refill)",
+    "GroupCode": "0104",
+    "SourceKeywords": [ "CO2", "Carbon Dioxide", "R-134a" ],
+    "MonthlyBaseQty": 120.0,
+    "MonthlyVariance": 40.0
+  },
+  {
+    "Title": "การปล่อยก๊าซจากระบบบำบัดน้ำเสียแบบไม่ใช้ออกซิเจน (Anaerobic Wastewater Treatment Plant)",
+    "GroupCode": "0104",
+    "SourceKeywords": [ "Wastewater", "LPG", "Diesel" ],
+    "MonthlyBaseQty": 2800.0,
+    "MonthlyVariance": 600.0
+  },
+  {
+    "Title": "การใช้ไฟฟ้า MEA อาคารสำนักงานใหญ่ (MEA Grid Electricity - HQ Building)",
+    "GroupCode": "0201",
+    "SourceKeywords": [ "Electricity", "Grid", "MEA" ],
+    "MonthlyBaseQty": 45000.0,
+    "MonthlyVariance": 8000.0
+  },
+  {
+    "Title": "การใช้ไฟฟ้า PEA สายการผลิตและประกอบสินค้า (PEA Grid Electricity - Manufacturing Plant)",
+    "GroupCode": "0201",
+    "SourceKeywords": [ "Electricity", "Grid", "PEA" ],
+    "MonthlyBaseQty": 125000.0,
+    "MonthlyVariance": 20000.0
+  },
+  {
+    "Title": "การใช้ไฟฟ้า PEA คลังสินค้าและศูนย์กระจายสินค้า (PEA Grid Electricity - Logistics Center)",
+    "GroupCode": "0201",
+    "SourceKeywords": [ "Electricity", "Grid" ],
+    "MonthlyBaseQty": 32000.0,
+    "MonthlyVariance": 5000.0
+  },
+  {
+    "Title": "การซื้อพลังงานไอน้ำอุตสาหกรรมจากนิคมอุตสาหกรรม (Purchased Industrial Steam)",
+    "GroupCode": "0202",
+    "SourceKeywords": [ "Steam", "Fuel Oil", "Natural Gas" ],
+    "MonthlyBaseQty": 18000.0,
+    "MonthlyVariance": 3500.0
+  },
+  {
+    "Title": "การซื้อพลังงานน้ำเย็นจากระบบ District Cooling (Purchased District Chilled Water)",
+    "GroupCode": "0202",
+    "SourceKeywords": [ "Electricity", "Grid" ],
+    "MonthlyBaseQty": 12000.0,
+    "MonthlyVariance": 2500.0
+  },
+  {
+    "Title": "การจัดซื้อกระดาษสำนักงานและวัสดุสิ้นเปลือง (Office Paper & Printing Consumables)",
+    "GroupCode": "0301",
+    "SourceKeywords": [ "Paper", "Diesel", "LPG" ],
+    "MonthlyBaseQty": 1200.0,
+    "MonthlyVariance": 250.0
+  },
+  {
+    "Title": "การใช้น้ำประปาสำหรับกระบวนการผลิตและอุปโภค (Industrial & Domestic Tap Water Supply)",
+    "GroupCode": "0301",
+    "SourceKeywords": [ "Water", "Electricity" ],
+    "MonthlyBaseQty": 4500.0,
+    "MonthlyVariance": 800.0
+  },
+  {
+    "Title": "การขนส่งวัตถุดิบทางบกเข้าโรงงานโดยซัพพลายเออร์ (Inbound Logistics & Raw Materials Freight)",
+    "GroupCode": "0304",
+    "SourceKeywords": [ "Diesel", "Diesel B7" ],
+    "MonthlyBaseQty": 22000.0,
+    "MonthlyVariance": 4000.0
+  },
+  {
+    "Title": "การกำจัดขยะมูลฝอยทั่วไปและขยะสำนักงาน (Municipal Solid Waste Disposal)",
+    "GroupCode": "0305",
+    "SourceKeywords": [ "Diesel", "Waste" ],
+    "MonthlyBaseQty": 2500.0,
+    "MonthlyVariance": 500.0
+  },
+  {
+    "Title": "การจัดการกากอุตสาหกรรมและขยะอันตราย (Hazardous Waste Off-site Treatment)",
+    "GroupCode": "0305",
+    "SourceKeywords": [ "Diesel", "Fuel Oil" ],
+    "MonthlyBaseQty": 1400.0,
+    "MonthlyVariance": 300.0
+  },
+  {
+    "Title": "การเดินทางไปปฏิบัติงานทางอากาศในและต่างประเทศ (Domestic & International Business Flights)",
+    "GroupCode": "0306",
+    "SourceKeywords": [ "Gasoline", "Diesel" ],
+    "MonthlyBaseQty": 15000.0,
+    "MonthlyVariance": 4000.0
+  },
+  {
+    "Title": "การพักแรมในโรงแรมเมื่อเดินทางไปปฏิบัติงาน (Business Travel Hotel Accommodation)",
+    "GroupCode": "0306",
+    "SourceKeywords": [ "Electricity", "Gasoline" ],
+    "MonthlyBaseQty": 65.0,
+    "MonthlyVariance": 15.0
+  },
+  {
+    "Title": "การเดินทางไป-กลับทำงานประจำวันของพนักงาน (Daily Employee Commuting)",
+    "GroupCode": "0307",
+    "SourceKeywords": [ "Gasoline", "Diesel" ],
+    "MonthlyBaseQty": 38000.0,
+    "MonthlyVariance": 6000.0
+  },
+  {
+    "Title": "การใช้เชื้อเพลิงชีวมวลเศษไม้/กะลาปาล์มในหม้อต้มไอน้ำ (Biomass Wood Pellets in Steam Boiler)",
+    "GroupCode": "0401",
+    "SourceKeywords": [ "Diesel B7: Report in Biogenic CO2 emissions", "Diesel B20: Report in Biogenic CO2 emissions", "Diesel B7" ],
+    "MonthlyBaseQty": 15000.0,
+    "MonthlyVariance": 3000.0
+  },
+  {
+    "Title": "การปล่อย CO₂ ชีวภาพจากการใช้น้ำมันไบโอดีเซล B7/B20 ในยานพาหนะ (Biogenic CO₂ from Biodiesel Fleet)",
+    "GroupCode": "0402",
+    "SourceKeywords": [ "Diesel B7: Report in Biogenic CO2 emissions", "Diesel B20: Report in Biogenic CO2 emissions", "Diesel B7" ],
+    "MonthlyBaseQty": 8500.0,
+    "MonthlyVariance": 1500.0
+  }
+]

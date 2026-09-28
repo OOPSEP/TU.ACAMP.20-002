@@ -1,0 +1,751 @@
+﻿@using Microsoft.AspNetCore.Components.Forms
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Identity
+
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject ActivityEventExcelService ExcelService
+@inject ActivityEventService ActivityEventService
+@inject SubscriptionService SubscriptionService
+@inject IJSRuntime JSRuntime
+@inject ILogger<ImportActivityEventDialog> Logger
+
+<RadzenStack Gap="1.5rem" Style="padding: 0.5rem;">
+    <!-- Top Bar & Template Download -->
+    <RadzenCard Class="p-3 bg-light" Style="border-radius: 8px; border: 1px solid var(--rz-border-color);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <RadzenText Text="Import Activity Events (.xlsx)" TextStyle="TextStyle.Subtitle1" class="fw-bold mb-1" />
+                <RadzenText Text="@($"Upload an Excel file containing Events of \"{TopicTitle}\". หนึ่งแถว = หนึ่งเดือน (yyyy-MM) เดือนที่มีข้อมูลอยู่แล้วเลือกได้รายแถวว่าจะข้าม ทับ หรือเพิ่มใหม่")"
+                            TextStyle="TextStyle.Caption" class="text-muted mb-0" />
+            </div>
+            <RadzenButton Text="Download Template" Icon="download" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@DownloadTemplateAsync" />
+        </div>
+    </RadzenCard>
+
+    <!-- File Upload Section -->
+    <div>
+        <label class="form-label fw-semibold small text-muted">Select Excel File (.xlsx):</label>
+        <InputFile OnChange="@OnInputFileChange" accept=".xlsx" class="form-control form-control-sm" />
+    </div>
+
+    @if (_isParsing)
+    {
+        <div class="py-4 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Parsing Excel file and matching reporting periods..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_parsedItems != null)
+    {
+        <!-- Validation Summary Badges -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge bg-secondary-subtle text-secondary border px-3 py-2">
+                Total Rows: <b>@_parsedItems.Count</b>
+            </span>
+            <span class="badge bg-primary-subtle text-primary-emphasis border px-3 py-2">
+                Ready to Import: <b>@ReadyCount</b>
+            </span>
+            @if (_parsedItems.Any(i => i.ImportState == eEventImportState.NeedsFix))
+            {
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2">
+                    Needs Fix: <b>@(_parsedItems.Count(i => i.ImportState == eEventImportState.NeedsFix))</b>
+                </span>
+            }
+            @if (_parsedItems.Any(i => i.IsExistingEventMatched))
+            {
+                var existingCount = _parsedItems.Count(i => i.IsExistingEventMatched);
+                var overwriteCount = _parsedItems.Count(i => i.IsExistingEventMatched && i.ExistingAction == eExistingEventAction.Overwrite);
+                var asNewCount = _parsedItems.Count(i => i.IsExistingEventMatched && i.ExistingAction == eExistingEventAction.ImportAsNew);
+                var skipCount = _parsedItems.Count(i => i.IsExistingEventMatched && i.ExistingAction == eExistingEventAction.Skip);
+                <span class="badge bg-warning-subtle text-warning-emphasis border px-3 py-2" title="@($"Overwrite: {overwriteCount}, Import as New: {asNewCount}, Skip: {skipCount}")">
+                    Already Exists: <b>@existingCount</b>
+                    @if (overwriteCount > 0 || asNewCount > 0)
+                    {
+                        <span class="ms-1 fw-normal">(@(overwriteCount > 0 ? $"{overwriteCount} overwrite" : "")@(overwriteCount > 0 && asNewCount > 0 ? ", " : "")@(asNewCount > 0 ? $"{asNewCount} as new" : ""))</span>
+                    }
+                </span>
+            }
+            @if (_parsedItems.Any(i => i.ImportState == eEventImportState.Invalid))
+            {
+                <span class="badge bg-danger-subtle text-danger-emphasis border px-3 py-2">
+                    Invalid: <b>@(_parsedItems.Count(i => i.ImportState == eEventImportState.Invalid))</b>
+                </span>
+            }
+        </div>
+
+        <!-- Preview DataGrid -->
+        <div style="max-height: 480px; overflow-y: auto; border: 1px solid var(--rz-border-color); border-radius: 8px;">
+            <RadzenDataGrid Data="@DisplayItems" TItem="ActivityEventImportItemDto" AllowPaging="false" AllowSorting="true" AllowColumnResize="true"
+                            RowDoubleClick="@OnRowDoubleClick" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="ActivityEventImportItemDto" Title="#" Width="45px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @item.RowNumber
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    @* [2026-09-15][Claude] แยกคอลัมน์ Period / Quantity / Remark ออกจากกัน แต่แก้ไขพร้อมกันทั้งแถวผ่าน Double-click (Enter = Apply, Esc = Cancel) *@
+                    <RadzenDataGridColumn TItem="ActivityEventImportItemDto" Title="Reporting Period" Width="200px" Property="TimeText">
+                        <Template Context="item">
+                            @if (!IsRowEditing(item))
+                            {
+                                <div class="d-flex align-items-center gap-1 flex-wrap">
+                                    <span class="fw-bold text-dark">@item.PeriodText</span>
+                                    @if (item.IsManuallyFixed)
+                                    {
+                                        <span class="badge bg-info-subtle text-info border" style="font-size: 0.65rem;" title="Manually edited in this dialog">edited</span>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                var state = GetRowEdit(item);
+                                <div class="d-flex gap-1 p-1" style="background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;"
+                                     @onkeyup="@((Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e) => OnEditKeyUp(e, item))">
+                                    <RadzenNumeric TValue="int" Value="@state.Year" Change="@((int val) => state.Year = val)"
+                                                   Min="2000" Max="2100" Placeholder="Year" Class="w-100" Style="font-size: 0.75rem;" />
+                                    <RadzenDropDown TValue="int" Data="@_monthOptions" TextProperty="Text" ValueProperty="Value"
+                                                    Value="@state.Month" Change="@((object val) => state.Month = (int)val)"
+                                                    Placeholder="Month..." Class="w-100" Style="font-size: 0.75rem;" />
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityEventImportItemDto" Title="Quantity" Width="230px" Property="Quantity">
+                        <Template Context="item">
+                            @if (!IsRowEditing(item))
+                            {
+                                <div class="d-flex align-items-center gap-1 flex-wrap">
+                                    <span class="font-monospace fw-bold text-dark">@item.Quantity.ToString("N2")</span>
+                                    <span class="text-secondary small fw-semibold">@UnitTitle</span>
+                                    @if (item.IsExistingEventMatched)
+                                    {
+                                        <span class="text-muted small">/ current</span>
+                                        <span class="font-monospace text-warning-emphasis fw-semibold">@item.ExistingQuantity.ToString("N2")</span>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                var state = GetRowEdit(item);
+                                <div class="p-1" style="background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;"
+                                     @onkeyup="@((Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e) => OnEditKeyUp(e, item))">
+                                    <RadzenNumeric TValue="decimal" Value="@state.Quantity" Change="@((decimal val) => state.Quantity = val)"
+                                                   Min="0" Format="n2" Placeholder="@($"Quantity ({UnitTitle})")" Class="w-100" Style="font-size: 0.75rem;" />
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+                    <RadzenDataGridColumn TItem="ActivityEventImportItemDto" Title="Remark" MinWidth="280px" Property="Remark">
+                        <Template Context="item">
+                            @if (!IsRowEditing(item))
+                            {
+                                @if (!string.IsNullOrEmpty(item.Remark))
+                                {
+                                    <span class="text-dark small text-truncate d-inline-block" style="max-width: 100%;" title="@item.Remark">@item.Remark</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small fst-italic">—</span>
+                                }
+                            }
+                            else
+                            {
+                                var state = GetRowEdit(item);
+                                <div class="p-1" style="background: #f8fafc; border-radius: 6px; border: 1px dashed #cbd5e1;"
+                                     @onkeyup="@((Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e) => OnEditKeyUp(e, item))">
+                                    <RadzenTextBox Value="@state.Remark" Change="@((string val) => state.Remark = val ?? string.Empty)"
+                                                   Placeholder="Remark / Note..." Class="w-100" Style="font-size: 0.75rem;" />
+                                    @if (item.ValidationErrors.Any())
+                                    {
+                                        <div class="text-danger" style="font-size: 0.65rem;">@string.Join("; ", item.ValidationErrors)</div>
+                                    }
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+
+
+                    <RadzenDataGridColumn TItem="ActivityEventImportItemDto" Title="Status" Width="190px" TextAlign="TextAlign.Center" Sortable="false">
+                        <Template Context="item">
+                            @{
+                                var errText = string.Join("; ", item.ValidationErrors);
+                            }
+                            @* [2026-09-15][Claude] แถวที่อยู่ในโหมดแก้ไข ใช้ SplitButton เดียวคุม Update(Apply)/Cancel *@
+                            @if (IsRowEditing(item))
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1" title="@errText">
+                                    <RadzenSplitButton Text="Update"
+                                                       Icon="save"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="ButtonStyle.Primary"
+                                                       Click="@(args => OnEditingActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Update (Apply)" Value="update" Icon="done" />
+                                            <RadzenSplitButtonItem Text="Cancel Editing" Value="cancel" Icon="close" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                </div>
+                            }
+                            else if (item.IsExistingEventMatched && item.ImportState == eEventImportState.Ready)
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1">
+                                    <RadzenSplitButton Text="@GetExistingBtnText(item.ExistingAction)"
+                                                       Icon="@GetExistingBtnIcon(item.ExistingAction)"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="@GetExistingBtnStyle(item.ExistingAction)"
+                                                       Click="@(args => OnExistingActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Edit Period / Quantity" Value="edit" Icon="edit" />
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Overwrite Existing Event" Value="overwrite" Icon="sync" />
+                                            <RadzenSplitButtonItem Text="Import as New Event" Value="as_new" Icon="add_box" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                </div>
+                            }
+                            else if (item.ImportState == eEventImportState.Ready)
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1">
+                                    <RadzenSplitButton Text="@GetValidBtnText(item.RowAction)"
+                                                       Icon="@GetValidBtnIcon(item.RowAction)"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="@GetValidBtnStyle(item.RowAction)"
+                                                       Click="@(args => OnValidActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Import this Event" Value="import" Icon="check_circle" />
+                                            <RadzenSplitButtonItem Text="Edit Period / Quantity" Value="edit" Icon="edit" />
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                </div>
+                            }
+                            else if (item.ImportState == eEventImportState.NeedsFix)
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1" title="@errText">
+                                    <RadzenSplitButton Text="@GetNeedsFixBtnText(item.RowAction)"
+                                                       Icon="help_outline"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="ButtonStyle.Warning"
+                                                       Click="@(args => OnNeedsFixActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Edit Period / Quantity" Value="edit" Icon="edit" />
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-inline-flex flex-column align-items-center gap-1" title="@errText">
+                                    <RadzenSplitButton Text="Invalid"
+                                                       Icon="warning"
+                                                       Size="ButtonSize.Small"
+                                                       ButtonStyle="ButtonStyle.Danger"
+                                                       Click="@(args => OnInvalidActionSelected(args, item))" Style="border-radius: 6px; font-weight: 600; min-width: 90px; height: 32px;">
+                                        <ChildContent>
+                                            <RadzenSplitButtonItem Text="Edit Period / Quantity" Value="edit" Icon="edit" />
+                                            <RadzenSplitButtonItem Text="Skip (Do Not Import)" Value="skip" Icon="block" />
+                                            <RadzenSplitButtonItem Text="Remove from List" Value="remove" Icon="delete" Style="color: var(--rz-danger);" />
+                                        </ChildContent>
+                                    </RadzenSplitButton>
+                                </div>
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
+        </div>
+    }
+
+    <!-- Action Buttons -->
+    <RadzenStack Orientation="Orientation.Vertical" AlignItems="AlignItems.End" Gap="0.25rem" Class="mt-3">
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.75rem">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close(false))" />
+            <RadzenButton Text="@($"Import ({ReadyCount} Ready)")"
+                          Icon="file_upload"
+                          ButtonStyle="ButtonStyle.Success"
+                          Disabled="@(ReadyCount == 0 || _isSaving)"
+                          Click="@ExecuteImportAsync" />
+        </RadzenStack>
+        @if (_parsedItems != null && _parsedItems.Any(i => i.ImportState == eEventImportState.NeedsFix))
+        {
+            <div class="text-warning small mt-1">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                @($"{_parsedItems.Count(i => i.ImportState == eEventImportState.NeedsFix)} row(s) still need fixing and will be skipped during import.")
+            </div>
+        }
+        @if (_parsedItems != null && _parsedItems.Any(i => i.IsExistingEventMatched && i.ExistingAction == eExistingEventAction.Skip))
+        {
+            <div class="text-muted small mt-1">
+                <i class="bi bi-info-circle me-1"></i>
+                @($"{_parsedItems.Count(i => i.IsExistingEventMatched && i.ExistingAction == eExistingEventAction.Skip)} period(s) already exist in the system and will be skipped.")
+            </div>
+        }
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    #region component parameters
+    [Parameter] public int TopicId { get; set; }
+    [Parameter] public int SubscriptionId { get; set; }
+    [Parameter] public string TopicTitle { get; set; } = "Activity Topic";
+    [Parameter] public string UnitTitle { get; set; } = "Unit";
+    [Parameter] public int Year { get; set; }
+    [Parameter] public List<TbActivityEvent> ExistingEvents { get; set; } = new();
+    #endregion
+
+    #region component state
+    private bool _isParsing = false;
+    private bool _isSaving = false;
+    private List<ActivityEventImportItemDto>? _parsedItems;
+
+    // [2026-09-15][Claude] กลับมาใช้สถานะแก้ไขระดับ "ทั้งแถว" ตามคำสั่ง — Double-click ที่แถวเพื่อเปิดแก้ไขทุกคอลัมน์พร้อมกัน
+    private readonly HashSet<int> _editingRows = new();
+    private readonly Dictionary<int, RowEditState> _rowEdits = new();
+
+    private class RowEditState
+    {
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public decimal Quantity { get; set; }
+        public string Remark { get; set; } = string.Empty;
+    }
+
+    private class MonthOption
+    {
+        public int Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private readonly List<MonthOption> _monthOptions =
+        Enumerable.Range(1, 12).Select(m => new MonthOption { Value = m, Text = $"{m:00}" }).ToList();
+
+    private IEnumerable<ActivityEventImportItemDto> DisplayItems =>
+        _parsedItems?.Where(i => i.RowAction != eEventRowAction.Remove) ?? Enumerable.Empty<ActivityEventImportItemDto>();
+
+    private int ReadyCount => _parsedItems?.Count(i => ExcelService.IsReady(i)) ?? 0;
+    #endregion
+
+    #region class methods - row actions
+    private void OnValidActionSelected(RadzenSplitButtonItem? args, ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-14]
+        var action = args?.Value?.ToString() ?? "import";
+        switch (action)
+        {
+            case "skip":
+                item.RowAction = eEventRowAction.Skip;
+                break;
+            case "remove":
+                RemoveRowFromList(item);
+                break;
+            case "edit":
+                EnableRowEditing(item);
+                break;
+            case "import":
+            default:
+                item.RowAction = eEventRowAction.Default;
+                break;
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    private void OnExistingActionSelected(RadzenSplitButtonItem? args, ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-14]
+        var action = args?.Value?.ToString() ?? "skip";
+        switch (action)
+        {
+            case "overwrite":
+                item.ExistingAction = eExistingEventAction.Overwrite;
+                item.RowAction = eEventRowAction.Default;
+                break;
+            case "as_new":
+                item.ExistingAction = eExistingEventAction.ImportAsNew;
+                item.RowAction = eEventRowAction.Default;
+                break;
+            case "remove":
+                RemoveRowFromList(item);
+                break;
+            case "edit":
+                EnableRowEditing(item);
+                break;
+            case "skip":
+            default:
+                item.ExistingAction = eExistingEventAction.Skip;
+                break;
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    private void OnNeedsFixActionSelected(RadzenSplitButtonItem? args, ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-14]
+        var action = args?.Value?.ToString() ?? "edit";
+        switch (action)
+        {
+            case "edit":
+                EnableRowEditing(item);
+                break;
+            case "remove":
+                RemoveRowFromList(item);
+                break;
+            case "skip":
+            default:
+                item.RowAction = eEventRowAction.Skip;
+                break;
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    private void OnInvalidActionSelected(RadzenSplitButtonItem? args, ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-14]
+        var action = args?.Value?.ToString() ?? "skip";
+        switch (action)
+        {
+            case "edit":
+                EnableRowEditing(item);
+                break;
+            case "remove":
+                RemoveRowFromList(item);
+                break;
+            case "skip":
+            default:
+                item.RowAction = eEventRowAction.Skip;
+                break;
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    // [2026-09-15][Claude] SplitButton ของแถวที่กำลังแก้ไข: Update(Apply) / Cancel / Remove
+    private void OnEditingActionSelected(RadzenSplitButtonItem? args, ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-15]
+        var action = args?.Value?.ToString() ?? "update";
+        switch (action)
+        {
+            case "cancel":
+                CancelRowEditing(item);
+                break;
+            case "remove":
+                RemoveRowFromList(item);
+                break;
+            case "update":
+            default:
+                ApplyRowEditing(item);
+                break;
+        }
+        StateHasChanged();
+        #endregion
+    }
+
+    private void RemoveRowFromList(ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-14]
+        item.RowAction = eEventRowAction.Remove;
+        _parsedItems?.Remove(item);
+        _editingRows.Remove(item.RowNumber);
+        _rowEdits.Remove(item.RowNumber);
+        #endregion
+    }
+
+    private static string GetValidBtnText(eEventRowAction action) => action switch
+    {
+        eEventRowAction.Skip => "Skip",
+        _ => "Import"
+    };
+
+    private static string GetValidBtnIcon(eEventRowAction action) => action switch
+    {
+        eEventRowAction.Skip => "block",
+        _ => "check_circle"
+    };
+
+    private static ButtonStyle GetValidBtnStyle(eEventRowAction action) => action switch
+    {
+        eEventRowAction.Skip => ButtonStyle.Light,
+        _ => ButtonStyle.Success
+    };
+
+    private static string GetNeedsFixBtnText(eEventRowAction action) => action switch
+    {
+        eEventRowAction.Skip => "Skip",
+        _ => "Fix"
+    };
+
+    private static string GetExistingBtnText(eExistingEventAction action) => action switch
+    {
+        eExistingEventAction.Overwrite => "Overwrite",
+        eExistingEventAction.ImportAsNew => "Import as New",
+        _ => "Skip"
+    };
+
+    private static string GetExistingBtnIcon(eExistingEventAction action) => action switch
+    {
+        eExistingEventAction.Overwrite => "sync",
+        eExistingEventAction.ImportAsNew => "add_box",
+        _ => "block"
+    };
+
+    private static ButtonStyle GetExistingBtnStyle(eExistingEventAction action) => action switch
+    {
+        eExistingEventAction.Overwrite => ButtonStyle.Warning,
+        eExistingEventAction.ImportAsNew => ButtonStyle.Info,
+        _ => ButtonStyle.Light
+    };
+    #endregion
+
+    #region class methods - in-row editing
+    private RowEditState GetRowEdit(ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-14]
+        if (_rowEdits.TryGetValue(item.RowNumber, out var existing)) return existing;
+
+        var state = new RowEditState
+        {
+            Year = item.TimeStamp?.Year ?? FallbackYear,
+            Month = item.TimeStamp?.Month ?? 1,
+            Quantity = item.Quantity,
+            Remark = item.Remark ?? string.Empty
+        };
+        _rowEdits[item.RowNumber] = state;
+        return state;
+        #endregion
+    }
+
+    // [2026-09-15][Claude] Double-click ที่แถวใดก็ได้ = เปิดแก้ไขทั้งแถว (Period + Quantity + Remark) พร้อมกัน
+    private void OnRowDoubleClick(DataGridRowMouseEventArgs<ActivityEventImportItemDto> args)
+    {
+        #region hide [2026-09-15]
+        if (args?.Data == null) return;
+        EnableRowEditing(args.Data);
+        #endregion
+    }
+
+    private bool IsRowEditing(ActivityEventImportItemDto item) => _editingRows.Contains(item.RowNumber);
+
+    private void EnableRowEditing(ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-15]
+        GetRowEdit(item);
+        _editingRows.Add(item.RowNumber);
+        StateHasChanged();
+        #endregion
+    }
+
+    // [2026-09-15][Claude] Enter = Apply, Escape = Cancel — ใช้ keyup ไม่ใช่ keydown เพราะเบราว์เซอร์ยิง change ของ input ก่อน keyup ทำให้ค่าที่เพิ่งพิมพ์ถูก commit เข้า state ทันก่อน Apply
+    private void OnEditKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e, ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-15]
+        if (e.Key == "Enter" || e.Key == "NumpadEnter")
+        {
+            ApplyRowEditing(item);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelRowEditing(item);
+        }
+        #endregion
+    }
+
+    private void CancelRowEditing(ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-15]
+        _editingRows.Remove(item.RowNumber);
+        _rowEdits.Remove(item.RowNumber);
+        StateHasChanged();
+        #endregion
+    }
+
+    // [2026-09-15][Claude] ส่งค่าครบทั้ง 3 ตัวเข้า ApplyManualValue เพราะ service ตรวจ period/quantity/remark พร้อมกันเป็นชุดเดียว
+    private void ApplyRowEditing(ActivityEventImportItemDto item)
+    {
+        #region hide [2026-09-15]
+        var state = GetRowEdit(item);
+
+        DateTime? period = null;
+        if (state.Year >= 2000 && state.Year <= 2100 && state.Month >= 1 && state.Month <= 12)
+        {
+            period = new DateTime(state.Year, state.Month, 1);
+        }
+
+        ExcelService.ApplyManualValue(item, period, state.Quantity, state.Remark, _parsedItems, ExistingEvents);
+
+        // ปิดโหมดแก้ไขเมื่อข้อมูลผ่าน validate แล้วเท่านั้น ถ้ายังไม่ผ่านให้คงฟอร์มไว้พร้อมข้อความ error
+        if (item.ImportState == eEventImportState.Ready)
+        {
+            _editingRows.Remove(item.RowNumber);
+            _rowEdits.Remove(item.RowNumber);
+        }
+
+        StateHasChanged();
+        #endregion
+    }
+
+    private int FallbackYear => Year > 0 ? Year : TU.ACAMP.Domain.Tools.AppTimeZone.LocalNow.Year;
+    #endregion
+
+    #region class methods
+    private async Task DownloadTemplateAsync()
+    {
+        #region hide [2026-09-14]
+        try
+        {
+            var bytes = await ExcelService.GenerateTemplateExcelAsync(UnitTitle, TopicTitle);
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("saveAsFile", "Template_ActivityEvents.xlsx", base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Template Downloaded", "Import template saved.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate activity event Excel import template.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to download template.");
+        }
+        #endregion
+    }
+
+    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    {
+        #region hide [2026-09-14]
+        var file = e.File;
+        if (file == null) return;
+
+        _isParsing = true;
+        StateHasChanged();
+
+        try
+        {
+            var sub = SubscriptionId > 0 ? await SubscriptionService.GetByIdAsync(SubscriptionId) : null;
+            var maxBytes = FileConstants.GetMaxUploadSizeBytes(sub?.AllowDataUploadCount);
+
+            if (file.Size > maxBytes)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "File Too Large", $"{file.Name} ({FileConstants.FormatFileSize(file.Size)}) exceeds maximum allowed upload limit of {FileConstants.FormatFileSize(maxBytes)}.");
+                _isParsing = false;
+                StateHasChanged();
+                return;
+            }
+
+            using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            _parsedItems = await ExcelService.ParseImportExcelAsync(ms, ExistingEvents);
+
+            _editingRows.Clear();
+            _rowEdits.Clear();
+
+            var existingCount = _parsedItems.Count(i => i.IsExistingEventMatched);
+            NotificationService.Notify(NotificationSeverity.Info, "Excel Parsed",
+                $"Parsed {_parsedItems.Count} row(s) ({existingCount} period(s) already exist in the system).");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to parse uploaded activity event Excel file.");
+            NotificationService.Notify(NotificationSeverity.Error, "Parsing Error", "Failed to parse Excel file. Please ensure it is a valid .xlsx file.");
+            _parsedItems = null;
+        }
+        finally
+        {
+            _isParsing = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+
+    private async Task ExecuteImportAsync()
+    {
+        #region hide [2026-09-14]
+        if (_parsedItems == null) return;
+
+        var readyRows = _parsedItems.Where(i => ExcelService.IsReady(i)).ToList();
+        if (!readyRows.Any()) return;
+
+        if (TopicId <= 0 || SubscriptionId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Context Required", "ไม่พบ Topic หรือ Subscription ปลายทางสำหรับการนำเข้า");
+            return;
+        }
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var toSave = ExcelService.BuildEventsToSave(readyRows, TopicId, SubscriptionId);
+
+            int createdCount = 0;
+            int overwrittenCount = 0;
+            int failedCount = 0;
+            int skippedExisting = _parsedItems.Count(i => i.IsExistingEventMatched && i.ExistingAction == eExistingEventAction.Skip);
+            int skippedNeedsFix = _parsedItems.Count(i => i.ImportState == eEventImportState.NeedsFix);
+
+            foreach (var ev in toSave)
+            {
+                try
+                {
+                    if (ev.Id > 0)
+                    {
+                        await ActivityEventService.UpdateAsync(ev);
+                        overwrittenCount++;
+                    }
+                    else
+                    {
+                        await ActivityEventService.CreateAsync(ev);
+                        createdCount++;
+                    }
+                }
+                catch (Exception exItem)
+                {
+                    failedCount++;
+                    Logger.LogWarning(exItem, "Skipped activity event import row for period {Period}", ev.TimeStamp.ToString("yyyy-MM"));
+                }
+            }
+
+            if (createdCount > 0 || overwrittenCount > 0)
+            {
+                var parts = new List<string>();
+                if (createdCount > 0) parts.Add($"{createdCount} created");
+                if (overwrittenCount > 0) parts.Add($"{overwrittenCount} overwritten");
+                if (skippedExisting > 0) parts.Add($"{skippedExisting} existing skipped");
+                if (skippedNeedsFix > 0) parts.Add($"{skippedNeedsFix} needs fix skipped");
+                if (failedCount > 0) parts.Add($"{failedCount} failed");
+
+                NotificationService.Notify(NotificationSeverity.Success, "Import Successful", string.Join(", ", parts) + ".");
+                DialogService.Close(true);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Nothing Imported", "ไม่มีรายการใดถูกนำเข้า กรุณาตรวจสอบสถานะในตาราง Preview");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save imported activity events.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save imported events.");
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+        #endregion
+    }
+    #endregion
+}

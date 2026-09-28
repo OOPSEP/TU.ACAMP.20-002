@@ -1,0 +1,176 @@
+@* [2026-09-26][Claude] แยก Cascading Organization & Reporting Year Filter Bar ออกจาก ExecutiveDashboard2 เป็น widget
+   - Year / Corporate / Company / Facility (cascading) อยู่แถวบน, ปุ่ม Advanced ชิดขวา
+   - Advanced: เดือนเริ่มปีบัญชี (Fiscal Year Start Month)
+   - widget ถือแค่ state การแสดงผล; การโหลดข้อมูล/รีเซ็ต cascading/sync URL ยังอยู่ที่หน้าเรียกผ่าน callback *@
+
+@using System.Globalization
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Services.Dashboard
+@using TU.ACAMP.WebApp.Components.Common
+
+<RadzenCard Class="p-2 mb-4 shadow-sm border rounded-3 bg-white d-flex align-items-center gap-3 flex-wrap">
+    <!-- Year Selector -->
+    <div class="d-flex align-items-center gap-2">
+        <RadzenIcon Icon="calendar_today" Class="text-muted" />
+        <RadzenLabel Text="@(FiscalStartMonth == 1 ? "Year:" : "FY:")" Class="fw-semibold small m-0" />
+        <RadzenDropDown TValue="int" Data="@AvailableYears" Value="@SelectedYear"
+                        ValueChanged="@OnYearChangedAsync" Style="width: 110px;" Size="ButtonSize.Small" />
+    </div>
+
+    <!-- Corporate Selector -->
+    <div class="d-flex align-items-center gap-2">
+        <RadzenIcon Icon="corporate_fare" Class="text-muted" />
+        <RadzenLabel Text="Corporate:" Class="fw-semibold small m-0" />
+        <RadzenDropDown TValue="int?" Data="@Corporates" TextProperty="Title" ValueProperty="Id"
+                        Value="@SelectedCorporateId" ValueChanged="@OnCorporateChangedAsync"
+                        AllowClear="true" Placeholder="All Corporates" Style="width: 200px;" Size="ButtonSize.Small" />
+    </div>
+
+    <!-- Company Selector (Cascading) -->
+    <div class="d-flex align-items-center gap-2">
+        <RadzenIcon Icon="business" Class="text-muted" />
+        <RadzenLabel Text="Company:" Class="fw-semibold small m-0" />
+        <RadzenDropDown TValue="int?" Data="@FilteredCompanies" TextProperty="Title" ValueProperty="Id"
+                        Value="@SelectedCompanyId" ValueChanged="@OnCompanyChangedAsync"
+                        AllowClear="true" Placeholder="All Companies" Disabled="@(!FilteredCompanies.Any())"
+                        Style="width: 200px;" Size="ButtonSize.Small" />
+    </div>
+
+    <!-- Facility Selector (Cascading) -->
+    <div class="d-flex align-items-center gap-2">
+        <RadzenIcon Icon="factory" Class="text-muted" />
+        <RadzenLabel Text="Facility:" Class="fw-semibold small m-0" />
+        <RadzenDropDown TValue="int?" Data="@FilteredFacilities" TextProperty="Title" ValueProperty="Id"
+                        Value="@SelectedFacilityId" ValueChanged="@OnFacilityChangedAsync"
+                        AllowClear="true" Placeholder="All Facilities" Disabled="@(!FilteredFacilities.Any())"
+                        Style="width: 200px;" Size="ButtonSize.Small" />
+    </div>
+
+    <!-- Advanced Toggle (ชิดขวา) -->
+    <div class="d-flex align-items-center position-relative ms-auto">
+        <AdvancedFilterToggle IsExpanded="@_isExpanded"
+                              HasActive="@(FiscalStartMonth != 1)"
+                              OnToggle="@ToggleExpand"
+                              Size="ButtonSize.Small"
+                              ActiveTooltip="@($"FY starts {MonthName(FiscalStartMonth)}")" />
+    </div>
+
+    @if (_isExpanded)
+    {
+        <!-- ADVANCED: Fiscal Year Start Month -->
+        <div class="w-100 border-top pt-2 d-flex align-items-center gap-3 flex-wrap">
+            <div class="d-flex align-items-center gap-2">
+                <RadzenIcon Icon="event_repeat" Class="text-muted" />
+                <RadzenLabel Text="Fiscal Year Starts In:" Class="fw-semibold small m-0" />
+                <RadzenDropDown TValue="int" Data="@_monthOptions" TextProperty="Text" ValueProperty="Value"
+                                Value="@FiscalStartMonth" ValueChanged="@OnFiscalStartMonthChangedAsync"
+                                Style="width: 140px;" Size="ButtonSize.Small" />
+            </div>
+            <span class="small text-muted">Reporting period: <strong>@CurrentPeriodText</strong></span>
+            @if (FiscalStartMonth != 1)
+            {
+                <span class="small text-warning">Emission intensity is available for calendar-year reporting (January) only.</span>
+            }
+        </div>
+    }
+</RadzenCard>
+
+@code {
+    #region records & helper types
+    private sealed record MonthOption(int Value, string Text);
+    #endregion
+
+    #region class properties
+    [Parameter] public List<int> AvailableYears { get; set; } = new();
+    [Parameter] public List<TbCorporate> Corporates { get; set; } = new();
+    [Parameter] public List<TbCompany> Companies { get; set; } = new();
+    [Parameter] public List<TbFacility> Facilities { get; set; } = new();
+
+    [Parameter] public int SelectedYear { get; set; }
+    [Parameter] public EventCallback<int> SelectedYearChanged { get; set; }
+
+    [Parameter] public int? SelectedCorporateId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedCorporateIdChanged { get; set; }
+
+    [Parameter] public int? SelectedCompanyId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedCompanyIdChanged { get; set; }
+
+    [Parameter] public int? SelectedFacilityId { get; set; }
+    [Parameter] public EventCallback<int?> SelectedFacilityIdChanged { get; set; }
+
+    [Parameter] public int FiscalStartMonth { get; set; } = 1;
+    [Parameter] public EventCallback<int> FiscalStartMonthChanged { get; set; }
+
+    /// <summary>ปี หรือ เดือนเริ่มปีบัญชี เปลี่ยน</summary>
+    [Parameter] public EventCallback OnFilterChanged { get; set; }
+    /// <summary>Corporate เปลี่ยน (หน้าเรียกต้องรีเซ็ต Company/Facility และโหลด Net-Zero target ใหม่)</summary>
+    [Parameter] public EventCallback OnCorporateChanged { get; set; }
+    /// <summary>Company เปลี่ยน (หน้าเรียกต้องรีเซ็ต Facility)</summary>
+    [Parameter] public EventCallback OnCompanyChanged { get; set; }
+    [Parameter] public EventCallback OnFacilityChanged { get; set; }
+    #endregion
+
+    #region class fields
+    private bool _isExpanded;
+
+    private static readonly List<MonthOption> _monthOptions = Enumerable.Range(1, 12)
+        .Select(m => new MonthOption(m, CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(m)))
+        .ToList();
+
+    private IEnumerable<TbCompany> FilteredCompanies =>
+        SelectedCorporateId.HasValue
+            ? Companies.Where(c => c.CorporateId == SelectedCorporateId.Value)
+            : Companies;
+
+    private IEnumerable<TbFacility> FilteredFacilities =>
+        SelectedCompanyId.HasValue
+            ? Facilities.Where(f => f.CompanyId == SelectedCompanyId.Value)
+            : (SelectedCorporateId.HasValue
+                ? Facilities.Where(f => FilteredCompanies.Select(c => c.Id).Contains(f.CompanyId))
+                : Facilities);
+
+    private string CurrentPeriodText => ExecutiveDashboardService2.FormatFiscalPeriod(SelectedYear, FiscalStartMonth);
+    #endregion
+
+    #region class methods
+    protected override void OnInitialized()
+    {
+        // กางแถบ Advanced ไว้ถ้าเปิดหน้ามาด้วยปีบัญชีที่ไม่ใช่ปีปฏิทิน (เช่น restore จาก URL)
+        _isExpanded = FiscalStartMonth != 1;
+    }
+
+    private static string MonthName(int month) => CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(month);
+
+    private void ToggleExpand() => _isExpanded = !_isExpanded;
+
+    private async Task OnYearChangedAsync(int value)
+    {
+        await SelectedYearChanged.InvokeAsync(value);
+        await OnFilterChanged.InvokeAsync();
+    }
+
+    private async Task OnFiscalStartMonthChangedAsync(int value)
+    {
+        await FiscalStartMonthChanged.InvokeAsync(value);
+        await OnFilterChanged.InvokeAsync();
+    }
+
+    private async Task OnCorporateChangedAsync(int? value)
+    {
+        await SelectedCorporateIdChanged.InvokeAsync(value);
+        await OnCorporateChanged.InvokeAsync();
+    }
+
+    private async Task OnCompanyChangedAsync(int? value)
+    {
+        await SelectedCompanyIdChanged.InvokeAsync(value);
+        await OnCompanyChanged.InvokeAsync();
+    }
+
+    private async Task OnFacilityChangedAsync(int? value)
+    {
+        await SelectedFacilityIdChanged.InvokeAsync(value);
+        await OnFacilityChanged.InvokeAsync();
+    }
+    #endregion
+}

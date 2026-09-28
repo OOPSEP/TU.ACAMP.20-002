@@ -1,0 +1,6 @@
+Testing input: sourceName='ดีเซล (Stationary)'
+Step 1 (direct/substring): None None
+Step 2 (stripped 'ดีเซล'): 186 น้ำมันดีเซล / น้ำมันโซล่าร์
+Step 3: isStationary=True, isMobile=False
+Matched source: 15 Diesel
+Found mapping: 45 Title=Diesel Scope3ChildId=186

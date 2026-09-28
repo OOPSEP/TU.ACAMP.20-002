@@ -1,0 +1,542 @@
+@page "/organization/company/add"
+@page "/organization/company/edit/{SecureId}"
+@page "/organization/company/view/{SecureId}"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Components.Pages.Organization.Company.Widgets
+
+@attribute [Authorize]
+
+@inject CompanyService CompanyService
+@inject CorporateService CorporateService
+@inject SubscriptionService SubscriptionService
+@inject FacilityService FacilityService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<AddEditCompany> Logger
+
+<PageTitle>@(_isReadOnlyForm ? "View Company" : (_model.Id == 0 ? "Add Company" : "Edit Company")) - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToBack" Class="me-2" Style="border-radius: 6px;" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isReadOnlyForm
+                        ? "View Company"
+                        : (_model.Id == 0 ? "Add Company" : "Edit Company"))
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-1 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    Manage company legal entity details, equity share ratio, and operational site boundaries.
+                </RadzenText>
+                @if (_selectedSubscriptionId.HasValue && !_isAdmin)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:var(--rz-primary-lighter,#e8f0fe); color:var(--rz-primary,#3d6af8); border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">business</span>
+                        @(!string.IsNullOrWhiteSpace(_selectedSubscriptionName) ? _selectedSubscriptionName : "Subscription Workspace")
+                    </span>
+                }
+                else if (_isAdmin && _selectedSubscriptionId.HasValue)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:6px; background:#d1ecf1; color:#0c5460; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap;">
+                        <span class="rzi" style="font-size:0.9rem;">manage_accounts</span>
+                        @(!string.IsNullOrWhiteSpace(_selectedSubscriptionName) ? _selectedSubscriptionName : "Subscription")
+                    </span>
+                }
+
+                @if (_model.Corporate != null || _selectedCorporateId.HasValue)
+                {
+                    var corpTitle = _model.Corporate?.Title ?? _corporatesList.FirstOrDefault(c => c.Id == _selectedCorporateId)?.Title;
+                    if (!string.IsNullOrWhiteSpace(corpTitle))
+                    {
+                        <span style="display:inline-flex; align-items:center; gap:6px; background:#f1f5f9; color:#334155; border-radius:999px; padding:3px 14px; font-size:0.78rem; font-weight:600; white-space:nowrap; border: 1px solid #cbd5e1;">
+                            <span class="rzi" style="font-size:0.9rem;">corporate_fare</span>
+                            @corpTitle
+                        </span>
+                    }
+                }
+            </div>
+        </div>
+
+        @if (_hasChanges && !_isReadOnlyForm)
+        {
+            <div class="d-flex align-items-center">
+                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Unsaved Changes" IsPill="true" Class="px-3 py-2 shadow-sm" Style="font-size: 0.8rem; font-weight: 600;" />
+            </div>
+        }
+    </div>
+
+    <!-- Loading State -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading company form..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenTemplateForm TItem="TbCompany" Data="@_model" Submit="@OnSubmit">
+            <RadzenTabs @bind-SelectedIndex="@_activeTabIndex" RenderMode="TabRenderMode.Client" Class="shadow-sm rounded-3" Style="border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+                <Tabs>
+                    <!-- TAB 1: BASIC INFORMATION -->
+                    <RadzenTabsItem Text="1. Basic Information">
+                        <ChildContent>
+                            <CompanyBasicInfoWidget Model="@_model"
+                                                    CorporatesList="@_corporatesList"
+                                                    IsReadOnly="@_isReadOnlyForm"
+                                                    IsAdmin="@_isAdmin"
+                                                    OnChanged="@HandleModelChanged"
+                                                    OnCorporateChanged="@HandleCorporateChanged" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+
+                    <!-- TAB 2: FACILITIES / OPERATIONAL SITES -->
+                    <RadzenTabsItem Text="2. Facilities & Sites">
+                        <ChildContent>
+                            <CompanyFacilitiesWidget Model="@_model"
+                                                     FacilitiesList="@_facilitiesList"
+                                                     IsReadOnly="@_isReadOnlyForm"
+                                                     OnManageFacilities="@NavigateToFacilityManagement" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+
+                    <!-- TAB 3: TOPICS & BOUNDARY -->
+                    <RadzenTabsItem Text="3. Topics">
+                        <ChildContent>
+                            <CompanyTopicsWidget Model="@_model"
+                                                 TopicsList="@_topicsList"
+                                                 IsReadOnly="@_isReadOnlyForm" />
+                        </ChildContent>
+                    </RadzenTabsItem>
+                </Tabs>
+            </RadzenTabs>
+
+            <!-- Action Buttons -->
+            <RadzenRow Class="mt-3">
+                <RadzenColumn Size="12" Class="d-flex justify-content-end gap-2">
+                    <RadzenButton ButtonType="ButtonType.Button" Text="Cancel" ButtonStyle="ButtonStyle.Light"
+                                  Click="@NavigateToBack" Style="min-width: 100px; border-radius: 8px;" />
+                    @if (!_isReadOnlyForm)
+                    {
+                        <RadzenButton ButtonType="ButtonType.Submit" Text="Save" ButtonStyle="ButtonStyle.Primary"
+                                      Icon="save" Disabled="@(_isReadOnlyForm || _isSaving || (!_hasChanges && _model.Id > 0))"
+                                      Style="min-width: 100px; border-radius: 8px; font-weight: 600;" />
+                    }
+                </RadzenColumn>
+            </RadzenRow>
+        </RadzenTemplateForm>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _hasLoaded = false;
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _canCreate = false;
+    private bool _isSaving = false;
+    private bool _isReadOnlyForm = false;
+    private bool _hasChanges = false;
+    private string _originalSnapshot = string.Empty;
+
+    private int _activeTabIndex = 0;
+    private int _activeGridPageIndex = 0;
+    private string _searchText = string.Empty;
+
+    private string _currentUserEmail = string.Empty;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private HashSet<int> _editableCorporateIds = new();
+    private HashSet<int> _editableCompanyIds = new();
+
+    private List<TbSubscription> _subscriptionsList = new();
+    private List<TbCorporate> _corporatesList = new();
+    private List<TbFacility> _facilitiesList = new();
+    private List<TU.ACAMP.Domain.Models.Library.TbActivityTopic> _topicsList = new();
+
+    private int? _selectedSubscriptionId;
+    private int? _selectedCorporateId;
+    private int? _lastBoundCorporateId;
+    private string _selectedSubscriptionName = string.Empty;
+
+    private TbCompany _model = new();
+    #endregion
+
+    #region class properties
+    [Parameter]
+    public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cid")]
+    public string SecureCid { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string SecureSid { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "gpage")]
+    public string SecureGpage { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string SecureSearchText { get; set; } = string.Empty;
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-18]
+        _isLoading = true;
+        try
+        {
+            await InitializeUserSessionAsync();
+            RestoreStateParameters();
+
+            var targetId = ResolveCompanyId();
+            if (targetId.HasValue && targetId.Value > 0)
+            {
+                var existingItem = await CompanyService.GetByIdAsync(targetId.Value, includeFacilities: true, includeTopics: true);
+                if (existingItem != null)
+                {
+                    _model = existingItem;
+                    _facilitiesList = existingItem.Facilities.ToList();
+                    _topicsList = existingItem.Topics.ToList();
+                    _selectedCorporateId = _model.CorporateId;
+                    if (_model.Corporate != null)
+                    {
+                        _selectedSubscriptionId = _model.Corporate.SubscriptionId;
+                    }
+                }
+            }
+            else
+            {
+                await LoadLookupsAndMetadataAsync();
+                var defaultCorpId = _selectedCorporateId ?? (_corporatesList.FirstOrDefault()?.Id ?? 0);
+                _model = new TbCompany
+                {
+                    CorporateId = defaultCorpId,
+                    Code = defaultCorpId > 0 ? await CompanyService.GenerateNextCodeAsync(defaultCorpId) : "COM-001",
+                    Title = string.Empty,
+                    EquityShare = 100,
+                    Remark = string.Empty,
+                    IsActive = true
+                };
+            }
+
+            await LoadLookupsAndMetadataAsync();
+            EvaluateFormPermissions();
+            _originalSnapshot = SerializeForCheck(_model);
+            _hasChanges = _model.Id == 0;
+
+            _lastBoundCorporateId = _selectedCorporateId;
+            _hasLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Critical crash in AddEditCompany initialization.");
+            NotificationService.Notify(NotificationSeverity.Error, "Initialization Error", "Failed to load company record.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-08-18]
+        if (!_hasLoaded)
+        {
+            await base.OnParametersSetAsync();
+            return;
+        }
+
+        RestoreStateParameters();
+        if (_selectedCorporateId != _lastBoundCorporateId)
+        {
+            _lastBoundCorporateId = _selectedCorporateId;
+            await LoadLookupsAndMetadataAsync();
+            EvaluateFormPermissions();
+            _originalSnapshot = SerializeForCheck(_model);
+            _hasChanges = false;
+        }
+
+        await base.OnParametersSetAsync();
+        #endregion
+    }
+
+    private int? ResolveCompanyId()
+    {
+        #region hide [2026-08-18]
+        if (!string.IsNullOrWhiteSpace(SecureId))
+        {
+            var decrypted = DataProtection.UnprotectInt(SecureId);
+            if (decrypted.HasValue) return decrypted.Value;
+        }
+        return null;
+        #endregion
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-18]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+        }
+
+        _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(_currentUserEmail, _isAdmin);
+        _subscriptionsList = await SubscriptionService.GetSubscriptionsForUserAsync(_currentUserEmail, _isAdmin, includeInactive: false);
+        _editableCorporateIds = await CorporateService.GetEditableCorporateIdsAsync(_currentUserEmail, _isAdmin);
+        _editableCompanyIds = await CompanyService.GetEditableCompanyIdsAsync(_currentUserEmail, _isAdmin);
+        #endregion
+    }
+
+    private void RestoreStateParameters()
+    {
+        #region hide [2026-08-18]
+        var decryptedCid = DataProtection.UnprotectInt(SecureCid);
+        if (decryptedCid.HasValue)
+        {
+            _selectedCorporateId = decryptedCid.Value;
+        }
+
+        var decryptedSid = DataProtection.UnprotectInt(SecureSid);
+        if (decryptedSid.HasValue)
+        {
+            _selectedSubscriptionId = decryptedSid.Value;
+        }
+
+        var decryptedGpage = DataProtection.UnprotectInt(SecureGpage);
+        if (decryptedGpage.HasValue && decryptedGpage.Value >= 0)
+        {
+            _activeGridPageIndex = decryptedGpage.Value;
+        }
+
+        var decryptedQ = DataProtection.Unprotect(SecureSearchText);
+        if (!string.IsNullOrWhiteSpace(decryptedQ))
+        {
+            _searchText = decryptedQ;
+        }
+
+        if (_selectedSubscriptionId.HasValue)
+        {
+            var matchingSub = _subscriptionsList.FirstOrDefault(s => s.Id == _selectedSubscriptionId.Value);
+            _selectedSubscriptionName = matchingSub?.Title ?? $"Subscription #{_selectedSubscriptionId.Value}";
+        }
+        #endregion
+    }
+
+    private async Task LoadLookupsAndMetadataAsync()
+    {
+        #region hide [2026-08-18]
+        try
+        {
+            _corporatesList = await CorporateService.GetBySubscriptionIdAsync(
+                _selectedSubscriptionId,
+                includeCompanies: false,
+                includeUsers: false,
+                includeInactive: true);
+
+            if (_selectedSubscriptionId.HasValue)
+            {
+                var sub = _subscriptionsList.FirstOrDefault(s => s.Id == _selectedSubscriptionId.Value);
+                _selectedSubscriptionName = sub?.Title ?? string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading lookup data for Company form.");
+        }
+        #endregion
+    }
+
+    private void EvaluateFormPermissions()
+    {
+        #region hide [2026-08-18]
+        var uri = NavigationManager.Uri;
+        var isExplicitViewRoute = uri.Contains("/view/", StringComparison.OrdinalIgnoreCase);
+
+        if (_isAdmin)
+        {
+            _canCreate = true;
+            _isReadOnlyForm = isExplicitViewRoute;
+            return;
+        }
+
+        if (_model.Id == 0)
+        {
+            _canCreate = _selectedCorporateId.HasValue
+                ? _editableCorporateIds.Contains(_selectedCorporateId.Value)
+                : (_editableCorporateIds.Count > 0 || _editableSubscriptionIds.Count > 0);
+            _isReadOnlyForm = !_canCreate;
+        }
+        else
+        {
+            bool hasEditAccess = _editableCompanyIds.Contains(_model.Id) ||
+                                 _editableCorporateIds.Contains(_model.CorporateId) ||
+                                 (_model.Corporate != null && _editableSubscriptionIds.Contains(_model.Corporate.SubscriptionId));
+
+            _isReadOnlyForm = isExplicitViewRoute || !hasEditAccess;
+        }
+        #endregion
+    }
+
+    private async Task HandleCorporateChanged(int corporateId)
+    {
+        #region hide [2026-08-18]
+        if (_model.Id == 0 && corporateId > 0)
+        {
+            _model.Code = await CompanyService.GenerateNextCodeAsync(corporateId);
+        }
+        HandleModelChanged();
+        #endregion
+    }
+
+    private void HandleModelChanged()
+    {
+        #region hide [2026-08-18]
+        var current = SerializeForCheck(_model);
+        _hasChanges = _model.Id == 0 || (current != _originalSnapshot);
+        StateHasChanged();
+        #endregion
+    }
+
+    private string SerializeForCheck(TbCompany model)
+    {
+        #region hide [2026-08-18]
+        if (model == null) return string.Empty;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            model.CorporateId,
+            model.Code,
+            model.Title,
+            model.EquityShare,
+            model.Remark,
+            model.IsActive
+        });
+        #endregion
+    }
+
+    private void NavigateToBack()
+    {
+        #region hide [2026-08-18]
+        try
+        {
+            var queryParams = new Dictionary<string, object?>();
+
+            if (_selectedCorporateId.HasValue)
+                queryParams["cid"] = DataProtection.Protect(_selectedCorporateId.Value);
+
+            if (_selectedSubscriptionId.HasValue)
+                queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+            if (_activeGridPageIndex > 0)
+                queryParams["gpage"] = DataProtection.Protect(_activeGridPageIndex);
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                queryParams["q"] = DataProtection.Protect(_searchText);
+
+            var url = NavigationManager.GetUriWithQueryParameters("/organization/company", queryParams);
+            NavigationManager.NavigateTo(url, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error navigating back from AddEditCompany.");
+            NavigationManager.NavigateTo("/organization/company");
+        }
+        #endregion
+    }
+
+    private void NavigateToFacilityManagement()
+    {
+        #region hide [2026-08-18]
+        if (_model.Id > 0)
+        {
+            var secureComId = DataProtection.Protect(_model.Id);
+            NavigationManager.NavigateTo($"/organization/facility?comid={Uri.EscapeDataString(secureComId)}");
+        }
+        #endregion
+    }
+
+    private async Task OnSubmit(TbCompany model)
+    {
+        #region hide [2026-08-18]
+        if (_isReadOnlyForm)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Denied", "You do not have write access to submit this form.");
+            return;
+        }
+
+        if (model.CorporateId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation Error", "Please select a Corporate Group.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(model.Code))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation Error", "Company code is required.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(model.Title))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation Error", "Company title is required.");
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            if (model.Id == 0)
+            {
+                if (!_canCreate && !_isAdmin)
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "Denied", "You do not have permission to create companies.");
+                    return;
+                }
+
+                var created = await CompanyService.CreateAsync(model);
+                NotificationService.Notify(NotificationSeverity.Success, "Created", $"Company '{created.Title}' ({created.Code}) created successfully.");
+            }
+            else
+            {
+                await CompanyService.UpdateAsync(model);
+                NotificationService.Notify(NotificationSeverity.Success, "Updated", $"Company '{model.Title}' ({model.Code}) updated successfully.");
+            }
+
+            NavigateToBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving company ID: {Id}", model.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Save Error", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+    #endregion
+}

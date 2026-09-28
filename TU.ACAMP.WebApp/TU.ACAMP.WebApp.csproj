@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>aspnet-TU_ACAMP_WebApp-cc1a434f-9f98-42d8-bdbd-2fd2e49c460a</UserSecretsId>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Remove="Components\Pages\Library\Activity\ActivityTopic\PageListActivityTopic1.razor" />
+    <Content Remove="Components\Pages\Library\Activity\ActivityTopic\PageListActivityTopic2.razor" />
+    <Content Remove="Components\Pages\Library\Activity\ActivityTopic\PageListActivityTopic3.razor" />
+    <Content Remove="Components\Pages\Organization\Facility\PageListFacility.razor" />
+    <Content Remove="Components\Pages\Organization\Company\PageListCompany.razor" />
+    <Content Remove="Components\Pages\Organization\Corporate\PageListCorporate.razor" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Files\JSON\system_topic_templates.json.bak" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="9.0.0" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Radzen.Blazor" Version="8.4.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.3.1" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TU.ACAMP.Domain\TU.ACAMP.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="Files\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Components\Pages\Library\Activity\ActivityGroup\" />
+    <Folder Include="Components\Pages\Library\CarbonLabel\" />
+    <Folder Include="Files\Excels\" />
+    <Folder Include="Files\PDF\" />
+    <Folder Include="Temp\ทดสอบ-รายงาน\" />
+  </ItemGroup>
+
+</Project>

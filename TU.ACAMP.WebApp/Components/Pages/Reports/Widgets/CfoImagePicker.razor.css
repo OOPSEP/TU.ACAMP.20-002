@@ -1,0 +1,51 @@
+/* [2026-09-24][Claude] CfoImagePicker: กรอบรูปที่คลิกเพื่อเลือกไฟล์ใหม่ ใช้ร่วมกัน Fr-01 / Fr-02 / Fr-03.1 (โทนสว่าง)
+   ย้ายมาจาก CfoFr01DetailsWidget.razor.css — ขนาดกรอบกำหนดผ่าน parameter Width/Height */
+.cfo-image-picker {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 100%;
+    padding: 8px;
+    margin: 0;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.cfo-image-picker:hover {
+    border-color: var(--rz-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .15);
+}
+
+.cfo-image-picker img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.cfo-image-picker-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .25rem;
+    padding: .4rem;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--rz-primary);
+    background: rgba(255, 255, 255, .92);
+    border-top: 1px solid #e2e8f0;
+    opacity: 0;
+    transition: opacity .15s ease;
+}
+
+.cfo-image-picker:hover .cfo-image-picker-overlay {
+    opacity: 1;
+}

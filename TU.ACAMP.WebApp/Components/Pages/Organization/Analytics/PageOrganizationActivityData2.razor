@@ -1,0 +1,1149 @@
+@* [2026-09-24][Claude] ย้าย route ไปที่ PageOrganizationActivityData3 (Hotspot แบบ Pareto 70%)
+@page "/organization/activity-analytics"
+@page "/organization/activity-data"
+@page "/view-activity-data-from-organization"
+*@
+
+@using System.Globalization
+@using System.IO
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Components.Pages.Organization.Analytics.Widgets
+@using TU.ACAMP.WebApp.Data
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Components.Common
+
+@attribute [Authorize]
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject SubscriptionService SubscriptionService
+@inject CorporateService CorporateService
+@inject CompanyService CompanyService
+@inject FacilityService FacilityService
+@inject ActivityTopicService TopicService
+@inject ActivityGroupService GroupService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+@inject ILogger<PageOrganizationActivityData2> Logger
+
+@*
+    ============================================================================
+    PageOrganizationActivityData2.razor (v2 - 2026-09-13: Antigravity)
+    - รองรับ Advanced Filter แบบ Expandable Row (ปุ่ม Advanced / Less แยกแถวไม่รก)
+    - รองรับ Month Start (Fiscal Year Period) เช่น มกราคม (ปฏิทิน), เมษายน (Japan FY), ตุลาคม (Thai Gov FY)
+    - กรองและคำนวณรอบปี 12 เดือนตรงตามมาตรฐานเดียวกับ FacilityService
+    - Sync query parameter 'sm' (Start Month), 'yr', 'q' ลงบน URL Address bar
+    ============================================================================
+*@
+
+<PageTitle>@($"{_orgTitle} - GHG Activity Data Analytics") - ACAMP</PageTitle>
+
+<div class="container-fluid py-2 px-4">
+    <!-- Breadcrumb & Top Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@GoBack" Class="me-2" Style="border-radius: 6px;" Title="Back to previous page" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @_orgTitle
+                </RadzenText>
+                <span class="badge bg-primary-subtle text-primary border ms-2 px-2 py-1" style="font-size: 0.78rem;">
+                    @_levelDisplay Level Analytics
+                </span>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0 ms-5">
+                GHG Footprint Analytics, Scope Share Comparison & Hotspot Materiality Visualizations.
+            </RadzenText>
+        </div>
+
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Class="flex-wrap">
+            <RadzenButton Icon="description" Text="CFO & ISO Report" ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                          Click="@NavigateToCfoReport" Style="border-radius: 6px; font-weight: 600;" Title="View official CFO & ISO 14064-1 Audit Report" />
+            <RadzenButton Icon="download" Text="Export Excel" ButtonStyle="ButtonStyle.Info" Variant="Variant.Flat"
+                          Click="@ExportToExcelAsync"
+                          Disabled="@(_yearGroups == null || !_yearGroups.Any() || !CanExport)"
+                          Title="@(CanExport ? "Export GHG activity analytics data" : "Export is restricted to users with edit permissions.")"
+                          Style="border-radius: 6px;" />
+        </RadzenStack>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading GHG Activity Analytics Data..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <!-- Summary Cards Section (Hotspot & Footprint Summary) -->
+        <div class="row g-3 mb-4">
+            <!-- Card 1: Total Footprint -->
+            <div class="col-12 col-md-4">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <span class="text-muted small fw-semibold d-block">Overall Total Footprint</span>
+                            <span class="fs-4 fw-bold text-dark">@((_overallTotalKg / 1000m).ToString("N2"))</span>
+                            <span class="text-secondary fw-semibold ms-1 small">tCO₂e</span>
+                        </div>
+                        <div class="p-3 bg-primary-subtle rounded-circle text-primary">
+                            <RadzenIcon Icon="cloud" Style="font-size: 28px;" />
+                        </div>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Card 2: Top Hotspot -->
+            <div class="col-12 col-md-4">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <span class="text-muted small fw-semibold d-block">🔥 #1 GHG Hotspot</span>
+                            @if (_topHotspot != null)
+                            {
+                                <div class="fw-bold text-danger text-truncate" style="max-width: 220px;" title="@_topHotspot.Title">
+                                    @_topHotspot.Title
+                                </div>
+                                <div class="small text-secondary">
+                                    @((_topHotspot.KgCO2e / 1000m).ToString("N2")) tCO₂e (@_topHotspot.OverallSharePercent.ToString("F1")% of Total)
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">- No data -</span>
+                            }
+                        </div>
+                        <div class="p-3 bg-danger-subtle rounded-circle text-danger">
+                            <RadzenIcon Icon="local_fire_department" Style="font-size: 28px;" />
+                        </div>
+                    </div>
+                </RadzenCard>
+            </div>
+
+            <!-- Card 3: Materiality Threshold Count -->
+            <div class="col-12 col-md-4">
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <div>
+                            <span class="text-muted small fw-semibold d-block">Materiality Hotspots (&ge; @_thresholdPercent.ToString("0.0")%)</span>
+                            <span class="fs-4 fw-bold text-danger">@_materialCount</span>
+                            <span class="text-muted ms-1 small">Activity Groups</span>
+                        </div>
+                        <div class="p-3 bg-warning-subtle rounded-circle text-warning-emphasis">
+                            <RadzenIcon Icon="warning" Style="font-size: 28px;" />
+                        </div>
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+
+        <!-- Filter & Controls Toolbar Card with Advanced Filter Button -->
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 mb-4">
+            <!-- Row 1: Primary Controls (Search, Sort, Expand/Collapse, Threshold, Hotspots, Advanced Toggle) -->
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <!-- Left: Search Box -->
+                <div style="min-width: 240px;" class="flex-grow-1">
+                    <RadzenTextBox @bind-Value="_searchText"
+                                   @bind-Value:event="oninput"
+                                   Placeholder="Search activity group, code, or topic..."
+                                   Style="width: 100%; border-radius: 6px;"
+                                   Size="ButtonSize.Medium" />
+                </div>
+
+                <!-- Right: Sort, Expand/Collapse, Threshold, Materiality & Advanced Toggle -->
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <!-- Sort Option Dropdown -->
+                    <div class="d-flex align-items-center gap-1">
+                        <RadzenLabel Text="Sort:" Class="text-secondary small fw-bold mb-0" />
+                        <RadzenDropDown @bind-Value="_sortBy" Data="@_sortOptions" TextProperty="Text" ValueProperty="Value"
+                                        Style="width: 210px; height: 34px; font-size: 0.82rem;" />
+                    </div>
+
+                    <!-- Expand / Collapse All Button -->
+                    <div class="d-flex align-items-center border-start ps-2">
+                        <RadzenButton Icon="@(_isAllExpanded ? "unfold_less" : "unfold_more")"
+                                      Text="@(_isAllExpanded ? "Collapse All" : "Expand All")"
+                                      ButtonStyle="@(_isAllExpanded ? ButtonStyle.Secondary : ButtonStyle.Light)"
+                                      Variant="Variant.Flat"
+                                      Size="ButtonSize.Small"
+                                      Style="border-radius: 6px; font-size: 0.82rem; height: 34px;"
+                                      Click="@ToggleExpandAll"
+                                      Title="@(_isAllExpanded ? "Collapse all activity groups" : "Expand all activity groups")" />
+                    </div>
+
+                    <!-- Materiality Threshold -->
+                    <div class="d-flex align-items-center gap-1 border-start ps-2">
+                        <RadzenLabel Text="Threshold:" Class="text-secondary small fw-bold mb-0" />
+                        <RadzenNumeric TValue="decimal" @bind-Value="_thresholdPercent"
+                                       Min="0.1m" Max="100m" Step="0.5m" Format="0.0 '%'"
+                                       Style="width: 95px; height: 34px;"
+                                       Change="@(args => RecalculateMaterialCount())" />
+                    </div>
+
+                    <!-- Materiality Switch -->
+                    <div class="d-flex align-items-center gap-2 border-start ps-2">
+                        <RadzenSwitch @bind-Value="_isMateriality" Style="--rz-switch-height: 22px;" />
+                        <RadzenLabel Text="@($"Hotspots (≥ {_thresholdPercent:0.0}%)")" Class="fw-semibold text-dark mb-0 small" />
+                    </div>
+
+                    <!-- Advanced Filter Button (Separate row expansion) -->
+                    <div class="d-flex align-items-center border-start ps-2 position-relative">
+                        @* [2026-09-26][Claude] ใช้ปุ่มมาตรฐาน AdvancedFilterToggle *@
+                        <AdvancedFilterToggle IsExpanded="@_isAdvancedExpanded"
+                                              HasActive="@HasActiveAdvancedFilters"
+                                              OnToggle="@ToggleAdvancedFilter"
+                                              Size="ButtonSize.Small"
+                                              Style="height: 34px;" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Advanced Filter Section (Fiscal Month Start & Quick Reset) -->
+            @if (_isAdvancedExpanded)
+            {
+                <div class="row g-3 align-items-center mt-2 pt-3 border-top" style="border-color: var(--rz-border-color) !important;">
+                    <!-- Month Start (Fiscal Year Period) -->
+                    <div class="col-12 col-md-5">
+                        <RadzenFormField Text="Month Start (Fiscal Year Period)" Style="width: 100%;">
+                            <RadzenDropDown TValue="int"
+                                            Value="@_startMonth"
+                                            ValueChanged="@OnStartMonthChanged"
+                                            Data="@_monthsList"
+                                            TextProperty="Text"
+                                            ValueProperty="Value"
+                                            Style="width: 100%;">
+                                <Template Context="month">
+                                    @if (month is MonthOption m)
+                                    {
+                                        <div class="d-flex align-items-center justify-content-between" style="width: 100%;">
+                                            <span>@m.Text</span>
+                                            @if (!string.IsNullOrEmpty(m.Tag))
+                                            {
+                                                <span class="badge rounded-pill ms-2 px-2 py-1" style="font-size: 0.7rem; font-weight: 600; background-color: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7;">
+                                                    @m.Tag
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                </Template>
+                            </RadzenDropDown>
+                        </RadzenFormField>
+                    </div>
+
+                    <!-- Description / Fiscal Period Info -->
+                    <div class="col-12 col-md-4 text-muted small">
+                        <RadzenIcon Icon="info" Style="font-size: 16px; vertical-align: middle;" Class="me-1 text-info" />
+                        <span>Annual cycle spans 12 consecutive months starting from 1st of selected month.</span>
+                    </div>
+
+                    <!-- Reset Advanced Filter -->
+                    @if (HasActiveAdvancedFilters)
+                    {
+                        <div class="col-12 col-md-3 d-flex justify-content-md-end">
+                            <RadzenButton Text="Reset to Calendar Year"
+                                          Icon="restart_alt"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          Variant="Variant.Text"
+                                          Size="ButtonSize.Small"
+                                          Click="@ResetAdvancedFilter"
+                                          Style="font-size: 0.82rem;" />
+                        </div>
+                    }
+                </div>
+            }
+        </RadzenCard>
+
+        <!-- Main Data Grid / Accordion Widget -->
+        <PageViewActivityDatafromEvent YearGroups="@_yearGroups"
+                                        StartMonth="@_startMonth"
+                                        IsMateriality="@_isMateriality"
+                                        ThresholdPercent="@((double)_thresholdPercent)"
+                                        SearchText="@_searchText"
+                                        SortBy="@_sortBy"
+                                        IsAllExpanded="@_isAllExpanded"
+                                        SelectedYear="@_selectedYear"
+                                        SelectedYearChanged="@OnYearChanged" />
+    }
+</div>
+
+@code {
+    #region helper records
+    public record MonthOption(string Text, int Value, string Tag);
+    #endregion
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? EncryptedId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "level")]
+    public int LevelValue { get; set; } = 1;
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? EncryptedRet { get; set; }
+
+    [SupplyParameterFromQuery(Name = "yr")]
+    public string? SecureYr { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sm")]
+    public int? QueryStartMonth { get; set; }
+
+    private bool _isLoading = true;
+    private int _targetId = 0;
+    private eTopicLevel _level = eTopicLevel.Corporate;
+    private string _orgTitle = "Organization GHG Analytics";
+    private string _levelDisplay = "Corporate";
+    private string _searchText = string.Empty;
+    private bool _isMateriality = false;
+    private decimal _thresholdPercent = 5.0m;
+    private string? _returnUrl;
+    private string _sortBy = "code_asc";
+    private bool _isAllExpanded = false;
+    private int? _selectedYear;
+
+    // Advanced Filter State
+    private bool _isAdvancedExpanded = false;
+    private int _startMonth = 1;
+    private bool HasActiveAdvancedFilters => _startMonth != 1;
+
+    private readonly List<MonthOption> _monthsList = new()
+    {
+        new("January (01)", 1, "Calendar Default"),
+        new("February (02)", 2, ""),
+        new("March (03)", 3, ""),
+        new("April (04)", 4, "Japan FY"),
+        new("May (05)", 5, "Japan FY (Alt)"),
+        new("June (06)", 6, ""),
+        new("July (07)", 7, ""),
+        new("August (08)", 8, ""),
+        new("September (09)", 9, ""),
+        new("October (10)", 10, "Thai Gov FY"),
+        new("November (11)", 11, ""),
+        new("December (12)", 12, "")
+    };
+
+    private void ToggleAdvancedFilter()
+    {
+        _isAdvancedExpanded = !_isAdvancedExpanded;
+    }
+
+    private async Task OnStartMonthChanged(int month)
+    {
+        _startMonth = month;
+        await LoadDataAsync();
+        await SyncBrowserUrlAsync();
+    }
+
+    private async Task ResetAdvancedFilter()
+    {
+        _startMonth = 1;
+        await LoadDataAsync();
+        await SyncBrowserUrlAsync();
+    }
+
+    private class SortOptionItem
+    {
+        public string Value { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private readonly List<SortOptionItem> _sortOptions = new()
+    {
+        new SortOptionItem { Value = "code_asc", Text = "Category / Code" },
+        new SortOptionItem { Value = "emissions_desc", Text = "Emissions (High → Low)" },
+        new SortOptionItem { Value = "emissions_asc", Text = "Emissions (Low → High)" },
+        new SortOptionItem { Value = "name_asc", Text = "Name / Title" }
+    };
+
+    private void ToggleExpandAll()
+    {
+        _isAllExpanded = !_isAllExpanded;
+    }
+
+    private decimal _overallTotalKg = 0m;
+    private int _materialCount = 0;
+    private PageViewActivityDatafromEvent.ActivityGroupEmissionsDto? _topHotspot;
+
+    private List<PageViewActivityDatafromEvent.YearEmissionsGroupDto>? _yearGroups;
+
+    private bool _isAdmin = false;
+    private HashSet<int> _editableFacilityIds = new();
+    private HashSet<int> _editableCompanyIds = new();
+    private HashSet<int> _editableCorporateIds = new();
+    private HashSet<int> _editableSubscriptionIds = new();
+
+    private bool CanExport
+    {
+        get
+        {
+            if (_isAdmin) return true;
+            if (_level == eTopicLevel.Facility && _targetId > 0)
+                return _editableFacilityIds.Contains(_targetId);
+            if (_level == eTopicLevel.Company && _targetId > 0)
+                return _editableCompanyIds.Contains(_targetId);
+            if (_level == eTopicLevel.Corporate && _targetId > 0)
+                return _editableCorporateIds.Contains(_targetId);
+            return _editableFacilityIds.Any() || _editableCompanyIds.Any() || _editableCorporateIds.Any() || _editableSubscriptionIds.Any();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ResolveParameters();
+        await LoadDataAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncBrowserUrlAsync();
+        }
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["id"] = EncryptedId,
+                ["level"] = LevelValue.ToString(),
+                ["ret"] = EncryptedRet,
+                ["yr"] = _selectedYear.HasValue ? _selectedYear.Value.ToString() : null,
+                ["sm"] = _startMonth != 1 ? _startMonth.ToString() : null,
+                ["q"] = !string.IsNullOrWhiteSpace(_searchText) ? _searchText : null
+            };
+
+            var uri = NavigationManager.GetUriWithQueryParameters("/organization/activity-analytics", queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // Ignore during prerender
+        }
+    }
+
+    private async Task OnYearChanged(int? year)
+    {
+        _selectedYear = year;
+        await SyncBrowserUrlAsync();
+    }
+
+    private void ResolveParameters()
+    {
+        if (!string.IsNullOrWhiteSpace(EncryptedId))
+        {
+            _targetId = DataProtection.UnprotectInt(EncryptedId) ?? 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureYr) && int.TryParse(SecureYr, out var yr))
+        {
+            _selectedYear = yr;
+        }
+
+        if (QueryStartMonth.HasValue && QueryStartMonth.Value >= 1 && QueryStartMonth.Value <= 12)
+        {
+            _startMonth = QueryStartMonth.Value;
+            if (_startMonth != 1)
+            {
+                _isAdvancedExpanded = true;
+            }
+        }
+
+        _level = LevelValue switch
+        {
+            2 => eTopicLevel.Company,
+            3 => eTopicLevel.Facility,
+            _ => eTopicLevel.Corporate
+        };
+
+        _levelDisplay = _level switch
+        {
+            eTopicLevel.Company => "Company",
+            eTopicLevel.Facility => "Facility",
+            _ => "Corporate"
+        };
+
+        if (!string.IsNullOrWhiteSpace(EncryptedRet))
+        {
+            _returnUrl = DataProtection.Unprotect(EncryptedRet);
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            _isLoading = true;
+
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity != null && user.Identity.IsAuthenticated)
+            {
+                _isAdmin = user.IsInRole(SystemRoles.Administrator);
+                var email = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+                _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(email, _isAdmin);
+                _editableCorporateIds = await CorporateService.GetEditableCorporateIdsAsync(email, _isAdmin);
+                _editableCompanyIds = await CompanyService.GetEditableCompanyIdsAsync(email, _isAdmin);
+                _editableFacilityIds = await FacilityService.GetEditableFacilityIdsAsync(email, _isAdmin);
+            }
+
+            using var context = await DbFactory.CreateDbContextAsync();
+
+            if (_targetId == 0)
+            {
+                var corps = await CorporateService.GetBySubscriptionIdAsync();
+                if (corps.Any())
+                {
+                    _targetId = corps.First().Id;
+                    _level = eTopicLevel.Corporate;
+                }
+            }
+
+            if (_level == eTopicLevel.Corporate && _targetId > 0)
+            {
+                var corp = await context.Corporates.AsNoTracking().FirstOrDefaultAsync(c => c.Id == _targetId);
+                if (corp != null)
+                {
+                    _orgTitle = corp.Title;
+                    _thresholdPercent = corp.MaterialityThreshold > 0 ? corp.MaterialityThreshold : 5.0m;
+                }
+            }
+            else if (_level == eTopicLevel.Company && _targetId > 0)
+            {
+                var comp = await context.Companies.Include(c => c.Corporate).AsNoTracking().FirstOrDefaultAsync(c => c.Id == _targetId);
+                if (comp != null)
+                {
+                    _orgTitle = comp.Title;
+                    _thresholdPercent = comp.Corporate?.MaterialityThreshold > 0 ? comp.Corporate.MaterialityThreshold : 5.0m;
+                }
+            }
+            else if (_level == eTopicLevel.Facility && _targetId > 0)
+            {
+                var fac = await context.Facilities.Include(f => f.Company).ThenInclude(c => c!.Corporate).AsNoTracking().FirstOrDefaultAsync(f => f.Id == _targetId);
+                if (fac != null)
+                {
+                    _orgTitle = fac.Title;
+                    _thresholdPercent = fac.Company?.Corporate?.MaterialityThreshold > 0 ? fac.Company.Corporate.MaterialityThreshold : 5.0m;
+                }
+            }
+
+            List<int> corpIds = new();
+            List<int> companyIds = new();
+            List<int> facilityIds = new();
+
+            if (_level == eTopicLevel.Corporate)
+            {
+                corpIds.Add(_targetId);
+                companyIds = await context.Companies.Where(c => c.CorporateId == _targetId && !c.IsDeleted).Select(c => c.Id).ToListAsync();
+                facilityIds = await context.Facilities.Where(f => companyIds.Contains(f.CompanyId) && !f.IsDeleted).Select(f => f.Id).ToListAsync();
+            }
+            else if (_level == eTopicLevel.Company)
+            {
+                companyIds.Add(_targetId);
+                facilityIds = await context.Facilities.Where(f => f.CompanyId == _targetId && !f.IsDeleted).Select(f => f.Id).ToListAsync();
+            }
+            else if (_level == eTopicLevel.Facility)
+            {
+                facilityIds.Add(_targetId);
+            }
+
+            var topics = await context.Topics
+                .Where(t => !t.IsDeleted &&
+                     ((t.Level == eTopicLevel.Corporate && corpIds.Contains(t.TargetId)) ||
+                      (t.Level == eTopicLevel.Company && companyIds.Contains(t.TargetId)) ||
+                      (t.Level == eTopicLevel.Facility && facilityIds.Contains(t.TargetId))))
+                .Include(t => t.Childs.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.ActivityGroup)
+                .Include(t => t.Childs.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.ActivityUnit)
+                .Include(t => t.Childs.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.Source)
+                        .ThenInclude(s => s!.Group)
+                .Include(t => t.Childs.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.Source)
+                        .ThenInclude(s => s!.Unit)
+                .Include(t => t.Events.Where(e => !e.IsDeleted))
+                .AsNoTracking()
+                .OrderBy(t => t.OrderId)
+                .ThenBy(t => t.Id)
+                .ToListAsync();
+
+            // [2026-09-13: Antigravity] คำนวณปีตาม StartMonth (Fiscal Cycle 12 เดือน)
+            var allYears = topics.SelectMany(t => t.Events)
+                .Select(e => _startMonth == 1 ? e.TimeStamp.Year : (e.TimeStamp.Month >= _startMonth ? e.TimeStamp.Year : e.TimeStamp.Year - 1))
+                .Distinct()
+                .OrderByDescending(y => y)
+                .ToList();
+
+            if (!allYears.Any()) allYears.Add(DateTime.Now.Year);
+
+            _yearGroups = new List<PageViewActivityDatafromEvent.YearEmissionsGroupDto>();
+
+            // All Years
+            var allYearsGroup = BuildYearEmissionsGroup(0, topics);
+            _yearGroups.Add(allYearsGroup);
+
+            // Individual Years
+            foreach (var year in allYears)
+            {
+                _yearGroups.Add(BuildYearEmissionsGroup(year, topics));
+            }
+
+            // Compute Hotspot & Materiality Summaries from All Years
+            var allScopeGroups = allYearsGroup.Scopes.Where(s => (int)s.ScopeNo > 0).ToList();
+            _overallTotalKg = allScopeGroups.Sum(s => s.TotalKgCO2e);
+            var allAgList = allScopeGroups.SelectMany(s => s.ActivityGroups).ToList();
+
+            _topHotspot = allAgList.OrderByDescending(a => a.KgCO2e).FirstOrDefault();
+            _materialCount = allAgList.Count(a => a.OverallSharePercent >= _thresholdPercent);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading organization activity data breakdown.");
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load GHG activity breakdown data.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void RecalculateMaterialCount()
+    {
+        if (_yearGroups == null || !_yearGroups.Any()) return;
+        var allYearsGroup = _yearGroups.FirstOrDefault();
+        if (allYearsGroup != null)
+        {
+            var allScopeGroups = allYearsGroup.Scopes.Where(s => (int)s.ScopeNo > 0).ToList();
+            var allAgList = allScopeGroups.SelectMany(s => s.ActivityGroups).ToList();
+            _materialCount = allAgList.Count(a => a.OverallSharePercent >= _thresholdPercent);
+        }
+    }
+
+    private PageViewActivityDatafromEvent.YearEmissionsGroupDto BuildYearEmissionsGroup(int yearFilter, List<TbActivityTopic> topics)
+    {
+        var individualScopes = new[]
+        {
+            eTgoScopeNo.Scope1,
+            eTgoScopeNo.Scope2,
+            eTgoScopeNo.Scope3,
+            (eTgoScopeNo)4
+        };
+
+        var scopeGroupDtos = new List<PageViewActivityDatafromEvent.ScopeEmissionsGroupDto>();
+        decimal yearTotalKg = 0m;
+        var allScopesAgMap = new Dictionary<int, PageViewActivityDatafromEvent.ActivityGroupEmissionsDto>();
+
+        // [2026-09-13: Antigravity] กำหนดช่วงเวลา 12 เดือนตาม Fiscal Year Window (StartDate ถึง +12 เดือน)
+        DateTime? fiscalStart = null;
+        DateTime? fiscalEnd = null;
+        if (yearFilter > 0)
+        {
+            fiscalStart = new DateTime(yearFilter, _startMonth, 1, 0, 0, 0, DateTimeKind.Utc);
+            fiscalEnd = fiscalStart.Value.AddMonths(12);
+        }
+
+        // Pass 1: Build individual scope groups
+        foreach (var scope in individualScopes)
+        {
+            var scopeName = scope switch
+            {
+                eTgoScopeNo.Scope1 => "Scope 1 (Direct GHG)",
+                eTgoScopeNo.Scope2 => "Scope 2 (Indirect Energy)",
+                eTgoScopeNo.Scope3 => "Scope 3 (Other Indirect)",
+                _ => "Separate Report"
+            };
+
+            var groupEmissionsMap = new Dictionary<int, PageViewActivityDatafromEvent.ActivityGroupEmissionsDto>();
+            decimal scopeTotalKg = 0m;
+
+            foreach (var topic in topics)
+            {
+                var events = (fiscalStart.HasValue && fiscalEnd.HasValue)
+                    ? topic.Events.Where(e => e.TimeStamp >= fiscalStart.Value && e.TimeStamp < fiscalEnd.Value).ToList()
+                    : topic.Events.ToList();
+
+                var totalQty = events.Any() ? events.Sum(e => e.Quantity) : 0m;
+
+                var childs = topic.Childs.Where(c => !c.IsDeleted).ToList();
+                if (!childs.Any())
+                {
+                    childs.Add(new TbActivityTopicChild
+                    {
+                        Topic = topic,
+                        TopicId = topic.Id,
+                        ActivityGroupId = 1,
+                        EmissionSharePercent = 100
+                    });
+                }
+
+                foreach (var child in childs)
+                {
+                    var tgoScope = child.ActivityGroup?.TgoScopeNo ?? child.Source?.Group?.TgoScopeNo ?? eTgoScopeNo.Scope1;
+                    if (tgoScope != scope) continue;
+
+                    var grpId = child.ActivityGroupId;
+                    var grpCode = child.ActivityGroup?.Code ?? "-";
+                    var grpTitle = child.ActivityGroup?.Title ?? topic.Title;
+
+                    var ef = child.Source?.EF ?? 0m;
+                    var kg = (child.Source != null && totalQty > 0) ? EmissionCalculator.CalculateKgCO2e(totalQty, child) : 0m;
+
+                    scopeTotalKg += kg;
+
+                    if (!groupEmissionsMap.ContainsKey(grpId))
+                    {
+                        groupEmissionsMap[grpId] = new PageViewActivityDatafromEvent.ActivityGroupEmissionsDto
+                        {
+                            ActivityGroupId = grpId,
+                            ScopeNo = scope,
+                            ScopeName = scopeName,
+                            Code = grpCode,
+                            Title = grpTitle,
+                            KgCO2e = 0m,
+                            Topics = new()
+                        };
+                    }
+
+                    groupEmissionsMap[grpId].KgCO2e += kg;
+                    groupEmissionsMap[grpId].Topics.Add(new PageViewActivityDatafromEvent.TopicItemEmissionsDto
+                    {
+                        TopicId = topic.Id,
+                        TopicTitle = topic.Title,
+                        SourceName = child.Source?.Title ?? "-",
+                        UnitName = child.ActivityUnit?.Title ?? child.Source?.Unit?.Title ?? "-",
+                        Quantity = totalQty,
+                        EF = ef,
+                        KgCO2e = kg
+                    });
+
+                    // Add to All Scopes map
+                    if (!allScopesAgMap.ContainsKey(grpId))
+                    {
+                        allScopesAgMap[grpId] = new PageViewActivityDatafromEvent.ActivityGroupEmissionsDto
+                        {
+                            ActivityGroupId = grpId,
+                            ScopeNo = scope,
+                            ScopeName = scopeName,
+                            Code = grpCode,
+                            Title = grpTitle,
+                            KgCO2e = 0m,
+                            Topics = new()
+                        };
+                    }
+                    allScopesAgMap[grpId].KgCO2e += kg;
+                    allScopesAgMap[grpId].Topics.Add(new PageViewActivityDatafromEvent.TopicItemEmissionsDto
+                    {
+                        TopicId = topic.Id,
+                        TopicTitle = topic.Title,
+                        SourceName = child.Source?.Title ?? "-",
+                        UnitName = child.ActivityUnit?.Title ?? child.Source?.Unit?.Title ?? "-",
+                        Quantity = totalQty,
+                        EF = ef,
+                        KgCO2e = kg
+                    });
+                }
+            }
+
+            yearTotalKg += scopeTotalKg;
+
+            var agList = groupEmissionsMap.Values.ToList();
+            foreach (var ag in agList)
+            {
+                ag.SharePercent = scopeTotalKg > 0 ? (ag.KgCO2e * 100m / scopeTotalKg) : 0m;
+                ag.Topics = ag.Topics.OrderBy(t => t.TopicTitle).ThenBy(t => t.TopicId).ToList();
+            }
+
+            scopeGroupDtos.Add(new PageViewActivityDatafromEvent.ScopeEmissionsGroupDto
+            {
+                ScopeNo = scope,
+                ScopeName = scopeName,
+                TotalKgCO2e = scopeTotalKg,
+                ActivityGroups = agList.OrderBy(ag => ag.Code).ThenBy(ag => ag.Title).ToList()
+            });
+        }
+
+        // Pass 2: Calculate OverallSharePercent for all scope items
+        foreach (var sGroup in scopeGroupDtos)
+        {
+            foreach (var ag in sGroup.ActivityGroups)
+            {
+                ag.OverallSharePercent = yearTotalKg > 0 ? (ag.KgCO2e * 100m / yearTotalKg) : 0m;
+            }
+        }
+
+        // Pass 3: Prepend "All Scopes (รวมทุกขอบเขต)" as Tab 0
+        var allScopesList = allScopesAgMap.Values.ToList();
+        foreach (var ag in allScopesList)
+        {
+            ag.SharePercent = yearTotalKg > 0 ? (ag.KgCO2e * 100m / yearTotalKg) : 0m;
+            ag.OverallSharePercent = yearTotalKg > 0 ? (ag.KgCO2e * 100m / yearTotalKg) : 0m;
+            ag.Topics = ag.Topics.OrderBy(t => t.TopicTitle).ThenBy(t => t.TopicId).ToList();
+        }
+
+        var allScopesGroup = new PageViewActivityDatafromEvent.ScopeEmissionsGroupDto
+        {
+            ScopeNo = 0,
+            ScopeName = "All Scopes",
+            TotalKgCO2e = yearTotalKg,
+            ActivityGroups = allScopesList.OrderBy(ag => ag.Code).ThenBy(ag => ag.Title).ToList()
+        };
+
+        scopeGroupDtos.Insert(0, allScopesGroup);
+
+        return new PageViewActivityDatafromEvent.YearEmissionsGroupDto
+        {
+            Year = yearFilter,
+            Scopes = scopeGroupDtos
+        };
+    }
+
+    private void GoBack()
+    {
+        if (!string.IsNullOrWhiteSpace(_returnUrl))
+        {
+            // [2026-09-13][Antigravity] If return URL doesn't have yr or user changed yr in analytics, ensure yr is preserved
+            var targetUrl = _returnUrl;
+            if (_selectedYear.HasValue && !targetUrl.Contains("yr="))
+            {
+                var sep = targetUrl.Contains("?") ? "&" : "?";
+                targetUrl = $"{targetUrl}{sep}yr={_selectedYear.Value}";
+            }
+            NavigationManager.NavigateTo(targetUrl);
+        }
+        else
+        {
+            var basePath = _level switch
+            {
+                eTopicLevel.Company => "/organization/companies",
+                eTopicLevel.Facility => "/organization/facilities",
+                _ => "/organization/corporates"
+            };
+            var yrParam = _selectedYear.HasValue ? $"?yr={_selectedYear.Value}" : "";
+            NavigationManager.NavigateTo($"{basePath}{yrParam}");
+        }
+    }
+
+    private void NavigateToCfoReport()
+    {
+        var encId = !string.IsNullOrWhiteSpace(EncryptedId) ? EncryptedId : DataProtection.Protect(_targetId);
+        var encRet = DataProtection.Protect(NavigationManager.Uri);
+        NavigationManager.NavigateTo($"/reports/cfo-reports?id={Uri.EscapeDataString(encId)}&level={LevelValue}&ret={Uri.EscapeDataString(encRet)}");
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        // [2026-09-19][Antigravity] Enforce edit permission check for exporting activity data analytics
+        if (!CanExport)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Access Denied", "Only users with edit permissions can export data.");
+            return;
+        }
+
+        try
+        {
+            if (_yearGroups == null || !_yearGroups.Any()) return;
+
+            using var workbook = new XLWorkbook();
+
+            var allYearsGroup = _yearGroups.FirstOrDefault(y => y.Year == 0) ?? _yearGroups.First();
+            var allScopesTab = allYearsGroup.Scopes.FirstOrDefault(s => s.ScopeNo == 0) ?? allYearsGroup.Scopes.First();
+            var individualScopeTabs = allYearsGroup.Scopes.Where(s => (int)s.ScopeNo > 0).ToList();
+
+            // ==========================================
+            // SHEET 1: 📊 Executive Summary & Insights
+            // ==========================================
+            var summarySheet = workbook.Worksheets.Add("Executive Insights");
+            summarySheet.ShowGridLines = true;
+
+            // Title Banner
+            var titleCell = summarySheet.Cell(1, 1);
+            titleCell.Value = "ORGANIZATION GHG ACTIVITY DATA ANALYTICS & INSIGHTS REPORT";
+            titleCell.Style.Font.Bold = true;
+            titleCell.Style.Font.FontSize = 14;
+            titleCell.Style.Font.FontColor = XLColor.White;
+            titleCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#0F5132");
+            summarySheet.Range(1, 1, 1, 6).Merge();
+
+            // Metadata Block
+            summarySheet.Cell(3, 1).Value = "Organization Title:";
+            summarySheet.Cell(3, 1).Style.Font.Bold = true;
+            summarySheet.Cell(3, 2).Value = _orgTitle;
+
+            summarySheet.Cell(4, 1).Value = "Analytics Level:";
+            summarySheet.Cell(4, 1).Style.Font.Bold = true;
+            summarySheet.Cell(4, 2).Value = $"{_levelDisplay} Level";
+
+            summarySheet.Cell(5, 1).Value = "Fiscal Month Start:";
+            summarySheet.Cell(5, 1).Style.Font.Bold = true;
+            summarySheet.Cell(5, 2).Value = _monthsList.FirstOrDefault(m => m.Value == _startMonth)?.Text ?? "January (01)";
+
+            summarySheet.Cell(6, 1).Value = "Report Export Date:";
+            summarySheet.Cell(6, 1).Style.Font.Bold = true;
+            summarySheet.Cell(6, 2).Value = DateTime.Now.ToString("dd MMMM yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+
+            summarySheet.Cell(7, 1).Value = "Total GHG Footprint:";
+            summarySheet.Cell(7, 1).Style.Font.Bold = true;
+            summarySheet.Cell(7, 2).Value = (double)(_overallTotalKg / 1000m);
+            summarySheet.Cell(7, 2).Style.NumberFormat.Format = "#,##0.00 \"tCO2e\"";
+            summarySheet.Cell(7, 2).Style.Font.Bold = true;
+            summarySheet.Cell(7, 2).Style.Font.FontColor = XLColor.DarkGreen;
+
+            // Section 1: Scope Emissions Breakdown Table
+            summarySheet.Cell(9, 1).Value = "1. Scope Emissions Breakdown Summary";
+            summarySheet.Cell(9, 1).Style.Font.Bold = true;
+            summarySheet.Cell(9, 1).Style.Font.FontSize = 11;
+
+            var scopeHeaders = new[] { "Scope Category", "Scope Description", "Emissions (kgCO2e)", "Emissions (tCO2e)", "Overall Share (%)" };
+            for (int c = 0; c < scopeHeaders.Length; c++)
+            {
+                var hCell = summarySheet.Cell(10, c + 1);
+                hCell.Value = scopeHeaders[c];
+                hCell.Style.Font.Bold = true;
+                hCell.Style.Font.FontColor = XLColor.White;
+                hCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E293B");
+                hCell.Style.Alignment.Horizontal = c >= 2 ? XLAlignmentHorizontalValues.Right : XLAlignmentHorizontalValues.Left;
+            }
+
+            int scopeRow = 11;
+            foreach (var sTab in individualScopeTabs)
+            {
+                summarySheet.Cell(scopeRow, 1).Value = $"Scope {(int)sTab.ScopeNo}";
+                summarySheet.Cell(scopeRow, 2).Value = sTab.ScopeName;
+
+                var kgCell = summarySheet.Cell(scopeRow, 3);
+                kgCell.Value = (double)sTab.TotalKgCO2e;
+                kgCell.Style.NumberFormat.Format = "#,##0.00";
+
+                var tCell = summarySheet.Cell(scopeRow, 4);
+                tCell.Value = (double)(sTab.TotalKgCO2e / 1000m);
+                tCell.Style.NumberFormat.Format = "#,##0.00";
+
+                var pctCell = summarySheet.Cell(scopeRow, 5);
+                pctCell.Value = _overallTotalKg > 0 ? (double)(sTab.TotalKgCO2e / _overallTotalKg) : 0.0;
+                pctCell.Style.NumberFormat.Format = "0.0%";
+
+                scopeRow++;
+            }
+
+            // Total Scope Row
+            summarySheet.Cell(scopeRow, 1).Value = "Total Footprint";
+            summarySheet.Cell(scopeRow, 1).Style.Font.Bold = true;
+            summarySheet.Cell(scopeRow, 2).Value = "All Scopes Consolidated";
+            summarySheet.Cell(scopeRow, 2).Style.Font.Bold = true;
+
+            var totKgCell = summarySheet.Cell(scopeRow, 3);
+            totKgCell.Value = (double)_overallTotalKg;
+            totKgCell.Style.NumberFormat.Format = "#,##0.00";
+            totKgCell.Style.Font.Bold = true;
+
+            var totTCell = summarySheet.Cell(scopeRow, 4);
+            totTCell.Value = (double)(_overallTotalKg / 1000m);
+            totTCell.Style.NumberFormat.Format = "#,##0.00";
+            totTCell.Style.Font.Bold = true;
+
+            var totPctCell = summarySheet.Cell(scopeRow, 5);
+            totPctCell.Value = 1.0;
+            totPctCell.Style.NumberFormat.Format = "0.0%";
+            totPctCell.Style.Font.Bold = true;
+
+            summarySheet.Range(scopeRow, 1, scopeRow, 5).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            summarySheet.Range(scopeRow, 1, scopeRow, 5).Style.Border.BottomBorder = XLBorderStyleValues.Double;
+
+            // Section 2: Top Materiality Hotspots Table (>= 5%)
+            int hotspotStartRow = scopeRow + 3;
+            summarySheet.Cell(hotspotStartRow, 1).Value = "2. Top GHG Hotspots & Materiality Analysis (>= 5% Threshold)";
+            summarySheet.Cell(hotspotStartRow, 1).Style.Font.Bold = true;
+            summarySheet.Cell(hotspotStartRow, 1).Style.Font.FontSize = 11;
+
+            var hotspotHeaders = new[] { "Rank", "Scope", "Activity Code", "Activity Group Title", "Emissions (tCO2e)", "Overall Share (%)", "Materiality Status" };
+            for (int c = 0; c < hotspotHeaders.Length; c++)
+            {
+                var hCell = summarySheet.Cell(hotspotStartRow + 1, c + 1);
+                hCell.Value = hotspotHeaders[c];
+                hCell.Style.Font.Bold = true;
+                hCell.Style.Font.FontColor = XLColor.White;
+                hCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#991B1B");
+                hCell.Style.Alignment.Horizontal = c >= 4 ? XLAlignmentHorizontalValues.Right : XLAlignmentHorizontalValues.Left;
+            }
+
+            int hRow = hotspotStartRow + 2;
+            int rank = 1;
+            foreach (var ag in allScopesTab.ActivityGroups.Where(a => a.OverallSharePercent >= 5.0m))
+            {
+                summarySheet.Cell(hRow, 1).Value = rank++;
+                summarySheet.Cell(hRow, 2).Value = ag.ScopeName;
+                summarySheet.Cell(hRow, 3).Value = ag.Code;
+                summarySheet.Cell(hRow, 4).Value = ag.Title;
+
+                var tCell = summarySheet.Cell(hRow, 5);
+                tCell.Value = (double)(ag.KgCO2e / 1000m);
+                tCell.Style.NumberFormat.Format = "#,##0.00";
+
+                var pctCell = summarySheet.Cell(hRow, 6);
+                pctCell.Value = (double)(ag.OverallSharePercent / 100m);
+                pctCell.Style.NumberFormat.Format = "0.0%";
+
+                var statCell = summarySheet.Cell(hRow, 7);
+                statCell.Value = "🔥 HOTSPOT (>= 5%)";
+                statCell.Style.Font.Bold = true;
+                statCell.Style.Font.FontColor = XLColor.DarkRed;
+                statCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#FEE2E2");
+
+                hRow++;
+            }
+
+            if (rank == 1)
+            {
+                summarySheet.Cell(hRow, 1).Value = "- No activity groups exceeded the 5% materiality threshold -";
+                summarySheet.Range(hRow, 1, hRow, 7).Merge();
+                summarySheet.Cell(hRow, 1).Style.Font.Italic = true;
+            }
+
+            summarySheet.Columns().AdjustToContents();
+
+            // ==========================================
+            // SHEET 2: 🗂️ Activity Group Breakdown
+            // ==========================================
+            var groupSheet = workbook.Worksheets.Add("Activity Group Breakdown");
+            groupSheet.ShowGridLines = true;
+
+            var gHeaders = new[] { "#", "Scope Category", "Activity Code", "Activity Group Title", "Emissions (kgCO2e)", "Emissions (tCO2e)", "Scope Share (%)", "Overall Share (%)", "Materiality Status", "Topics Count" };
+            for (int col = 0; col < gHeaders.Length; col++)
+            {
+                var hCell = groupSheet.Cell(1, col + 1);
+                hCell.Value = gHeaders[col];
+                hCell.Style.Font.Bold = true;
+                hCell.Style.Font.FontColor = XLColor.White;
+                hCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#0F5132");
+                hCell.Style.Alignment.Horizontal = col >= 4 && col <= 7 ? XLAlignmentHorizontalValues.Right : XLAlignmentHorizontalValues.Left;
+            }
+
+            int gRow = 2;
+            foreach (var ag in allScopesTab.ActivityGroups)
+            {
+                bool isHotspot = ag.OverallSharePercent >= 5.0m;
+
+                groupSheet.Cell(gRow, 1).Value = gRow - 1;
+                groupSheet.Cell(gRow, 2).Value = ag.ScopeName;
+                groupSheet.Cell(gRow, 3).Value = ag.Code;
+                groupSheet.Cell(gRow, 4).Value = ag.Title;
+
+                var kgCell = groupSheet.Cell(gRow, 5);
+                kgCell.Value = (double)ag.KgCO2e;
+                kgCell.Style.NumberFormat.Format = "#,##0.00";
+
+                var tCell = groupSheet.Cell(gRow, 6);
+                tCell.Value = (double)(ag.KgCO2e / 1000m);
+                tCell.Style.NumberFormat.Format = "#,##0.00";
+
+                var scopePctCell = groupSheet.Cell(gRow, 7);
+                scopePctCell.Value = (double)(ag.SharePercent / 100m);
+                scopePctCell.Style.NumberFormat.Format = "0.0%";
+
+                var overallPctCell = groupSheet.Cell(gRow, 8);
+                overallPctCell.Value = (double)(ag.OverallSharePercent / 100m);
+                overallPctCell.Style.NumberFormat.Format = "0.0%";
+
+                var statCell = groupSheet.Cell(gRow, 9);
+                statCell.Value = isHotspot ? "🔥 HOTSPOT (>= 5%)" : "Normal";
+                if (isHotspot)
+                {
+                    statCell.Style.Font.Bold = true;
+                    statCell.Style.Font.FontColor = XLColor.DarkRed;
+                    statCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#FEE2E2");
+                }
+
+                groupSheet.Cell(gRow, 10).Value = ag.Topics?.Count ?? 0;
+
+                gRow++;
+            }
+
+            groupSheet.Columns().AdjustToContents();
+
+            // ==========================================
+            // SHEET 3: 📌 Detailed Topic & Emission Source Audit Trail
+            // ==========================================
+            var auditSheet = workbook.Worksheets.Add("Topic & Emission Source Audit");
+            auditSheet.ShowGridLines = true;
+
+            var aHeaders = new[] { "#", "Scope Category", "Activity Code", "Activity Group Title", "Topic Title / Activity Item", "Master Emission Source", "Unit", "Recorded Quantity", "EF (kgCO2e/unit)", "Emissions (kgCO2e)", "Emissions (tCO2e)" };
+            for (int col = 0; col < aHeaders.Length; col++)
+            {
+                var hCell = auditSheet.Cell(1, col + 1);
+                hCell.Value = aHeaders[col];
+                hCell.Style.Font.Bold = true;
+                hCell.Style.Font.FontColor = XLColor.White;
+                hCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E293B");
+                hCell.Style.Alignment.Horizontal = col >= 7 ? XLAlignmentHorizontalValues.Right : XLAlignmentHorizontalValues.Left;
+            }
+
+            int aRow = 2;
+            int auditIndex = 1;
+            foreach (var ag in allScopesTab.ActivityGroups)
+            {
+                foreach (var topic in ag.Topics)
+                {
+                    auditSheet.Cell(aRow, 1).Value = auditIndex++;
+                    auditSheet.Cell(aRow, 2).Value = ag.ScopeName;
+                    auditSheet.Cell(aRow, 3).Value = ag.Code;
+                    auditSheet.Cell(aRow, 4).Value = ag.Title;
+                    auditSheet.Cell(aRow, 5).Value = topic.TopicTitle;
+                    auditSheet.Cell(aRow, 6).Value = topic.SourceName;
+                    auditSheet.Cell(aRow, 7).Value = topic.UnitName;
+
+                    var qtyCell = auditSheet.Cell(aRow, 8);
+                    qtyCell.Value = (double)topic.Quantity;
+                    qtyCell.Style.NumberFormat.Format = "#,##0.00";
+
+                    var efCell = auditSheet.Cell(aRow, 9);
+                    efCell.Value = (double)topic.EF;
+                    efCell.Style.NumberFormat.Format = "0.000000";
+
+                    var kgCell = auditSheet.Cell(aRow, 10);
+                    kgCell.Value = (double)topic.KgCO2e;
+                    kgCell.Style.NumberFormat.Format = "#,##0.00";
+
+                    var tCell = auditSheet.Cell(aRow, 11);
+                    tCell.Value = (double)(topic.KgCO2e / 1000m);
+                    tCell.Style.NumberFormat.Format = "#,##0.00";
+
+                    aRow++;
+                }
+            }
+
+            auditSheet.Columns().AdjustToContents();
+
+            // Save & Download
+            using var ms = new MemoryStream();
+            workbook.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            // [2026-09-21][Gemini] Standard Export Filename: ghg_analytics_{orgTitle}_{date}_{time}.xlsx
+            var fileName = ExportFileNameHelper.Generate("ghg_analytics", _orgTitle, fallback: "org");
+            await JSRuntime.InvokeVoidAsync("saveAsFile", fileName, base64);
+            NotificationService.Notify(NotificationSeverity.Success, "Export Successful", "Detailed GHG Activity Analytics Excel Report exported successfully.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error exporting detailed analytics report to Excel.");
+            NotificationService.Notify(NotificationSeverity.Error, "Export Failed", ex.Message);
+        }
+    }
+}

@@ -1,0 +1,846 @@
+@*
+    @page "/organization/company"
+    @page "/organization/companies"
+*@
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using System.Security.Claims
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Components.Pages.Organization.Company.Widgets
+
+@attribute [Authorize]
+
+@inject CompanyService CompanyService
+@inject CorporateService CorporateService
+@inject ActivityTopicService TopicService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IWebHostEnvironment Env
+@inject ILogger<PageListCompany> Logger
+
+<PageTitle>Companies & Subsidiaries - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToCorporateList" Class="me-2" Style="border-radius: 6px;" Title="Back to Corporate Groups" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    Companies & Subsidiaries Management
+                </RadzenText>
+            </div>
+            <RadzenText TextStyle="TextStyle.Body2" Class="text-muted mt-1 ms-5">
+                Manage legal business entities, subsidiaries, equity share distribution, and operational site boundaries.
+            </RadzenText>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+            @if (CurrentSubscription != null)
+            {
+                <RadzenBadge BadgeStyle="@(IsCompanyQuotaReached ? BadgeStyle.Danger : BadgeStyle.Info)"
+                             Text="@($"Quota: {CurrentCompanyCount} / {AllowCompanyCount} Companies ({CurrentSubscription.SubscriptionPlan})")"
+                             IsPill="true"
+                             Style="font-size: 0.82rem; padding: 6px 14px; font-weight: 600;" />
+            }
+            <RadzenButton Text="Back to Corporate Groups" Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                          Click="@NavigateToCorporateList" Style="border-radius: 8px; font-weight: 600;" />
+            @if (_canCreate)
+            {
+                <RadzenButton Text="Add Company" Icon="add_circle" ButtonStyle="ButtonStyle.Primary"
+                              Disabled="@IsCompanyQuotaReached"
+                              Click="@NavigateToCreate" Style="border-radius: 8px; font-weight: 600;" />
+            }
+        </div>
+    </div>
+
+    <!-- Filter Toolbar Widget (Row 1: Search, Sub Option, Corporate, Year, Expand | Row 2: Month, Scopes, Activity Groups) -->
+    <ComFilterWidget @bind-SearchText="@_searchText"
+                      @bind-SelectedSubscriptionId="@_selectedSubscriptionId"
+                      @bind-SelectedCorporateId="@_selectedCorporateId"
+                      @bind-SelectedYear="@_selectedYear"
+                      @bind-StartMonth="@_startMonth"
+                      @bind-SelectedScopes="@_selectedScopes"
+                      @bind-SelectedActivityGroupIds="@_selectedActivityGroupIds"
+                      SubscriptionsList="@_subscriptionsList"
+                      CorporatesList="@_corporatesList"
+                      IsAdmin="@_isAdmin"
+                      OnFilterChanged="@OnFilterChanged" />
+
+    @if (IsCompanyQuotaReached && _canCreate && CurrentSubscription != null)
+    {
+        <div class="alert alert-warning d-flex align-items-center mb-3 py-2 px-3 shadow-sm rounded-3" role="alert">
+            <RadzenIcon Icon="warning" Class="me-2 fs-5 text-warning" />
+            <div class="small">
+                <strong>Company Quota Limit Reached:</strong> You have reached the maximum allowed <b>@AllowCompanyCount</b> companies for the <b>@CurrentSubscription.SubscriptionPlan</b> plan (@CurrentSubscription.Title). Please upgrade your subscription plan to create more companies.
+            </div>
+        </div>
+    }
+
+    <!-- Content / Grid Section -->
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading companies & subsidiaries..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else
+    {
+        <RadzenCard Class="shadow-sm p-3" Style="border-radius: 12px; border: 1px solid var(--rz-border-color); background: var(--rz-card-background-color);">
+            @if (!_filteredItems.Any())
+            {
+                <div class="p-5 text-center text-muted">
+                    <RadzenIcon Icon="domain_disabled" Style="font-size: 48px; opacity: 0.5;" Class="mb-3" />
+                    <div>No companies found matching the specified filter criteria.</div>
+                </div>
+            }
+            else
+            {
+                <RadzenDataGrid @ref="_grid"
+                                Data="@_filteredItems"
+                                TItem="TbCompany"
+                                AllowColumnResize="true"
+                                AllowPaging="true"
+                                PageSize="@_pageSize"
+                                PageSizeOptions="@_pageSizeOptions"
+                                AllowSorting="true"
+                                ColumnWidth="180px"
+                                PagerHorizontalAlign="HorizontalAlign.Right"
+                                ShowPagingSummary="true"
+                                Style="@GridStyles.Default"
+                                Page="@OnGridPageChanged"
+                                RowDoubleClick="@(args => OnRowDoubleClick(args.Data))">
+                    <Columns>
+                        @if (Env.IsDevelopment() || _isAdmin)
+                        {
+                            <RadzenDataGridColumn TItem="TbCompany" Property="Id" Title="ID" Width="60px" TextAlign="TextAlign.Center" />
+                        }
+
+                        <RadzenDataGridColumn TItem="TbCompany" Title="#" Width="50px" TextAlign="TextAlign.Center" Sortable="false" Filterable="false">
+                            <Template Context="d">
+                                @(_filteredItems.IndexOf(d) + 1)
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Property="Code" Title="Code" Width="130px">
+                            <Template Context="item">
+                                <span class="badge bg-light text-dark border fw-bold px-2 py-1" style="font-size: 0.8rem;">
+                                    @item.Code
+                                </span>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Property="Title" Title="Company Title / Name" MinWidth="250px">
+                            <Template Context="item">
+                                <div class="text-truncate" style="max-width: 320px;" title="@item.Title">
+                                    <span class="fw-bold text-dark">@item.Title</span>
+                                    @if (!string.IsNullOrWhiteSpace(item.Remark))
+                                    {
+                                        <div class="text-muted small text-truncate" title="@item.Remark">@item.Remark</div>
+                                    }
+                                </div>
+                            </Template>
+                        </RadzenDataGridColumn>
+                        <RadzenDataGridColumn TItem="TbCompany" Title="Facilities" Width="140px" TextAlign="TextAlign.Center" Sortable="false">
+                            <Template Context="item">
+                                <RadzenButton Click="@(() => NavigateToFacilityList(item))"
+                                              ButtonStyle="ButtonStyle.Light"
+                                              Variant="Variant.Outlined"
+                                              Size="ButtonSize.Small"
+                                              Class="text-success border fw-bold"
+                                              Style="display: inline-flex; align-items: center; gap: 4px; border-radius: 6px;">
+                                    <RadzenIcon Icon="factory" Style="font-size: 15px;" />
+                                    <span>@((item.Facilities?.Count ?? 0)) Sites</span>
+                                </RadzenButton>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Title="Corporate Group" Width="200px" Visible="false">
+                            <Template Context="item">
+                                @if (item.Corporate != null)
+                                {
+                                    <div class="d-flex align-items-center gap-1">
+                                        <span class="badge bg-secondary-subtle text-secondary border px-1" style="font-size: 0.75rem;">@item.Corporate.Code</span>
+                                        <span class="small text-truncate fw-semibold" title="@item.Corporate.Title">@item.Corporate.Title</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">-</span>
+                                }
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Property="EquityShare" Title="Equity Share" Width="130px" TextAlign="TextAlign.Center" Visible="false">
+                            <Template Context="item">
+                                <span class="badge bg-info-subtle text-info-emphasis border fw-bold px-2 py-1" style="font-size: 0.8rem;">
+                                    @item.EquityShare%
+                                </span>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                       
+
+                        <RadzenDataGridColumn TItem="TbCompany" Title="Topics" Width="140px" TextAlign="TextAlign.Center" Sortable="false">
+                            <Template Context="item">
+                                <RadzenButton Click="@(() => NavigateToTopicList(item))"
+                                              ButtonStyle="ButtonStyle.Light"
+                                              Variant="Variant.Outlined"
+                                              Size="ButtonSize.Small"
+                                              Class="text-primary border fw-bold"
+                                              Style="display: inline-flex; align-items: center; gap: 4px; border-radius: 6px;">
+                                    <RadzenIcon Icon="category" Style="font-size: 15px;" />
+                                    <span>@((item.Topics?.Count ?? 0)) Topics</span>
+                                </RadzenButton>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Title="Report" Width="130px" TextAlign="TextAlign.Center" Sortable="false" Visible="false">
+                            <Template Context="item">
+                                <RadzenButton Click="@(() => NavigateToReportList(item))"
+                                              ButtonStyle="ButtonStyle.Light"
+                                              Variant="Variant.Outlined"
+                                              Size="ButtonSize.Small"
+                                              Class="text-info border fw-bold"
+                                              Style="display: inline-flex; align-items: center; gap: 4px; border-radius: 6px;"
+                                              Title="View Company CFO Report">
+                                    <RadzenIcon Icon="summarize" Style="font-size: 15px;" />
+                                    <span>Reports</span>
+                                </RadzenButton>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Title="tCO2e" Width="160px" TextAlign="TextAlign.Right" Sortable="false">
+                            <Template Context="item">
+                                <RadzenButton Click="@(() => NavigateToAnalytics(item))"
+                                              ButtonStyle="ButtonStyle.Success"
+                                              Variant="Variant.Flat"
+                                              Size="ButtonSize.Small"
+                                              Style="border-radius: 6px; font-weight: 700; font-size: 0.85rem;"
+                                              Title="View Company GHG Activity Data Analytics Breakdown">
+                                    <RadzenIcon Icon="insights" Style="font-size: 15px;" Class="me-1" />
+                                    <span>@GetTotalGhgDisplay(item.Id) t</span>
+                                </RadzenButton>
+                            </Template>
+                        </RadzenDataGridColumn>
+
+                        <RadzenDataGridColumn TItem="TbCompany" Title="Actions" Width="130px" TextAlign="TextAlign.Center" Sortable="false" Filterable="false">
+                            <Template Context="item">
+                                @{
+                                    bool canEdit = CanEditCompany(item);
+                                }
+                                <RadzenSplitButton Icon="@(canEdit ? "edit" : "visibility")"
+                                                   Text="@(canEdit ? "Edit" : "View")"
+                                                   ButtonStyle="@(canEdit ? ButtonStyle.Primary : ButtonStyle.Secondary)"
+                                                   Size="ButtonSize.Small"
+                                                   Click="@(args => OnSplitButtonClick(args, item))">
+                                    <ChildContent>
+                                        @if (canEdit)
+                                        {
+                                            <RadzenSplitButtonItem Text="Duplicate" Value="1" Icon="content_copy" />
+                                            <RadzenSplitButtonItem Text="Clear Topics" Value="4" Icon="playlist_remove" />
+                                            <RadzenSplitButtonItem Text="Clear Facilities" Value="3" Icon="layers_clear" />
+                                            <RadzenSplitButtonItem Text="Delete" Value="2" Icon="delete" />
+                                        }
+                                    </ChildContent>
+                                </RadzenSplitButton>
+                            </Template>
+                        </RadzenDataGridColumn>
+                    </Columns>
+                </RadzenDataGrid>
+            }
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _isLoading = true;
+    private bool _isAdmin = false;
+    private bool _canCreate = false;
+
+    private int _pageSize = 15;
+    private readonly IEnumerable<int> _pageSizeOptions = new int[] { 15, 25, 50, 100 };
+    private int _activeGridPageIndex = 0;
+    private string _searchText = string.Empty;
+
+    private string _currentUserEmail = string.Empty;
+    private HashSet<int> _editableSubscriptionIds = new();
+    private HashSet<int> _editableCorporateIds = new();
+    private HashSet<int> _editableCompanyIds = new();
+
+    private List<TbSubscription> _subscriptionsList = new();
+    private List<TbCorporate> _corporatesList = new();
+    private int? _selectedSubscriptionId;
+    private int? _selectedCorporateId;
+
+    private int _selectedYear = DateTime.UtcNow.Year;
+    private int _startMonth = 1;
+    private IEnumerable<eTgoScopeNo> _selectedScopes = Enumerable.Empty<eTgoScopeNo>();
+    private IEnumerable<int> _selectedActivityGroupIds = Enumerable.Empty<int>();
+
+    private List<TbCompany> _allItems = new();
+    private List<TbCompany> _filteredItems = new();
+    private Dictionary<int, decimal> _ghgSummary = new();
+    private RadzenDataGrid<TbCompany>? _grid;
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "cid")]
+    public string SecureCid { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string SecureSid { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "gpage")]
+    public string SecureGpage { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "yr")]
+    public string? SecureYr { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string SecureSearchText { get; set; } = string.Empty;
+    #endregion
+
+    #region computed properties
+    private TbSubscription? CurrentSubscription =>
+        _selectedSubscriptionId.HasValue
+            ? _subscriptionsList.FirstOrDefault(s => s.Id == _selectedSubscriptionId.Value)
+            : (_subscriptionsList.Count == 1 ? _subscriptionsList[0] : null);
+
+    private int CurrentCompanyCount =>
+        _selectedSubscriptionId.HasValue
+            ? _allItems.Count(c => c.Corporate != null && c.Corporate.SubscriptionId == _selectedSubscriptionId.Value)
+            : _allItems.Count;
+
+    private int AllowCompanyCount => CurrentSubscription?.AllowCompanyCount ?? 24;
+
+    private bool IsCompanyQuotaReached => CurrentSubscription != null && CurrentCompanyCount >= AllowCompanyCount;
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-17]
+        _isLoading = true;
+        try
+        {
+            await InitializeUserSessionAsync();
+            RestoreStateParameters();
+
+            if (!_selectedSubscriptionId.HasValue && !_isAdmin && _subscriptionsList.Count == 1)
+            {
+                _selectedSubscriptionId = _subscriptionsList[0].Id;
+            }
+
+            UpdateCreatePermission();
+            await LoadCorporatesAsync();
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Critical error initializing PageListCompany.");
+            NotificationService.Notify(NotificationSeverity.Error, "Initialization Error", "Failed to load company entities.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private async Task InitializeUserSessionAsync()
+    {
+        #region hide [2026-08-17]
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity != null && user.Identity.IsAuthenticated)
+        {
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? (user.Identity.Name ?? string.Empty);
+            _isAdmin = user.IsInRole(SystemRoles.Administrator);
+        }
+
+        _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(_currentUserEmail, _isAdmin);
+        _subscriptionsList = await SubscriptionService.GetSubscriptionsForUserAsync(_currentUserEmail, _isAdmin, includeInactive: false);
+        _editableCorporateIds = await CorporateService.GetEditableCorporateIdsAsync(_currentUserEmail, _isAdmin);
+        _editableCompanyIds = await CompanyService.GetEditableCompanyIdsAsync(_currentUserEmail, _isAdmin);
+        #endregion
+    }
+
+    private void RestoreStateParameters()
+    {
+        #region hide [2026-08-17]
+        var decryptedCid = DataProtection.UnprotectInt(SecureCid);
+        if (decryptedCid.HasValue)
+        {
+            _selectedCorporateId = decryptedCid.Value;
+        }
+
+        var decryptedSid = DataProtection.UnprotectInt(SecureSid);
+        if (decryptedSid.HasValue)
+        {
+            _selectedSubscriptionId = decryptedSid.Value;
+        }
+
+        var decryptedGpage = DataProtection.UnprotectInt(SecureGpage);
+        if (decryptedGpage.HasValue && decryptedGpage.Value >= 0)
+        {
+            _activeGridPageIndex = decryptedGpage.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecureYr) && int.TryParse(SecureYr, out var yr) && yr > 0)
+        {
+            _selectedYear = yr;
+        }
+
+        var decryptedQ = DataProtection.Unprotect(SecureSearchText);
+        if (!string.IsNullOrWhiteSpace(decryptedQ))
+        {
+            _searchText = decryptedQ;
+        }
+        #endregion
+    }
+
+    private async Task LoadCorporatesAsync()
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            _corporatesList = await CorporateService.GetBySubscriptionIdAsync(
+                _selectedSubscriptionId,
+                includeCompanies: false,
+                includeUsers: false,
+                includeInactive: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading corporate groups for filter.");
+        }
+        #endregion
+    }
+
+    private void UpdateCreatePermission()
+    {
+        #region hide [2026-08-17]
+        if (_isAdmin)
+        {
+            _canCreate = true;
+            return;
+        }
+
+        if (_selectedCorporateId.HasValue)
+        {
+            _canCreate = _editableCorporateIds.Contains(_selectedCorporateId.Value);
+        }
+        else if (_selectedSubscriptionId.HasValue)
+        {
+            _canCreate = _editableSubscriptionIds.Contains(_selectedSubscriptionId.Value);
+        }
+        else
+        {
+            _canCreate = _editableCorporateIds.Count > 0 || _editableSubscriptionIds.Count > 0;
+        }
+        #endregion
+    }
+
+    private async Task LoadDataAsync()
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            _allItems = await CompanyService.GetByCorporateIdAsync(
+                _selectedCorporateId,
+                _selectedSubscriptionId,
+                includeFacilities: true,
+                includeTopics: true,
+                includeInactive: true);
+
+            _editableCompanyIds = await CompanyService.GetEditableCompanyIdsAsync(
+                _currentUserEmail, _isAdmin, _selectedCorporateId, _selectedSubscriptionId);
+
+            await LoadGhgSummaryAsync();
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading company entities.");
+            NotificationService.Notify(NotificationSeverity.Error, "Data Load Failed", "Unable to retrieve company records.");
+        }
+        #endregion
+    }
+
+    private string GetTotalGhgDisplay(int companyId)
+    {
+        #region hide [2026-08-29]
+        if (_ghgSummary != null && _ghgSummary.TryGetValue(companyId, out var val))
+        {
+            return val.ToString("N2");
+        }
+        return "0.00";
+        #endregion
+    }
+
+    private async Task LoadGhgSummaryAsync()
+    {
+        #region hide [2026-08-29]
+        try
+        {
+            if (_allItems != null && _allItems.Any())
+            {
+                var companyIds = _allItems.Select(c => c.Id).ToList();
+                _ghgSummary = await CompanyService.GetCompanyGhgSummaryAsync(
+                    companyIds,
+                    _selectedYear,
+                    _startMonth,
+                    _selectedScopes,
+                    _selectedActivityGroupIds);
+            }
+            else
+            {
+                _ghgSummary = new Dictionary<int, decimal>();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load GHG summary in PageListCompany");
+        }
+        #endregion
+    }
+
+    private void ApplyFilter()
+    {
+        #region hide [2026-08-17]
+        var query = _allItems.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var term = _searchText.Trim().ToLowerInvariant();
+            query = query.Where(x =>
+                (!string.IsNullOrWhiteSpace(x.Code) && x.Code.ToLower().Contains(term)) ||
+                (!string.IsNullOrWhiteSpace(x.Title) && x.Title.ToLower().Contains(term)) ||
+                (!string.IsNullOrWhiteSpace(x.Remark) && x.Remark.ToLower().Contains(term)));
+        }
+
+        _filteredItems = query.ToList();
+        #endregion
+    }
+
+    private async Task OnFilterChanged()
+    {
+        #region hide [2026-08-17]
+        _activeGridPageIndex = 0;
+        UpdateCreatePermission();
+        await LoadCorporatesAsync();
+        await LoadDataAsync();
+        NavigateToSelfState();
+        #endregion
+    }
+
+    private void OnGridPageChanged(Radzen.PagerEventArgs args)
+    {
+        #region hide [2026-08-17]
+        _activeGridPageIndex = args.PageIndex;
+        NavigateToSelfState();
+        #endregion
+    }
+
+    private void NavigateToSelfState()
+    {
+        #region hide [2026-08-17]
+        var queryParams = new Dictionary<string, object?>();
+
+        if (_selectedCorporateId.HasValue)
+            queryParams["cid"] = DataProtection.Protect(_selectedCorporateId.Value);
+
+        if (_selectedSubscriptionId.HasValue)
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+        if (_activeGridPageIndex > 0)
+            queryParams["gpage"] = DataProtection.Protect(_activeGridPageIndex);
+
+        queryParams["yr"] = _selectedYear.ToString();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+            queryParams["q"] = DataProtection.Protect(_searchText);
+
+        var url = NavigationManager.GetUriWithQueryParameters("/organization/company", queryParams);
+        NavigationManager.NavigateTo(url, replace: true);
+        #endregion
+    }
+
+    private bool CanEditCompany(TbCompany item)
+    {
+        #region hide [2026-08-17]
+        if (_isAdmin) return true;
+        return _editableCompanyIds.Contains(item.Id) ||
+               _editableCorporateIds.Contains(item.CorporateId) ||
+               (item.Corporate != null && _editableSubscriptionIds.Contains(item.Corporate.SubscriptionId));
+        #endregion
+    }
+
+    private void NavigateToAnalytics(TbCompany item)
+    {
+        var encId = DataProtection.Protect(item.Id);
+        var encRet = DataProtection.Protect("/organization/companies");
+        NavigationManager.NavigateTo($"/organization/activity-analytics?id={Uri.EscapeDataString(encId)}&level=2&ret={Uri.EscapeDataString(encRet)}");
+    }
+
+    private void NavigateToReportList(TbCompany item)
+    {
+        var encId = DataProtection.Protect(item.Id);
+        var encRet = DataProtection.Protect("/organization/companies");
+        NavigationManager.NavigateTo($"/reports/cfo-reports?id={Uri.EscapeDataString(encId)}&level=2&ret={Uri.EscapeDataString(encRet)}");
+    }
+
+    private void NavigateToCreate()
+    {
+        #region hide [2026-08-17]
+        var queryParams = new Dictionary<string, object?>();
+
+        if (_selectedCorporateId.HasValue)
+            queryParams["cid"] = DataProtection.Protect(_selectedCorporateId.Value);
+
+        if (_selectedSubscriptionId.HasValue)
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+        if (_activeGridPageIndex > 0)
+            queryParams["gpage"] = DataProtection.Protect(_activeGridPageIndex);
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+            queryParams["q"] = DataProtection.Protect(_searchText);
+
+        var url = NavigationManager.GetUriWithQueryParameters("/organization/company/add", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private void OnRowDoubleClick(TbCompany item)
+    {
+        #region hide [2026-08-17]
+        if (item == null) return;
+        bool canEdit = CanEditCompany(item);
+        var secureId = DataProtection.Protect(item.Id);
+        var queryParams = new Dictionary<string, object?>();
+
+        if (_selectedCorporateId.HasValue)
+            queryParams["cid"] = DataProtection.Protect(_selectedCorporateId.Value);
+
+        if (_selectedSubscriptionId.HasValue)
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+
+        if (_activeGridPageIndex > 0)
+            queryParams["gpage"] = DataProtection.Protect(_activeGridPageIndex);
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+            queryParams["q"] = DataProtection.Protect(_searchText);
+
+        var actionPath = canEdit ? "edit" : "view";
+        var url = NavigationManager.GetUriWithQueryParameters($"/organization/company/{actionPath}/{Uri.EscapeDataString(secureId)}", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+
+    private async Task OnSplitButtonClick(RadzenSplitButtonItem args, TbCompany item)
+    {
+        #region hide [2026-08-17]
+        if (args == null || args.Value == null)
+        {
+            OnRowDoubleClick(item);
+            return;
+        }
+
+        switch (args.Value.ToString())
+        {
+            case "1":
+                await OnDuplicate(item);
+                break;
+            case "2":
+                await ConfirmDelete(item);
+                break;
+            case "3":
+                await ConfirmClearFacilities(item);
+                break;
+            case "4":
+                await ConfirmClearTopics(item);
+                break;
+        }
+        #endregion
+    }
+
+    private async Task ConfirmClearTopics(TbCompany item)
+    {
+        #region hide [2026-08-29]
+        if (item == null) return;
+
+        var confirmed = await DialogService.Confirm(
+            "Are you sure you want to clear all activity topics for this company?",
+            "Clear Topics Confirmation",
+            new ConfirmOptions { OkButtonText = "Clear Topics", CancelButtonText = "Cancel" });
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var clearedCount = await TopicService.ClearTopicsByTargetAsync(eTopicLevel.Company, item.Id);
+                if (clearedCount > 0)
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Topics Cleared", $"Successfully cleared {clearedCount} activity topic(s).");
+                }
+                else
+                {
+                    NotificationService.Notify(NotificationSeverity.Info, "Notice", "There are no activity topics to clear.");
+                }
+                await LoadDataAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error clearing topics for Company ID: {Id}", item.Id);
+                NotificationService.Notify(NotificationSeverity.Error, "Action Failed", "Failed to clear activity topics.");
+            }
+        }
+        #endregion
+    }
+
+    private async Task OnDuplicate(TbCompany item)
+    {
+        #region hide [2026-08-17]
+        try
+        {
+            if (item == null) return;
+
+            if (IsCompanyQuotaReached && CurrentSubscription != null)
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Quota Exceeded", $"Cannot duplicate: Maximum company limit of {AllowCompanyCount} reached for this subscription ({CurrentSubscription.SubscriptionPlan} Plan).");
+                return;
+            }
+
+            var dup = await CompanyService.DuplicateAsync(item.Id);
+            NotificationService.Notify(NotificationSeverity.Success, "Duplicated", $"Company duplicated as '{dup.Code}'.");
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error duplicating company ID: {Id}", item.Id);
+            NotificationService.Notify(NotificationSeverity.Error, "Duplicate Failed", ex.Message);
+        }
+        #endregion
+    }
+
+    private async Task ConfirmClearFacilities(TbCompany item)
+    {
+        #region hide [2026-08-18]
+        if (item == null) return;
+
+        var facilityCount = item.Facilities?.Count(f => !f.IsDeleted) ?? 0;
+        if (facilityCount == 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "Notice", "This company has no associated facilities/sites to clear.");
+            return;
+        }
+
+        var confirmed = await DialogService.Confirm(
+            $"Are you sure you want to clear all {facilityCount} associated facility/site(s) from company '{item.Title}' ({item.Code})?\n\nNote: Only facilities without recorded carbon activity data will be removed.",
+            "Clear Facilities Confirmation",
+            new ConfirmOptions { OkButtonText = "Clear Facilities", CancelButtonText = "Cancel" });
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var clearedCount = await CompanyService.ClearChildFacilitiesAsync(item.Id);
+                NotificationService.Notify(NotificationSeverity.Success, "Facilities Cleared", $"Successfully removed {clearedCount} facility/site(s) from '{item.Code}'.");
+                await LoadDataAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error clearing facilities for Company ID: {Id}", item.Id);
+                NotificationService.Notify(NotificationSeverity.Warning, "Action Blocked", ex.Message);
+            }
+        }
+        #endregion
+    }
+
+    private async Task ConfirmDelete(TbCompany item)
+    {
+        #region hide [2026-08-17]
+        var confirmed = await DialogService.Confirm(
+            "Are you sure you want to delete this company?",
+            "Delete Company",
+            new ConfirmOptions { OkButtonText = "Delete", CancelButtonText = "Cancel" });
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var success = await CompanyService.DeleteAsync(item.Id);
+                if (success)
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Deleted", $"Company '{item.Code}' deleted successfully.");
+                    await LoadDataAsync();
+                }
+                else
+                {
+                    NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Company could not be deleted.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error deleting company ID: {Id}", item.Id);
+                NotificationService.Notify(NotificationSeverity.Error, "Delete Failed", ex.Message);
+            }
+        }
+        #endregion
+    }
+
+    private void NavigateToFacilityList(TbCompany item)
+    {
+        #region hide [2026-08-17]
+        var secureComId = DataProtection.Protect(item.Id);
+        NavigationManager.NavigateTo($"/organization/facility?comid={Uri.EscapeDataString(secureComId)}");
+        #endregion
+    }
+
+    private void NavigateToTopicList(TbCompany item)
+    {
+        #region hide [2026-08-18]
+        var secureComId = DataProtection.Protect(item.Id);
+        NavigationManager.NavigateTo($"/library/activity-topics?comid={Uri.EscapeDataString(secureComId)}&ptype=Company");
+        #endregion
+    }
+
+    private void NavigateToCorporateList()
+    {
+        var queryParams = new Dictionary<string, object?>();
+
+        if (_selectedSubscriptionId.HasValue && _selectedSubscriptionId.Value > 0)
+        {
+            queryParams["sid"] = DataProtection.Protect(_selectedSubscriptionId.Value);
+        }
+        else if (_selectedCorporateId.HasValue && _selectedCorporateId.Value > 0)
+        {
+            var corp = _corporatesList.FirstOrDefault(c => c.Id == _selectedCorporateId.Value);
+            if (corp != null && corp.SubscriptionId > 0)
+            {
+                queryParams["sid"] = DataProtection.Protect(corp.SubscriptionId);
+            }
+        }
+
+        queryParams["yr"] = _selectedYear.ToString();
+
+        var url = NavigationManager.GetUriWithQueryParameters("/organization/corporate", queryParams);
+        NavigationManager.NavigateTo(url);
+    }
+    #endregion
+}

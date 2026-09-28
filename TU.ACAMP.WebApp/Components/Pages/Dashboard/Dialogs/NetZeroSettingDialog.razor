@@ -1,0 +1,226 @@
+@using Radzen
+@using TU.ACAMP.WebApp.Services.Dashboard
+@inject DialogService DialogService
+@inject GhgTargetAlertService AlertService
+@inject NotificationService NotificationService
+
+<div class="p-3">
+    <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-3 text-dark">
+        ⚙️ Net-Zero Pathway & Base Year Settings
+    </RadzenText>
+    <RadzenText TextStyle="TextStyle.Body2" Class="text-muted mb-4">
+        Configure baseline year, long-term Net-Zero reduction targets, and automated email alerts.
+    </RadzenText>
+
+    <RadzenStack Gap="1rem">
+        <!-- Base Year -->
+        <div>
+            <RadzenLabel Text="Base Year:" Class="fw-semibold small d-block mb-1" />
+            <RadzenDropDown TValue="int" Data="@YearOptions" @bind-Value="@Model.BaseYear" Style="width: 100%;" />
+        </div>
+
+        <!-- Target Net-Zero Year -->
+        <div>
+            <RadzenLabel Text="Net-Zero Target Year:" Class="fw-semibold small d-block mb-1" />
+            <RadzenNumeric TValue="int" @bind-Value="@Model.TargetYear" Min="2025" Max="2060" Step="1" Style="width: 100%;" />
+        </div>
+
+        <!-- Target Reduction % -->
+        <div>
+            <RadzenLabel Text="Target GHG Reduction (%):" Class="fw-semibold small d-block mb-1" />
+            <RadzenNumeric TValue="decimal" @bind-Value="@Model.TargetReductionPercent" Min="0" Max="100" Step="5" Format="0.0" Style="width: 100%;" />
+            <small class="text-muted">e.g. 50.0% reduction target by @Model.TargetYear</small>
+        </div>
+
+        <!-- [2026-09-25][Antigravity] Carbon Offsets & RECs -->
+        <div>
+            <RadzenLabel Text="Carbon Offsets & RECs (tCO₂e):" Class="fw-semibold small d-block mb-1" />
+            <RadzenNumeric TValue="decimal" @bind-Value="@Model.CarbonOffsets" Min="0" Max="10000000" Step="10" Format="0.00" Style="width: 100%;" />
+            <small class="text-muted">Certified T-VER, carbon credits, or RECs retired in this reporting period for Net Footprint</small>
+        </div>
+
+        <!-- Target Calculation Summary -->
+        <RadzenCard Class="bg-light border rounded-3 p-3 mt-1">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="small text-muted">Baseline Reference:</span>
+                <span class="fw-bold small text-dark">Base Year @Model.BaseYear</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="small text-muted">Target Horizon:</span>
+                <span class="fw-bold small text-dark">@Model.TargetYear (@Model.TargetReductionPercent.ToString("F1")% Reduction)</span>
+            </div>
+            @if (Model.CarbonOffsets > 0m)
+            {
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small text-muted">Certified Offsets:</span>
+                    <span class="fw-bold small text-success">@Model.CarbonOffsets.ToString("N2") tCO₂e</span>
+                </div>
+            }
+        </RadzenCard>
+
+        <!-- [2026-09-25][Antigravity] Section: Automated Email Alerts -->
+        <div class="border-top pt-3 mt-2">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <div>
+                    <span class="fw-bold small text-dark d-block">📧 Automated GHG Target Email Alerts</span>
+                    <small class="text-muted">Notify team when annual cumulative emissions approach the reduction target ceiling</small>
+                </div>
+                <RadzenSwitch @bind-Value="@Model.EnableAlert" />
+            </div>
+
+            @if (Model.EnableAlert)
+            {
+                <div class="p-3 bg-light rounded-3 border mt-2">
+                    <div class="mb-3">
+                        <RadzenLabel Text="Alert Threshold (% of Annual Target Cap):" Class="fw-semibold small d-block mb-1" />
+                        <RadzenNumeric TValue="decimal" @bind-Value="@Model.AlertThresholdPercent" Min="50" Max="100" Step="5" Format="0.0" Style="width: 100%;" />
+                        <small class="text-muted">Alert triggers when actual emissions reach or exceed this percentage (Default: 80.0%)</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <RadzenLabel Text="Notification Email Recipients (Optional):" Class="fw-semibold small d-block mb-1" />
+                        <RadzenTextBox @bind-Value="@Model.AlertEmails" Placeholder="e.g. esg@company.com, manager@company.com" Style="width: 100%;" />
+                        <small class="text-muted">Comma-separated emails. By default, alerts are always sent to Subscription Owner and all subscription members.</small>
+                    </div>
+
+                    <!-- Quick Test Email -->
+                    <div class="border-top pt-2 mt-2">
+                        <span class="small fw-semibold text-muted d-block mb-1">Test Email Delivery:</span>
+                        <div class="d-flex gap-2">
+                            <RadzenTextBox @bind-Value="@_testEmail" Placeholder="Enter recipient email for test..." Style="flex-grow: 1;" />
+                            <RadzenButton Text="Send Test" Icon="send" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                                          Size="ButtonSize.Small" IsBusy="@_isSendingTest" Click="@SendTestEmailAsync" Style="border-radius: 6px;" />
+                        </div>
+                    </div>
+
+                    <!-- [2026-09-25][Gemini] Instant Notify All Subscription Members -->
+                    <div class="border-top pt-2 mt-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="small fw-semibold text-dark d-block">Notify All Subscription Members:</span>
+                                <small class="text-muted">Immediately dispatches trajectory alert email to all members</small>
+                            </div>
+                            <RadzenButton Text="Notify Members Now" Icon="mark_email_read" ButtonStyle="ButtonStyle.Warning" Variant="Variant.Outlined"
+                                          Size="ButtonSize.Small" IsBusy="@_isSendingAllMembers" Click="@SendAlertToAllMembersAsync" Style="border-radius: 6px;" />
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </RadzenStack>
+
+    <!-- BUTTON ACTIONS -->
+    <div class="d-flex justify-content-end align-items-center gap-2 mt-4 pt-3 border-top">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@OnCancel" Style="border-radius: 6px;" />
+        <RadzenButton Text="Save Settings" ButtonStyle="ButtonStyle.Success" Icon="check" Click="@OnSave" Style="border-radius: 6px;" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public NetZeroSettingModel Model { get; set; } = new NetZeroSettingModel();
+
+    [Parameter]
+    public List<int> YearOptions { get; set; } = new List<int> { 2026, 2025, 2024, 2023, 2022 };
+
+    [Parameter]
+    public int SubscriptionId { get; set; }
+
+    [Parameter]
+    public int? CorporateId { get; set; }
+
+    private string _testEmail = string.Empty;
+    private bool _isSendingTest = false;
+
+    public class NetZeroSettingModel
+    {
+        public int BaseYear { get; set; } = 2023;
+        public int TargetYear { get; set; } = 2030;
+        public decimal TargetReductionPercent { get; set; } = 50.0m;
+        // [2026-09-25][Antigravity] Carbon Offsets & RECs for Net Footprint calculation
+        public decimal CarbonOffsets { get; set; } = 0.0m;
+        // [2026-09-25][Antigravity] Alert settings
+        public bool EnableAlert { get; set; } = true;
+        public decimal AlertThresholdPercent { get; set; } = 80.0m;
+        public string? AlertEmails { get; set; }
+    }
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(Model.AlertEmails))
+        {
+            var firstEmail = Model.AlertEmails.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(firstEmail))
+            {
+                _testEmail = firstEmail;
+            }
+        }
+    }
+
+    private async Task SendTestEmailAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_testEmail) || !_testEmail.Contains('@'))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Invalid Email", "Please enter a valid email address for testing.");
+            return;
+        }
+
+        try
+        {
+            _isSendingTest = true;
+            await AlertService.SendTestAlertAsync(SubscriptionId, CorporateId, _testEmail.Trim());
+            NotificationService.Notify(NotificationSeverity.Success, "Test Email Sent", $"GHG target test alert email was sent to {_testEmail}.");
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Delivery Failed", ex.Message);
+        }
+        finally
+        {
+            _isSendingTest = false;
+        }
+    }
+
+    private bool _isSendingAllMembers = false;
+
+    private async Task SendAlertToAllMembersAsync()
+    {
+        if (SubscriptionId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Subscription Required", "Valid subscription ID is required to notify members.");
+            return;
+        }
+
+        try
+        {
+            _isSendingAllMembers = true;
+            var (success, count, message) = await AlertService.NotifyAllSubscriptionMembersAsync(SubscriptionId, CorporateId);
+            if (success)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Alerts Sent", message);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Warning, "Notice", message);
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Delivery Failed", ex.Message);
+        }
+        finally
+        {
+            _isSendingAllMembers = false;
+        }
+    }
+
+    private void OnSave()
+    {
+        DialogService.Close(Model);
+    }
+
+    private void OnCancel()
+    {
+        DialogService.Close(null);
+    }
+}

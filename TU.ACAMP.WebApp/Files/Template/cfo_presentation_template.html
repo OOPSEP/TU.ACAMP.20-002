@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<!--
+  [2026-09-24][Claude] เทมเพลตไฟล์นำเสนอ CFO แบบ HTML (ใช้แทน PowerPoint)
+  - ไฟล์เดียว ทำงาน offline ได้ทั้งหมด (ไม่มี CDN / ไม่มี web font ภายนอก)
+  - ผืนสไลด์ 1920 x 1080 (Full HD) ย่อ/ขยายให้พอดีจออัตโนมัติ
+  - เนื้อหาอ้างอิงฟอร์ม อบก. "รูปแบบการนำเสนอ บังคับใช้ 1 ม.ค. 66" (TCFO_P_01_V1) แตกเป็นหลายสไลด์
+  - ข้อมูลทั้งหมดอยู่ในแท็ก script ที่มี id = cfo-data (type application/json) ท้ายไฟล์
+    ฝั่ง .NET แทนที่ก้อน JSON นี้ทั้งก้อนด้วย System.Text.Json (encoder ค่า default escape < > & ให้แล้ว
+    จึงไม่มีปัญหา "</script>" ในข้อความผู้ใช้) — ค่าไหนไม่มีให้ส่ง null หน้าสไลด์จะแสดง "ยังไม่ระบุ"
+  - ทุกข้อความจากข้อมูลถูกใส่ด้วย textContent เท่านั้น (กัน HTML injection)
+  - ปุ่มลัด: ← → / PageUp PageDown / Space = เปลี่ยนหน้า, Home End, F = เต็มจอ, O = ภาพรวมสไลด์, Esc = ปิด
+-->
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CFO Presentation</title>
+<style>
+:root{
+  --bg:#eef1f5;
+  --slide:#ffffff;
+  --ink:#0f172a;
+  --ink-2:#334155;
+  --muted:#64748b;
+  --faint:#94a3b8;
+  --line:#e2e8f0;
+  --soft:#f8fafc;
+  --accent:#0f8f6f;
+  --accent-2:#12b089;
+  --accent-soft:#e8f6f1;
+  --s1:#0f766e;
+  --s2:#2563eb;
+  --s3:#d97706;
+  --s4:#94a3b8;
+  --base:#cbd5e1;
+  --up:#dc2626;
+  --down:#059669;
+  --radius:22px;
+  --shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06);
+  --font:"Sarabun","Leelawadee UI","Leelawadee","Segoe UI","Tahoma","Loma",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--ink);font-family:var(--font);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer}
+
+/* ---------- ผืนสไลด์ 1920x1080 ---------- */
+.viewport{position:fixed;inset:0}
+.stage{position:absolute;top:50%;left:50%;width:1920px;height:1080px;transform-origin:center center;
+  background:var(--slide);border-radius:6px;box-shadow:0 20px 60px rgba(15,23,42,.12);overflow:hidden}
+.slide{position:absolute;inset:0;padding:84px 120px 112px;display:flex;flex-direction:column;
+  opacity:0;visibility:hidden;transform:translateX(60px);transition:opacity .55s ease,transform .55s cubic-bezier(.2,.7,.2,1),visibility 0s linear .55s}
+.slide.past{transform:translateX(-60px)}
+.slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.2,.7,.2,1),visibility 0s}
+
+/* ลวดลายพื้นหลังบาง ๆ */
+.slide::before{content:"";position:absolute;right:-220px;top:-220px;width:620px;height:620px;border-radius:50%;
+  background:radial-gradient(circle,var(--accent-soft) 0%,rgba(232,246,241,0) 70%);pointer-events:none}
+
+/* หัวสไลด์ */
+.eyebrow{display:flex;align-items:center;gap:14px;font-size:22px;font-weight:600;color:var(--accent);letter-spacing:.02em}
+.eyebrow .num{display:inline-grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--accent-soft);color:var(--accent);font-size:20px}
+h2.title{font-size:58px;font-weight:700;line-height:1.15;margin:14px 0 8px;letter-spacing:-.01em}
+.subtitle{font-size:26px;color:var(--muted);margin-bottom:40px}
+.body{flex:1;min-height:0;position:relative}
+
+/* ท้ายสไลด์ */
+.foot{position:absolute;left:120px;right:120px;bottom:40px;display:flex;justify-content:space-between;align-items:center;
+  font-size:20px;color:var(--faint);border-top:1px solid var(--line);padding-top:18px}
+.foot b{color:var(--muted);font-weight:600}
+
+/* การ์ดพื้นฐาน */
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.missing{display:inline-flex;align-items:center;gap:8px;color:var(--faint);font-style:normal;font-weight:500}
+.missing::before{content:"";width:10px;height:10px;border-radius:50%;border:2px dashed var(--faint)}
+
+/* แอนิเมชันตอนเข้าสไลด์ */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1);transition-delay:calc(var(--d,0) * 90ms + 150ms)}
+.slide.active .reveal,.printing .reveal{opacity:1;transform:none}
+
+/* ---------- 1. หน้าปก ---------- */
+.cover{display:grid;grid-template-columns:1.6fr 1fr;gap:60px;height:100%;align-items:center}
+.cover .kicker{font-size:26px;font-weight:600;color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+.cover h1{font-size:78px;line-height:1.12;font-weight:800;margin:22px 0 30px;letter-spacing:-.015em;white-space:pre-line}
+.cover .org{font-size:40px;font-weight:600;color:var(--ink-2);margin-bottom:44px}
+.chips{display:flex;flex-wrap:wrap;gap:14px}
+.chip{display:inline-flex;align-items:center;gap:10px;padding:12px 22px;border-radius:999px;background:var(--soft);border:1px solid var(--line);font-size:22px;color:var(--ink-2);font-weight:600}
+.chip i{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.cover .meta{margin-top:56px;font-size:22px;color:var(--muted)}
+.ring{position:relative;width:560px;height:560px;margin-left:auto}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .track{fill:none;stroke:var(--soft);stroke-width:34}
+.ring .arc{fill:none;stroke-width:34;stroke-linecap:butt;transition:stroke-dashoffset 1.4s cubic-bezier(.2,.7,.2,1) .3s}
+.ring .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.ring .center small{font-size:24px;color:var(--muted);font-weight:600}
+.ring .center strong{font-size:88px;font-weight:800;letter-spacing:-.02em;margin:6px 0}
+.ring .center span{font-size:24px;color:var(--muted)}
+.ring .legend{position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);display:flex;gap:26px;font-size:20px;color:var(--ink-2);white-space:nowrap}
+.dot{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:8px;vertical-align:middle}
+
+/* ---------- 2. ข้อมูลองค์กร ---------- */
+.org-grid{display:grid;grid-template-columns:760px 1fr;gap:56px;height:100%}
+.photo{height:100%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--soft)}
+.photo img{width:100%;height:100%;object-fit:cover}
+.photo .ph{display:flex;flex-direction:column;align-items:center;gap:18px;color:var(--faint);font-size:26px}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-content:start}
+.fact{padding:28px 32px}
+.fact.wide{grid-column:1 / -1}
+.fact label{display:flex;align-items:center;gap:12px;font-size:21px;color:var(--muted);font-weight:600;margin-bottom:10px}
+.fact label svg{width:26px;height:26px;stroke:var(--accent);fill:none;stroke-width:1.8}
+.fact p{font-size:30px;font-weight:600;line-height:1.4;color:var(--ink)}
+
+/* ---------- 3. ปริมาณตามประเภท ---------- */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:22px;margin-bottom:24px;flex:none}
+.kpi{padding:20px 28px;position:relative;overflow:hidden}
+.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--c,var(--accent))}
+.kpi label{font-size:21px;color:var(--muted);font-weight:600}
+.kpi strong{display:block;font-size:42px;font-weight:800;margin:6px 0 2px;letter-spacing:-.01em}
+.kpi span{font-size:19px;color:var(--faint)}
+.kpi.total{background:var(--accent-soft);border-color:transparent}
+.kpi.total strong{color:var(--accent)}
+.body.col{display:flex;flex-direction:column}
+.scope-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:28px;flex:1;min-height:0}
+.panel{padding:26px 32px;display:flex;flex-direction:column;min-height:0}
+.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.panel-head h3{font-size:26px;font-weight:700}
+.toggles{display:flex;gap:10px}
+.toggle{display:inline-flex;align-items:center;gap:10px;padding:8px 16px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:19px;color:var(--ink-2);font-weight:600;transition:.2s}
+.toggle i{width:12px;height:12px;border-radius:4px}
+.toggle.off{opacity:.45;text-decoration:line-through}
+.toggle:hover{border-color:var(--faint)}
+.chart{flex:1;min-height:0}
+.chart svg{width:100%;height:100%;overflow:visible}
+.axis text{font-size:18px;fill:var(--muted);font-family:var(--font)}
+.grid line{stroke:var(--line);stroke-dasharray:4 6}
+.bar{transform-box:fill-box;transform-origin:bottom;transform:scaleY(0);transition:transform .9s cubic-bezier(.2,.7,.2,1),opacity .25s}
+.slide.active .bar,.printing .bar{transform:scaleY(1)}
+.bar:hover{filter:brightness(1.08)}
+.series-off{opacity:0 !important;pointer-events:none}
+.bar-label{font-size:18px;font-weight:700;fill:var(--ink-2);font-family:var(--font);opacity:0;transition:opacity .4s ease 1s}
+.slide.active .bar-label,.printing .bar-label{opacity:1}
+.donut-wrap{display:flex;align-items:center;gap:30px;flex:1;min-height:0}
+.donut{position:relative;width:270px;height:270px;flex:none}
+.donut svg{width:100%;height:100%;transform:rotate(-90deg)}
+.donut circle{fill:none;stroke-width:44;transition:stroke-width .2s,opacity .2s,stroke-dasharray 1.2s cubic-bezier(.2,.7,.2,1)}
+.donut circle.seg{cursor:pointer}
+.donut circle.dim{opacity:.35}
+.donut .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+.donut .center small{font-size:19px;color:var(--muted);font-weight:600}
+.donut .center strong{font-size:40px;font-weight:800}
+.share-list{flex:1;display:flex;flex-direction:column;gap:14px}
+.share-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-radius:14px;background:var(--soft);font-size:21px;cursor:default;transition:background .2s}
+.share-row .nm{display:block;font-weight:700;color:var(--ink)}
+.share-row .vl{display:block;font-size:18px;color:var(--muted);margin-top:2px}
+.share-row:hover{background:var(--accent-soft)}
+.share-row b{font-size:24px}
+.note{font-size:18px;color:var(--faint);margin-top:12px}
+
+/* ---------- 4. เปรียบเทียบปีฐาน ---------- */
+.cmp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-bottom:26px}
+.cmp{padding:30px 32px}
+.cmp h3{font-size:24px;font-weight:700;color:var(--ink-2);margin-bottom:4px}
+.cmp .unit{font-size:18px;color:var(--faint);margin-bottom:22px}
+.cmp-row{margin-bottom:18px}
+.cmp-row .lbl{display:flex;justify-content:space-between;font-size:20px;color:var(--muted);margin-bottom:8px}
+.cmp-row .lbl b{color:var(--ink);font-size:24px}
+.track{height:18px;border-radius:999px;background:var(--soft);overflow:hidden}
+.fill{height:100%;border-radius:999px;transform-origin:left;transform:scaleX(0);transition:transform 1s cubic-bezier(.2,.7,.2,1) .35s}
+.slide.active .fill,.printing .fill{transform:scaleX(1)}
+.delta{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:8px 16px;border-radius:999px;font-size:21px;font-weight:700}
+.delta.up{background:#fef2f2;color:var(--up)}
+.delta.down{background:#ecfdf5;color:var(--down)}
+.delta.flat{background:var(--soft);color:var(--muted)}
+.reason{padding:28px 34px;display:flex;gap:26px;align-items:flex-start;background:linear-gradient(0deg,#fff,#fff) padding-box}
+.reason .ico{flex:none;width:64px;height:64px;border-radius:18px;background:var(--accent-soft);display:grid;place-items:center}
+.reason .ico svg{width:34px;height:34px;stroke:var(--accent);fill:none;stroke-width:1.8}
+.reason h3{font-size:24px;font-weight:700;margin-bottom:8px}
+.reason p{font-size:24px;line-height:1.6;color:var(--ink-2);white-space:pre-line}
+
+/* ---------- 5. แหล่งปล่อยสูงสุด ---------- */
+.top-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;height:100%}
+.top-col{padding:28px 30px;display:flex;flex-direction:column}
+.top-col header{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.top-col header h3{font-size:28px;font-weight:700;display:flex;align-items:center;gap:12px}
+.top-col header span{font-size:19px;color:var(--muted)}
+.src{padding:14px 14px;border-radius:14px;transition:background .2s}
+.src:hover{background:var(--soft)}
+.src .row1{display:flex;gap:14px;align-items:flex-start;font-size:22px;line-height:1.35}
+.src .rank{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:18px;font-weight:700;background:var(--soft);color:var(--ink-2)}
+.src:first-of-type .rank{color:#fff;background:var(--c)}
+.src .name{flex:1;font-weight:600}
+.src .row2{display:flex;align-items:center;gap:14px;margin:10px 0 0 48px}
+.src .row2 .track{flex:1;height:10px}
+.src .row2 small{font-size:18px;color:var(--muted);white-space:nowrap}
+
+/* ---------- 6. การทวนสอบ ---------- */
+.ver-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px}
+.ver{padding:34px 34px;min-height:220px;display:flex;flex-direction:column;gap:16px}
+.ver .ico{width:60px;height:60px;border-radius:18px;background:var(--accent-soft);display:grid;place-items:center}
+.ver .ico svg{width:32px;height:32px;stroke:var(--accent);fill:none;stroke-width:1.8}
+.ver label{font-size:21px;color:var(--muted);font-weight:600}
+.ver p{font-size:30px;font-weight:700;line-height:1.35}
+
+/* ---------- 7. ปิดท้าย ---------- */
+.end{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.end h1{font-size:110px;font-weight:800;letter-spacing:-.02em;color:var(--ink)}
+.end h1 span{color:var(--accent)}
+.end .en{font-size:30px;font-weight:600;letter-spacing:.3em;color:var(--accent);text-transform:uppercase;margin-top:6px}
+.end p{font-size:32px;color:var(--muted);margin-top:18px}
+.end .chips{justify-content:center;margin-top:44px}
+
+/* ---------- แถบนำทาง ---------- */
+.progress{position:fixed;left:0;top:0;right:0;height:4px;z-index:30;background:transparent}
+.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .45s ease}
+.navbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:6px;
+  padding:8px;border-radius:999px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border:1px solid var(--line);
+  box-shadow:0 10px 30px rgba(15,23,42,.12);transition:opacity .35s,transform .35s}
+body.idle .navbar{opacity:0;transform:translate(-50%,16px);pointer-events:none}
+.nav-btn{width:44px;height:44px;border-radius:50%;border:none;background:transparent;display:grid;place-items:center;color:var(--ink-2);transition:background .2s,color .2s}
+.nav-btn:hover{background:var(--accent-soft);color:var(--accent)}
+.nav-btn:disabled{opacity:.3;pointer-events:none}
+.nav-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.dots{display:flex;gap:8px;padding:0 10px}
+.dots button{width:10px;height:10px;border-radius:999px;border:none;background:var(--line);transition:width .3s,background .3s;padding:0}
+.dots button.on{width:30px;background:var(--accent)}
+.dots button:hover{background:var(--faint)}
+.dots button.on:hover{background:var(--accent)}
+.counter{font-size:15px;font-weight:700;color:var(--muted);min-width:64px;text-align:center;font-variant-numeric:tabular-nums}
+.sep{width:1px;height:26px;background:var(--line);margin:0 4px}
+
+/* ภาพรวมสไลด์ */
+.overview{position:fixed;inset:0;z-index:50;background:rgba(238,241,245,.96);backdrop-filter:blur(6px);display:none;overflow:auto;padding:70px 8vw}
+.overview.open{display:block}
+.overview h4{font-size:22px;color:var(--muted);margin-bottom:28px;font-weight:700}
+.ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px}
+.ov-card{aspect-ratio:16/9;border-radius:16px;border:2px solid var(--line);background:#fff;padding:22px;text-align:left;display:flex;flex-direction:column;justify-content:space-between;transition:.2s;box-shadow:var(--shadow)}
+.ov-card:hover{border-color:var(--accent-2);transform:translateY(-3px)}
+.ov-card.on{border-color:var(--accent)}
+.ov-card small{font-size:15px;color:var(--accent);font-weight:700}
+.ov-card b{font-size:20px;color:var(--ink);line-height:1.35}
+
+/* Tooltip */
+.tip{position:fixed;z-index:60;pointer-events:none;background:#0f172a;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;line-height:1.45;opacity:0;transform:translateY(4px);transition:opacity .15s,transform .15s;white-space:nowrap}
+.tip.show{opacity:1;transform:none}
+.tip b{font-size:16px}
+
+/* ---------- พิมพ์ / Save as PDF: 1 สไลด์ต่อหน้า ---------- */
+@page{size:1920px 1080px;margin:0}
+@media print{
+  html,body{overflow:visible;background:#fff}
+  .viewport{position:static}
+  .stage{position:static;transform:none !important;box-shadow:none;border-radius:0;width:1920px;height:auto;overflow:visible}
+  .slide{position:relative;width:1920px;height:1080px;opacity:1;visibility:visible;transform:none;break-after:page;page-break-after:always;transition:none}
+  .slide *{transition:none !important}
+  .navbar,.progress,.overview,.tip{display:none !important}
+}
+</style>
+</head>
+<body>
+
+<div class="progress"><i id="progress"></i></div>
+
+<div class="viewport">
+<div class="stage" id="stage">
+
+  <!-- 1. หน้าปก -->
+  <section class="slide" data-title="หน้าปก">
+    <div class="cover">
+      <div>
+        <div class="kicker reveal" style="--d:0">Carbon Footprint for Organization</div>
+        <h1 class="reveal" style="--d:1" data-bind="meta.reportTitle"></h1>
+        <div class="org reveal" style="--d:2" data-bind="organization.name"></div>
+        <div class="chips reveal" style="--d:3">
+          <span class="chip"><i></i>ปีที่รายงาน <span data-bind="period.calculateYear"></span></span>
+          <span class="chip"><i style="background:var(--base)"></i>ปีฐาน <span data-bind="period.baseYear"></span></span>
+          <span class="chip" data-bind="meta.gwp"></span>
+          <span class="chip" data-bind="meta.formCode"></span>
+        </div>
+        <div class="meta reveal" style="--d:4">จัดทำโดย <span data-bind="meta.preparedBy"></span> · <span data-bind="meta.generatedAt" data-format="date"></span></div>
+      </div>
+      <div class="ring reveal" style="--d:2" id="coverRing"></div>
+    </div>
+  </section>
+
+  <!-- 2. ข้อมูลองค์กร -->
+  <section class="slide has-foot" data-title="ข้อมูลองค์กร">
+    <div class="eyebrow reveal"><span class="num">01</span>ข้อมูลทั่วไป</div>
+    <h2 class="title reveal" style="--d:1" data-bind="organization.name"></h2>
+    <div class="subtitle reveal" style="--d:2">ข้อมูลองค์กรและขอบเขตระยะเวลาการเก็บข้อมูล</div>
+    <div class="body">
+      <div class="org-grid">
+        <div class="card photo reveal" style="--d:2" id="orgPhoto"></div>
+        <div class="facts">
+          <div class="card fact reveal" style="--d:3">
+            <label><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg>ประเภทอุตสาหกรรม</label>
+            <p data-bind="organization.industry"></p>
+          </div>
+          <div class="card fact reveal" style="--d:4">
+            <label><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>วันที่ขอขึ้นทะเบียน</label>
+            <p data-bind="period.registrationDate" data-format="date"></p>
+          </div>
+          <div class="card fact wide reveal" style="--d:5">
+            <label><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>ที่อยู่องค์กร</label>
+            <p data-bind="organization.address"></p>
+          </div>
+          <div class="card fact reveal" style="--d:6">
+            <label><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>ระยะเวลาเก็บข้อมูล (ปีปัจจุบัน)</label>
+            <p data-bind="period.calculatePeriodText"></p>
+          </div>
+          <div class="card fact reveal" style="--d:7">
+            <label><svg viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 14l3-3 3 2 5-6"/></svg>ระยะเวลาเก็บข้อมูล (ปีฐาน)</label>
+            <p data-bind="period.basePeriodText"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. ปริมาณก๊าซเรือนกระจกแยกตามประเภท -->
+  <section class="slide has-foot" data-title="ปริมาณก๊าซเรือนกระจกแยกตามประเภท">
+    <div class="eyebrow reveal"><span class="num">02</span>ผลการประเมิน</div>
+    <h2 class="title reveal" style="--d:1">ปริมาณก๊าซเรือนกระจกแยกตามประเภท</h2>
+    <div class="subtitle reveal" style="--d:2">หน่วย tCO<sub>2</sub>e / ปี · ปีที่รายงาน <span data-bind="period.calculateYear"></span></div>
+    <div class="body col">
+      <div class="kpis" id="kpis"></div>
+      <div class="scope-grid">
+        <div class="card panel reveal" style="--d:6">
+          <div class="panel-head">
+            <h3>เปรียบเทียบกับปีฐาน</h3>
+            <div class="toggles" id="barToggles"></div>
+          </div>
+          <div class="chart" id="barChart"></div>
+        </div>
+        <div class="card panel reveal" style="--d:7">
+          <div class="panel-head"><h3>สัดส่วนเมื่อเทียบประเภท 1 และ 2</h3></div>
+          <div class="donut-wrap">
+            <div class="donut" id="donut"></div>
+            <div class="share-list" id="shareList"></div>
+          </div>
+          <div class="note">ประเภท 3 และอื่น ๆ ไม่นำมาคิดสัดส่วน (ตามฟอร์ม TCFO_P_01)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. เปรียบเทียบกับปีฐาน -->
+  <section class="slide has-foot" data-title="ค่า CFO เทียบกับปีฐาน">
+    <div class="eyebrow reveal"><span class="num">03</span>ความก้าวหน้า</div>
+    <h2 class="title reveal" style="--d:1">ค่า CFO เทียบกับปีฐาน</h2>
+    <div class="subtitle reveal" style="--d:2">ปีฐาน <span data-bind="period.baseYear"></span> เทียบกับปีปัจจุบัน <span data-bind="period.calculateYear"></span></div>
+    <div class="body">
+      <div class="cmp-grid" id="cmpGrid"></div>
+      <div class="card reason reveal" style="--d:6">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg></div>
+        <div>
+          <h3>สาเหตุที่ค่า CFO ต่างจากปีฐาน</h3>
+          <p data-bind="changeReason"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. แหล่งปล่อยที่มากที่สุด -->
+  <section class="slide has-foot" data-title="แหล่งปล่อยที่มากที่สุด">
+    <div class="eyebrow reveal"><span class="num">04</span>จุดที่ควรจัดการ</div>
+    <h2 class="title reveal" style="--d:1">แหล่งปล่อยที่มากที่สุด</h2>
+    <div class="subtitle reveal" style="--d:2">เรียงตามปริมาณการปล่อย · แถบแสดงสัดส่วนภายในประเภทนั้น</div>
+    <div class="body">
+      <div class="top-grid" id="topGrid"></div>
+    </div>
+  </section>
+
+  <!-- 6. การทวนสอบและรับรอง -->
+  <section class="slide has-foot" data-title="การทวนสอบและรับรอง">
+    <div class="eyebrow reveal"><span class="num">05</span>การรับรอง</div>
+    <h2 class="title reveal" style="--d:1">การทวนสอบและรับรอง</h2>
+    <div class="subtitle reveal" style="--d:2">ผู้เกี่ยวข้องกับการจัดทำและรับรองรายงาน</div>
+    <div class="body">
+      <div class="ver-grid" id="verGrid"></div>
+    </div>
+  </section>
+
+  <!-- 7. ปิดท้าย -->
+  <section class="slide" data-title="ปิดท้าย">
+    <div class="end">
+      <h1 class="reveal">ขอบคุณ<span>.</span></h1>
+      <div class="en reveal" style="--d:1">Thank you</div>
+      <p class="reveal" style="--d:2" data-bind="organization.name"></p>
+      <div class="chips reveal" style="--d:3">
+        <span class="chip"><i></i>ปีที่รายงาน <span data-bind="period.calculateYear"></span></span>
+        <span class="chip" data-bind="meta.formCode"></span>
+      </div>
+    </div>
+  </section>
+
+</div>
+</div>
+
+<!-- แถบนำทาง -->
+<nav class="navbar" id="navbar" aria-label="Slide navigation">
+  <button class="nav-btn" id="btnPrev" title="ก่อนหน้า (←)"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+  <div class="dots" id="dots"></div>
+  <button class="nav-btn" id="btnNext" title="ถัดไป (→)"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+  <span class="sep"></span>
+  <span class="counter" id="counter">1 / 1</span>
+  <span class="sep"></span>
+  <button class="nav-btn" id="btnOverview" title="ภาพรวมสไลด์ (O)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+  <button class="nav-btn" id="btnFull" title="เต็มจอ (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+
+<div class="overview" id="overview">
+  <h4>ภาพรวมสไลด์ · กด Esc เพื่อปิด</h4>
+  <div class="ov-grid" id="ovGrid"></div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<!--
+  [2026-09-24][Claude] ก้อนข้อมูลของรายงาน — ฝั่ง .NET แทนที่ทั้งก้อนนี้
+  ค่าตัวอย่างด้านล่างเป็นข้อมูลสมมติสำหรับดูหน้าตาเทมเพลตเท่านั้น
+  - emissions.*.other = "อื่น ๆ" (รายงานแยก / Separate)
+  - intensity = Carbon intensity (Scope 1+2) ต่อหน่วยผลผลิต
+  - verification.* ระบบยังไม่มีข้อมูล ให้ส่ง null ได้
+-->
+<script id="cfo-data" type="application/json">
+{
+  "meta": {
+    "formCode": "TCFO_P_01_V1",
+    "reportTitle": "รายงานคาร์บอนฟุตพริ้นท์\nขององค์กร",
+    "gwp": "IPCC AR5",
+    "preparedBy": "คณะทำงานก๊าซเรือนกระจก",
+    "generatedAt": "2026-09-24"
+  },
+  "organization": {
+    "name": "บริษัท ตัวอย่างอุตสาหกรรม จำกัด",
+    "code": "COM-001",
+    "industry": "อุตสาหกรรมอาหารแปรรูป",
+    "address": "99 ถนนตัวอย่าง ตำบลตัวอย่าง อำเภอเมือง จังหวัดนครปฐม 73000",
+    "imageDataUrl": null
+  },
+  "period": {
+    "calculateYear": 2025,
+    "baseYear": 2023,
+    "calculatePeriodText": "1 ม.ค. 2568 – 31 ธ.ค. 2568",
+    "basePeriodText": "1 ม.ค. 2566 – 31 ธ.ค. 2566",
+    "registrationDate": "2026-10-15"
+  },
+  "emissions": {
+    "current": { "scope1": 1245.32, "scope2": 2310.75, "scope3": 1876.40, "other": 42.10 },
+    "base":    { "scope1": 1398.60, "scope2": 2544.20, "scope3": 1702.90, "other": 38.50 }
+  },
+  "intensity": { "unit": "ตันผลิตภัณฑ์", "current": 0.2874, "base": 0.3312 },
+  "topSources": {
+    "scope1": [
+      { "name": "การเผาไหม้ก๊าซธรรมชาติในหม้อไอน้ำ", "tco2e": 812.40 },
+      { "name": "น้ำมันดีเซลสำหรับรถขนส่งภายในโรงงาน", "tco2e": 265.10 },
+      { "name": "การรั่วไหลของสารทำความเย็น R-410A", "tco2e": 167.82 }
+    ],
+    "scope2": [
+      { "name": "การใช้ไฟฟ้าจากระบบสายส่ง", "tco2e": 2310.75 }
+    ],
+    "scope3": [
+      { "name": "การซื้อวัตถุดิบและบรรจุภัณฑ์ (หมวด 1)", "tco2e": 1102.30 },
+      { "name": "การขนส่งสินค้าขาออก (หมวด 9)", "tco2e": 498.60 },
+      { "name": "การเดินทางของพนักงาน (หมวด 7)", "tco2e": 275.50 }
+    ]
+  },
+  "changeReason": "ติดตั้งระบบผลิตไฟฟ้าพลังงานแสงอาทิตย์บนหลังคาและเปลี่ยนหม้อไอน้ำเป็นรุ่นประสิทธิภาพสูง ทำให้ประเภท 1 และ 2 ลดลง ขณะที่ประเภท 3 เพิ่มขึ้นตามปริมาณวัตถุดิบที่ซื้อ",
+  "verification": {
+    "consultant": "ดำเนินการเอง",
+    "verifier": null,
+    "assuranceLevel": "แบบจำกัด",
+    "tgoReviewer": null,
+    "support": "ดำเนินการเอง"
+  }
+}
+</script>
+
+<script>
+(function(){
+  "use strict";
+  var D = JSON.parse(document.getElementById("cfo-data").textContent);
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var COLORS = { scope1:"var(--s1)", scope2:"var(--s2)", scope3:"var(--s3)", other:"var(--s4)" };
+  var SCOPE_LABEL = { scope1:"ประเภท 1", scope2:"ประเภท 2", scope3:"ประเภท 3", other:"อื่น ๆ" };
+
+  /* ---------- helpers ---------- */
+  function get(path){ return path.split(".").reduce(function(o,k){ return (o==null)?null:o[k]; }, D); }
+  function has(v){ return v!==null && v!==undefined && v!==""; }
+  function num(v){ var n=Number(v); return isFinite(n)?n:0; }
+  function fmt(v,dec){ dec=(dec==null)?2:dec; return num(v).toLocaleString("th-TH",{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
+  function fmtDate(v){ var d=new Date(v); return isNaN(d)?String(v):d.toLocaleDateString("th-TH",{year:"numeric",month:"long",day:"numeric"}); }
+  function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+  function svg(tag,attrs){ var e=document.createElementNS(SVGNS,tag); for(var k in attrs) e.setAttribute(k,attrs[k]); return e; }
+  function missing(){ return el("em","missing","ยังไม่ระบุ"); }
+  function setVal(node,v,format){
+    node.textContent="";
+    if(!has(v)){ node.appendChild(missing()); return; }
+    node.textContent = format==="date" ? fmtDate(v) : format==="num" ? fmt(v) : String(v);
+  }
+  function niceMax(v){ if(v<=0) return 1; var p=Math.pow(10,Math.floor(Math.log10(v))); var n=v/p; var s=n<=1?1:n<=2?2:n<=5?5:10; return s*p; }
+  var E = { cur: D.emissions&&D.emissions.current||{}, base: D.emissions&&D.emissions.base||{} };
+  function s12(o){ return num(o.scope1)+num(o.scope2); }
+  function s123(o){ return num(o.scope1)+num(o.scope2)+num(o.scope3); }
+
+  /* tooltip */
+  var tip=document.getElementById("tip");
+  function showTip(evt,lines){
+    tip.textContent="";
+    lines.forEach(function(l,i){ var line=i===0?el("b",null,l):el("div",null,l); tip.appendChild(line); });
+    tip.style.left=(evt.clientX+16)+"px"; tip.style.top=(evt.clientY+16)+"px"; tip.classList.add("show");
+  }
+  function hideTip(){ tip.classList.remove("show"); }
+
+  /* count-up */
+  function countEl(target,dec){ var s=el("strong"); s.setAttribute("data-count",target); s.setAttribute("data-dec",dec==null?2:dec); s.textContent=fmt(target,dec); return s; }
+  function runCounts(scope){
+    scope.querySelectorAll("[data-count]").forEach(function(n){
+      var to=num(n.getAttribute("data-count")), dec=num(n.getAttribute("data-dec")), t0=null, dur=1100;
+      function step(ts){ if(!t0) t0=ts; var p=Math.min(1,(ts-t0)/dur); var e=1-Math.pow(1-p,3); n.textContent=fmt(to*e,dec); if(p<1) requestAnimationFrame(step); }
+      requestAnimationFrame(step);
+    });
+  }
+
+  /* ---------- bind ข้อความทั่วไป ---------- */
+  document.querySelectorAll("[data-bind]").forEach(function(n){ setVal(n,get(n.getAttribute("data-bind")),n.getAttribute("data-format")); });
+  document.title = (has(D.organization&&D.organization.name)?D.organization.name+" · ":"")+"CFO "+(D.period&&D.period.calculateYear||"");
+
+  /* ---------- 1. วงแหวนหน้าปก: Scope 1+2 ---------- */
+  (function(){
+    var host=document.getElementById("coverRing"), total=s12(E.cur), R=270, C=2*Math.PI*R;
+    var s=svg("svg",{viewBox:"0 0 620 620"});
+    s.appendChild(svg("circle",{cx:310,cy:310,r:R,"class":"track"}));
+    var offset=0;
+    ["scope1","scope2"].forEach(function(k){
+      var v=num(E.cur[k]), len= total>0 ? C*v/total : 0;
+      var arc=svg("circle",{cx:310,cy:310,r:R,"class":"arc",stroke:COLORS[k],"stroke-dasharray":Math.max(len-6,0)+" "+C,"stroke-dashoffset":-offset});
+      offset+=len; s.appendChild(arc);
+    });
+    host.appendChild(s);
+    var c=el("div","center"); c.appendChild(el("small",null,"ค่า CFO ประเภท 1 + 2"));
+    c.appendChild(countEl(total,2)); c.appendChild(el("span",null,"tCO₂e / ปี")); host.appendChild(c);
+    var lg=el("div","legend");
+    ["scope1","scope2"].forEach(function(k){ var sp=el("span"); var d=el("i","dot"); d.style.background=COLORS[k]; sp.appendChild(d); sp.appendChild(document.createTextNode(SCOPE_LABEL[k]+"  "+fmt(E.cur[k]))); lg.appendChild(sp); });
+    host.appendChild(lg);
+  })();
+
+  /* ---------- 2. รูปองค์กร ---------- */
+  (function(){
+    var host=document.getElementById("orgPhoto"), src=D.organization&&D.organization.imageDataUrl;
+    if(has(src) && /^(data:image\/|https?:|\.{0,2}\/|[\w-]+\/)/i.test(src)){
+      var img=el("img"); img.alt="ภาพองค์กร"; img.src=src; host.appendChild(img);
+    } else {
+      var ph=el("div","ph");
+      var ic=svg("svg",{viewBox:"0 0 24 24",width:96,height:96,fill:"none",stroke:"currentColor","stroke-width":1.2});
+      ic.appendChild(svg("rect",{x:3,y:5,width:18,height:14,rx:2})); ic.appendChild(svg("circle",{cx:9,cy:10,r:2})); ic.appendChild(svg("path",{d:"M21 16l-5-5-8 8"}));
+      ph.appendChild(ic); ph.appendChild(el("span",null,"ภาพองค์กร")); host.appendChild(ph);
+    }
+  })();
+
+  /* ---------- 3. KPI + กราฟแท่ง + โดนัท ---------- */
+  (function(){
+    var k=document.getElementById("kpis"), i=3;
+    ["scope1","scope2","scope3","other"].forEach(function(key){
+      var c=el("div","card kpi reveal"); c.style.setProperty("--d",i++); c.style.setProperty("--c",COLORS[key]);
+      c.appendChild(el("label",null,SCOPE_LABEL[key])); c.appendChild(countEl(E.cur[key])); c.appendChild(el("span",null,"tCO₂e / ปี")); k.appendChild(c);
+    });
+    var t=el("div","card kpi total reveal"); t.style.setProperty("--d",i);
+    t.appendChild(el("label",null,"รวม ประเภท 1 & 2")); t.appendChild(countEl(s12(E.cur))); t.appendChild(el("span",null,"tCO₂e / ปี")); k.appendChild(t);
+
+    /* กราฟแท่ง: ปีฐาน vs ปีปัจจุบัน */
+    var host=document.getElementById("barChart"), W=1000, H=440, L=90, B=50, T=34;
+    var keys=["scope1","scope2","scope3","other"];
+    var series=[{id:"base",label:"ปีฐาน "+(D.period.baseYear||""),data:E.base,color:"var(--base)"},
+                {id:"cur",label:"ปีปัจจุบัน "+(D.period.calculateYear||""),data:E.cur,color:null}];
+    var max=niceMax(Math.max.apply(null,keys.map(function(x){ return Math.max(num(E.cur[x]),num(E.base[x])); })));
+    var s=svg("svg",{viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet"});
+    var g=svg("g",{"class":"grid"}), ax=svg("g",{"class":"axis"});
+    for(var j=0;j<=4;j++){ var y=T+(H-B-T)*(1-j/4);
+      g.appendChild(svg("line",{x1:L,x2:W,y1:y,y2:y}));
+      var tx=svg("text",{x:L-14,y:y+6,"text-anchor":"end"}); tx.textContent=fmt(max*j/4, max<10?2:0); ax.appendChild(tx); }
+    s.appendChild(g); s.appendChild(ax);
+    var groupW=(W-L)/keys.length, bw=Math.min(62,groupW/3.4);
+    var layers={};
+    series.forEach(function(se,si){
+      var layer=svg("g",{"data-series":se.id}); layers[se.id]=layer;
+      keys.forEach(function(key,ki){
+        var v=num(se.data[key]), h=(H-B-T)*v/max, x=L+groupW*ki+groupW/2+(si===0?-bw-5:5), y=H-B-h;
+        var r=svg("rect",{x:x,y:y,width:bw,height:Math.max(h,0),rx:8,"class":"bar",fill:se.color||COLORS[key]});
+        r.style.transitionDelay=(0.35+ki*0.08+si*0.12)+"s";
+        r.addEventListener("mousemove",function(e){ showTip(e,[SCOPE_LABEL[key]+" · "+se.label, fmt(v)+" tCO₂e"]); });
+        r.addEventListener("mouseleave",hideTip);
+        layer.appendChild(r);
+        if(se.id==="cur"){ var lb=svg("text",{x:x+bw/2,y:y-10,"text-anchor":"middle","class":"bar-label"}); lb.textContent=fmt(v,0); layer.appendChild(lb); }
+      });
+      s.appendChild(layer);
+    });
+    keys.forEach(function(key,ki){ var tx=svg("text",{x:L+groupW*ki+groupW/2,y:H-B+34,"text-anchor":"middle"}); tx.textContent=SCOPE_LABEL[key]; ax.appendChild(tx); });
+    host.appendChild(s);
+
+    var tg=document.getElementById("barToggles");
+    series.forEach(function(se){
+      var b=el("button","toggle"); var ic=el("i"); ic.style.background= se.color || "linear-gradient(90deg,var(--s1),var(--s2),var(--s3))";
+      b.appendChild(ic); b.appendChild(document.createTextNode(se.label));
+      b.addEventListener("click",function(){ b.classList.toggle("off"); layers[se.id].classList.toggle("series-off"); });
+      tg.appendChild(b);
+    });
+
+    /* โดนัท: สัดส่วนประเภท 1 เทียบ 2 */
+    var dh=document.getElementById("donut"), tot=s12(E.cur), R=110, C=2*Math.PI*R, off=0;
+    var ds=svg("svg",{viewBox:"0 0 300 300"}); ds.appendChild(svg("circle",{cx:150,cy:150,r:R,stroke:"var(--soft)"}));
+    var center=el("div","center"), cs=el("small",null,"รวม 1 + 2"), cv=el("strong",null,fmt(tot,0)); center.appendChild(cs); center.appendChild(cv);
+    var segs=[], list=document.getElementById("shareList");
+    ["scope1","scope2"].forEach(function(key){
+      var v=num(E.cur[key]), p= tot>0 ? v/tot : 0, len=C*p;
+      var c=svg("circle",{cx:150,cy:150,r:R,"class":"seg",stroke:COLORS[key],"stroke-dasharray":len+" "+C,"stroke-dashoffset":-off});
+      off+=len; ds.appendChild(c); segs.push(c);
+      function on(){ segs.forEach(function(x){ x.classList.toggle("dim",x!==c); }); cs.textContent=SCOPE_LABEL[key]; cv.textContent=fmt(p*100,1)+"%"; }
+      function out(){ segs.forEach(function(x){ x.classList.remove("dim"); }); cs.textContent="รวม 1 + 2"; cv.textContent=fmt(tot,0); }
+      c.addEventListener("mouseenter",on); c.addEventListener("mouseleave",out);
+      var row=el("div","share-row"), left=el("span"), nm=el("span","nm"), d=el("i","dot"); d.style.background=COLORS[key];
+      nm.appendChild(d); nm.appendChild(document.createTextNode(SCOPE_LABEL[key])); left.appendChild(nm); left.appendChild(el("span","vl",fmt(v)+" tCO₂e"));
+      row.appendChild(left); row.appendChild(el("b",null,fmt(p*100,1)+"%"));
+      row.addEventListener("mouseenter",on); row.addEventListener("mouseleave",out); list.appendChild(row);
+    });
+    dh.appendChild(ds); dh.appendChild(center);
+  })();
+
+  /* ---------- 4. เปรียบเทียบปีฐาน ---------- */
+  (function(){
+    var host=document.getElementById("cmpGrid"), I=D.intensity||{};
+    var items=[
+      {title:"ค่า CFO ประเภท 1 + 2", unit:"tCO₂e / ปี", base:s12(E.base), cur:s12(E.cur), dec:2},
+      {title:"ค่า CFO รวม ประเภท 1 – 3", unit:"tCO₂e / ปี", base:s123(E.base), cur:s123(E.cur), dec:2},
+      {title:"Carbon intensity (ประเภท 1 + 2)", unit:"tCO₂e / "+(has(I.unit)?I.unit:"หน่วยผลผลิต"), base:I.base, cur:I.current, dec:4}
+    ];
+    items.forEach(function(it,ix){
+      var c=el("div","card cmp reveal"); c.style.setProperty("--d",3+ix);
+      c.appendChild(el("h3",null,it.title)); c.appendChild(el("div","unit",it.unit));
+      if(!has(it.base) || !has(it.cur)){ c.appendChild(missing()); host.appendChild(c); return; }
+      var mx=Math.max(num(it.base),num(it.cur))||1;
+      [["ปีฐาน "+(D.period.baseYear||""),it.base,"var(--base)"],["ปีปัจจุบัน "+(D.period.calculateYear||""),it.cur,"linear-gradient(90deg,var(--accent),var(--accent-2))"]].forEach(function(r){
+        var row=el("div","cmp-row"), lbl=el("div","lbl"); lbl.appendChild(el("span",null,r[0])); lbl.appendChild(el("b",null,fmt(r[1],it.dec)));
+        var tr=el("div","track"), f=el("div","fill"); f.style.width=(num(r[1])/mx*100)+"%"; f.style.background=r[2];
+        tr.appendChild(f); row.appendChild(lbl); row.appendChild(tr); c.appendChild(row);
+      });
+      var b=num(it.base), p= b!==0 ? (num(it.cur)-b)/b*100 : 0;
+      var cls= Math.abs(p)<0.05 ? "flat" : (p>0?"up":"down");
+      var arrow= cls==="flat" ? "■" : (p>0?"▲":"▼");
+      c.appendChild(el("span","delta "+cls, arrow+" "+(p>0?"+":"")+fmt(p,1)+"% จากปีฐาน"));
+      host.appendChild(c);
+    });
+  })();
+
+  /* ---------- 5. แหล่งปล่อยที่มากที่สุด ---------- */
+  (function(){
+    var host=document.getElementById("topGrid"), T=D.topSources||{};
+    ["scope1","scope2","scope3"].forEach(function(key,ci){
+      var col=el("div","card top-col reveal"); col.style.setProperty("--d",3+ci); col.style.setProperty("--c",COLORS[key]);
+      var hd=el("header"), h=el("h3"), d=el("i","dot"); d.style.background=COLORS[key]; h.appendChild(d); h.appendChild(document.createTextNode(SCOPE_LABEL[key]));
+      hd.appendChild(h); hd.appendChild(el("span",null,"รวม "+fmt(E.cur[key])+" tCO₂e")); col.appendChild(hd);
+      var rows=(T[key]||[]).slice().sort(function(a,b){ return num(b.tco2e)-num(a.tco2e); }).slice(0,5), tot=num(E.cur[key]);
+      if(!rows.length){ col.appendChild(missing()); }
+      rows.forEach(function(r,ri){
+        var share= tot>0 ? num(r.tco2e)/tot*100 : 0;
+        var s=el("div","src"), r1=el("div","row1"); r1.appendChild(el("span","rank",String(ri+1))); r1.appendChild(el("span","name",r.name||"-"));
+        var r2=el("div","row2"), tr=el("div","track"), f=el("div","fill"); f.style.width=Math.min(share,100)+"%"; f.style.background=COLORS[key]; f.style.transitionDelay=(0.4+ri*0.1)+"s";
+        tr.appendChild(f); r2.appendChild(tr); r2.appendChild(el("small",null,fmt(r.tco2e)+" tCO₂e · "+fmt(share,1)+"%"));
+        s.appendChild(r1); s.appendChild(r2); col.appendChild(s);
+      });
+      host.appendChild(col);
+    });
+  })();
+
+  /* ---------- 6. การทวนสอบ ---------- */
+  (function(){
+    var host=document.getElementById("verGrid"), V=D.verification||{};
+    var icons={
+      consultant:"M16 11a4 4 0 1 0-8 0M4 21a8 8 0 0 1 16 0M12 3v4",
+      verifier:"M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4zM9 12l2 2 4-4",
+      assuranceLevel:"M4 20h16M6 16V10M12 16V6M18 16v-4",
+      tgoReviewer:"M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a6 6 0 0 1 12 0M17 11l2 2 3-3",
+      support:"M12 21s-8-4.5-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 6.5-8 11-8 11z"
+    };
+    [["consultant","รายชื่อที่ปรึกษา"],["verifier","หน่วยงานทวนสอบ"],["assuranceLevel","ระดับการรับรอง"],["tgoReviewer","ผู้ตรวจสอบของ อบก."],["support","ได้รับการสนับสนุน"]].forEach(function(x,ix){
+      var c=el("div","card ver reveal"); c.style.setProperty("--d",3+ix);
+      var ic=el("div","ico"), s=svg("svg",{viewBox:"0 0 24 24"}); s.appendChild(svg("path",{d:icons[x[0]],"stroke-linecap":"round","stroke-linejoin":"round"})); ic.appendChild(s);
+      var p=el("p"); setVal(p,V[x[0]]);
+      c.appendChild(ic); c.appendChild(el("label",null,x[1])); c.appendChild(p); host.appendChild(c);
+    });
+  })();
+
+  /* ---------- ท้ายสไลด์ ---------- */
+  var slides=[].slice.call(document.querySelectorAll(".slide"));
+  slides.forEach(function(s,i){
+    if(!s.classList.contains("has-foot")) return;
+    var f=el("div","foot"), l=el("span"), b=el("b"); setVal(b,D.organization&&D.organization.name);
+    l.appendChild(b); l.appendChild(document.createTextNode("  ·  "+(D.meta&&D.meta.formCode||"")));
+    f.appendChild(l); f.appendChild(el("span",null,(i+1)+" / "+slides.length)); s.appendChild(f);
+  });
+
+  /* ---------- ย่อ/ขยายผืน 1920x1080 ให้พอดีจอ ---------- */
+  var stage=document.getElementById("stage");
+  function fit(){ var s=Math.min(window.innerWidth/1920, window.innerHeight/1080); stage.style.transform="translate(-50%,-50%) scale("+s+")"; }
+  window.addEventListener("resize",fit); fit();
+
+  /* ---------- การนำทาง ---------- */
+  var cur=-1, dots=document.getElementById("dots"), counter=document.getElementById("counter"), bar=document.getElementById("progress");
+  var btnPrev=document.getElementById("btnPrev"), btnNext=document.getElementById("btnNext");
+  var ov=document.getElementById("overview"), ovGrid=document.getElementById("ovGrid");
+  slides.forEach(function(s,i){
+    var d=el("button"); d.title=(i+1)+". "+s.getAttribute("data-title"); d.addEventListener("click",function(){ go(i); }); dots.appendChild(d);
+    var c=el("button","ov-card"); c.appendChild(el("small",null,"สไลด์ "+(i+1))); c.appendChild(el("b",null,s.getAttribute("data-title")));
+    c.addEventListener("click",function(){ closeOverview(); go(i); }); ovGrid.appendChild(c);
+  });
+  function go(i){
+    i=Math.max(0,Math.min(slides.length-1,i));
+    if(i===cur) return;
+    slides.forEach(function(s,k){ s.classList.toggle("active",k===i); s.classList.toggle("past",k<i); });
+    [].forEach.call(dots.children,function(d,k){ d.classList.toggle("on",k===i); });
+    [].forEach.call(ovGrid.children,function(d,k){ d.classList.toggle("on",k===i); });
+    cur=i; counter.textContent=(i+1)+" / "+slides.length; bar.style.width=((i+1)/slides.length*100)+"%";
+    btnPrev.disabled=i===0; btnNext.disabled=i===slides.length-1;
+    hideTip(); runCounts(slides[i]);
+    if(location.hash!=="#"+(i+1)) history.replaceState(null,"","#"+(i+1));
+  }
+  function openOverview(){ ov.classList.add("open"); }
+  function closeOverview(){ ov.classList.remove("open"); }
+  function toggleFull(){ if(!document.fullscreenElement){ (document.documentElement.requestFullscreen||function(){}).call(document.documentElement); } else { document.exitFullscreen(); } }
+
+  btnPrev.addEventListener("click",function(){ go(cur-1); });
+  btnNext.addEventListener("click",function(){ go(cur+1); });
+  document.getElementById("btnOverview").addEventListener("click",function(){ ov.classList.contains("open")?closeOverview():openOverview(); });
+  document.getElementById("btnFull").addEventListener("click",toggleFull);
+  document.addEventListener("keydown",function(e){
+    if(e.altKey||e.ctrlKey||e.metaKey) return;
+    switch(e.key){
+      case "ArrowRight": case "PageDown": case " ": case "Enter": e.preventDefault(); go(cur+1); break;
+      case "ArrowLeft": case "PageUp": case "Backspace": e.preventDefault(); go(cur-1); break;
+      case "Home": go(0); break;
+      case "End": go(slides.length-1); break;
+      case "f": case "F": toggleFull(); break;
+      case "o": case "O": case "g": case "G": ov.classList.contains("open")?closeOverview():openOverview(); break;
+      case "Escape": closeOverview(); break;
+    }
+  });
+  var tx=null;
+  document.addEventListener("touchstart",function(e){ tx=e.touches[0].clientX; },{passive:true});
+  document.addEventListener("touchend",function(e){ if(tx===null) return; var dx=e.changedTouches[0].clientX-tx; if(Math.abs(dx)>60) go(cur+(dx<0?1:-1)); tx=null; });
+  window.addEventListener("hashchange",function(){ var n=parseInt(location.hash.slice(1),10); if(n) go(n-1); });
+
+  /* ซ่อนแถบนำทางเมื่อไม่ขยับเมาส์ */
+  var idleTimer=null;
+  function wake(){ document.body.classList.remove("idle"); clearTimeout(idleTimer); idleTimer=setTimeout(function(){ if(!ov.classList.contains("open")) document.body.classList.add("idle"); },2500); }
+  ["mousemove","mousedown","keydown","touchstart"].forEach(function(ev){ document.addEventListener(ev,wake,{passive:true}); });
+  wake();
+
+  /* พิมพ์: แสดงทุกสไลด์ในสถานะสุดท้าย */
+  window.addEventListener("beforeprint",function(){ document.body.classList.add("printing"); });
+  window.addEventListener("afterprint",function(){ document.body.classList.remove("printing"); });
+
+  var start=parseInt(location.hash.slice(1),10);
+  go(start>0?start-1:0);
+})();
+</script>
+</body>
+</html>

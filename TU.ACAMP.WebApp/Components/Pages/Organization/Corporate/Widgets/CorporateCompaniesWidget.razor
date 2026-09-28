@@ -1,0 +1,85 @@
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Constants
+
+<div class="p-4">
+    @if (Model.Id == 0)
+    {
+        <div class="alert alert-info d-flex align-items-center mb-0" role="alert">
+            <RadzenIcon Icon="info" Class="me-2 fs-5" />
+            <div>
+                Companies can be added and configured after saving the Corporate record.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold m-0">
+                Associated Companies (@(CompaniesList.Count))
+            </RadzenText>
+            @if (!IsReadOnly)
+            {
+                <RadzenButton Text="Manage Companies" Icon="domain" ButtonStyle="ButtonStyle.Primary"
+                              Size="ButtonSize.Small" Click="@HandleManageCompanies"
+                              Style="border-radius: 6px;" />
+            }
+        </div>
+
+        @if (!CompaniesList.Any())
+        {
+            <div class="p-4 text-center text-muted border rounded bg-light">
+                <RadzenIcon Icon="domain_disabled" Style="font-size: 36px; opacity: 0.5;" Class="mb-2" />
+                <div>No companies currently registered under this corporate group.</div>
+            </div>
+        }
+        else
+        {
+            <RadzenDataGrid Data="@CompaniesList" TItem="TbCompany" AllowPaging="false" AllowSorting="true" AllowColumnResize="true" Style="@GridStyles.Default">
+                <Columns>
+                    <RadzenDataGridColumn TItem="TbCompany" Title="#" Width="50px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            @(CompaniesList.IndexOf(item) + 1)
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbCompany" Property="Code" Title="Code" Width="120px">
+                        <Template Context="item">
+                            <span class="badge bg-light text-dark border fw-bold px-2 py-1">@item.Code</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbCompany" Property="Title" Title="Company Title" MinWidth="220px">
+                        <Template Context="item">
+                            <span class="fw-bold">@item.Title</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbCompany" Property="EquityShare" Title="Equity Share" Width="120px" TextAlign="TextAlign.Center">
+                        <Template Context="item">
+                            <span class="badge bg-info-subtle text-info-emphasis border fw-bold">@item.EquityShare%</span>
+                        </Template>
+                    </RadzenDataGridColumn>
+                    <RadzenDataGridColumn TItem="TbCompany" Property="Remark" Title="Remark" MinWidth="200px" />
+                </Columns>
+            </RadzenDataGrid>
+        }
+    }
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public TbCorporate Model { get; set; } = new();
+    [Parameter] public List<TbCompany> CompaniesList { get; set; } = new();
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public EventCallback OnManageCompanies { get; set; }
+    #endregion
+
+    #region class methods
+    private async Task HandleManageCompanies()
+    {
+        #region hide [2026-08-18]
+        if (OnManageCompanies.HasDelegate)
+        {
+            await OnManageCompanies.InvokeAsync();
+        }
+        #endregion
+    }
+    #endregion
+}

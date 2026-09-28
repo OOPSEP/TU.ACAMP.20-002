@@ -1,0 +1,97 @@
+@page "/subscription/api-keys/create"
+
+@using Microsoft.AspNetCore.Authorization
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Constants
+
+@attribute [Authorize]
+@inject ApiKeyService ApiKeyService
+@inject NavigationManager NavigationManager
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Create API Key - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <div class="d-flex align-items-center mb-4">
+        <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@GoBack" Class="me-2" />
+        <RadzenText Text="Create API Key" TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-0" />
+    </div>
+
+    @if (!string.IsNullOrEmpty(_createdRawKey))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="mb-4">
+            <h5 class="fw-bold mb-2">Save Your API Key Now!</h5>
+            <p class="mb-2">This is the only time your raw API Key will be displayed. Copy and store it securely.</p>
+            <div class="d-flex align-items-center gap-2 mt-2">
+                <code class="p-2 bg-white rounded border fw-bold text-dark flex-grow-1" style="font-size: 1.1rem;">@_createdRawKey</code>
+                <RadzenButton Text="Copy Key" Icon="content_copy" ButtonStyle="ButtonStyle.Primary" Click="@CopyKeyToClipboard" />
+            </div>
+        </RadzenAlert>
+
+        <div class="mt-3">
+            <RadzenButton Text="Done & Return to API Keys" ButtonStyle="ButtonStyle.Success" Click="@GoBack" />
+        </div>
+    }
+    else
+    {
+        <RadzenCard Class="shadow-sm rounded-3 p-4" Style="max-width: 600px;">
+            <RadzenFormField Text="Key Name / Description *" Class="w-100 mb-3">
+                <RadzenTextBox @bind-Value="@_keyName" Placeholder="e.g. Rayong Factory Meter Ingestion" Class="w-100" />
+            </RadzenFormField>
+
+            <RadzenFormField Text="Custom Rate Limit (Req/Min)" Class="w-100 mb-3">
+                <RadzenNumeric @bind-Value="@_customRateLimit" Placeholder="Leave empty to use Subscription Plan default" Class="w-100" />
+            </RadzenFormField>
+
+            <div class="d-flex gap-2 justify-content-end mt-4">
+                <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@GoBack" />
+                <RadzenButton Text="Generate Key" Icon="key" ButtonStyle="ButtonStyle.Primary" Click="@GenerateKeyAsync" IsBusy="@_isSubmitting" Disabled="@string.IsNullOrWhiteSpace(_keyName)" />
+            </div>
+        </RadzenCard>
+    }
+</div>
+
+@code {
+    private string _keyName = string.Empty;
+    private int? _customRateLimit;
+    private bool _isSubmitting = false;
+    private string? _createdRawKey;
+
+    private async Task GenerateKeyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_keyName)) return;
+
+        _isSubmitting = true;
+        try
+        {
+            var res = await ApiKeyService.CreateApiKeyAsync(1, _keyName, customRateLimit: _customRateLimit);
+            _createdRawKey = res.RawKey;
+            NotificationService.Notify(NotificationSeverity.Success, "Key Generated", "API Key created successfully.");
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Creation Failed", ex.Message);
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task CopyKeyToClipboard()
+    {
+        if (!string.IsNullOrEmpty(_createdRawKey))
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", _createdRawKey);
+            NotificationService.Notify(NotificationSeverity.Info, "Copied", "API Key copied to clipboard.");
+        }
+    }
+
+    private void GoBack()
+    {
+        NavigationManager.NavigateTo("/subscription/api-keys");
+    }
+}

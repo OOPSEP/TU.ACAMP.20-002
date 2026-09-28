@@ -1,0 +1,39 @@
+[
+  {
+    "SubscriptionId": 1,
+    "Corporate": {
+      "Code": "CRP-001",
+      "Title": "บริษัท กรีน อินโนวา โฮลดิ้ง จำกัด (มหาชน)",
+      "Remark": "องค์กรระดับรวมงบ (Corporate Level - Demo)",
+      "MaterialityThreshold": 5.0,
+      "IsActive": true
+    },
+    "Company": {
+      "Code": "COM-001",
+      "Title": "บริษัท กรีนเทค แมนูแฟคเจอริ่ง (ประเทศไทย) จำกัด",
+      "EquityShare": 100,
+      "Remark": "นิติบุคคลผู้รายงาน (Company Level - Demo) - Equity Share 100%",
+      "IsActive": true
+    },
+    "Facilities": [
+      {
+        "Code": "FAC-001",
+        "Title": "โรงงานสมาร์ทอีโค ชลบุรี",
+        "Remark": "โรงงานผลิตและประกอบหลัก (Facility Level - Demo)",
+        "IsActive": true
+      },
+      {
+        "Code": "FAC-002",
+        "Title": "โรงงานแปรรูปวัตถุดิบสะอาด ระยอง",
+        "Remark": "โรงงานแปรรูปวัตถุดิบ (Facility Level - Demo)",
+        "IsActive": true
+      },
+      {
+        "Code": "FAC-003",
+        "Title": "ศูนย์กระจายสินค้ากรีนโลจิสติกส์ อยุธยา",
+        "Remark": "ศูนย์คลังสินค้าและกระจายสินค้า (Facility Level - Demo)",
+        "IsActive": true
+      }
+    ]
+  }
+]

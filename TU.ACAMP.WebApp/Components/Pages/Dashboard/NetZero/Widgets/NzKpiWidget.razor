@@ -1,0 +1,104 @@
+@* [2026-09-26][Claude] W1 — KPI ความคืบหน้า Net-Zero (ใช้ข้อมูลจาก NetZeroDashboardResult อย่างเดียว) *@
+@using TU.ACAMP.WebApp.Services.Dashboard
+
+<div class="row row-cols-1 row-cols-sm-2 row-cols-xl-3 g-3 mb-3">
+    <div class="col">
+        <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100">
+            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Base Year @Data.BaseYear</span>
+            @if (Data.BaseYearHasData)
+            {
+                <h3 class="fw-bold text-dark mb-0">@Data.BaseYearTon.ToString("N2") <small class="fs-6 text-muted">tCO₂e</small></h3>
+            }
+            else
+            {
+                <h3 class="fw-bold text-muted mb-0">N/A</h3>
+                <small class="text-muted">No activity data in base year.</small>
+            }
+        </RadzenCard>
+    </div>
+    <div class="col">
+        <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100">
+            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">
+                Latest @(Data.LatestYear?.ToString() ?? "-")
+                @if (Data.LatestIsYearToDate)
+                {
+                    <RadzenBadge Text="YTD" BadgeStyle="BadgeStyle.Warning" Class="ms-1" />
+                }
+            </span>
+            <h3 class="fw-bold text-dark mb-0">@Data.LatestTon.ToString("N2") <small class="fs-6 text-muted">tCO₂e</small></h3>
+            @if (Data.LatestTargetTon.HasValue)
+            {
+                <small class="text-muted">Target: @Data.LatestTargetTon.Value.ToString("N2") tCO₂e (-@(Data.RequiredReductionPercentLatest?.ToString("F1"))%)</small>
+            }
+        </RadzenCard>
+    </div>
+    <div class="col">
+        <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100">
+            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Reduction Achieved vs Base</span>
+            @if (Data.ReductionAchievedPercent.HasValue)
+            {
+                var achieved = Data.ReductionAchievedPercent.Value;
+                <h3 class="fw-bold mb-0 @(achieved >= (Data.RequiredReductionPercentLatest ?? 0m) ? "text-success" : "text-danger")">@achieved.ToString("F1")%</h3>
+                <small class="text-muted">Required by @Data.LatestYear: @(Data.RequiredReductionPercentLatest?.ToString("F1"))%</small>
+            }
+            else
+            {
+                <h3 class="fw-bold text-muted mb-0">N/A</h3>
+            }
+        </RadzenCard>
+    </div>
+    <div class="col">
+        <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100">
+            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">@Data.TargetYear Target (-@Data.TargetReductionPercent.ToString("F1")%)</span>
+            @if (Data.TargetYearTon.HasValue)
+            {
+                <h3 class="fw-bold text-dark mb-0">@Data.TargetYearTon.Value.ToString("N2") <small class="fs-6 text-muted">tCO₂e</small></h3>
+                @if (Data.ProjectedTargetYearTon.HasValue)
+                {
+                    <small class="@(Data.ProjectedTargetYearTon.Value <= Data.TargetYearTon.Value ? "text-success" : "text-danger")">
+                        Projected @Data.TargetYear: @Data.ProjectedTargetYearTon.Value.ToString("N2") tCO₂e (estimate)
+                    </small>
+                }
+            }
+            else
+            {
+                <h3 class="fw-bold text-muted mb-0">N/A</h3>
+            }
+        </RadzenCard>
+    </div>
+    <div class="col">
+        <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100">
+            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Gap to @Data.TargetYear Target</span>
+            @if (Data.GapToTargetTon.HasValue)
+            {
+                var gap = Data.GapToTargetTon.Value;
+                <h3 class="fw-bold mb-0 @(gap <= 0m ? "text-success" : "text-dark")">@(gap <= 0m ? "Achieved" : gap.ToString("N2"))
+                    @if (gap > 0m) { <small class="fs-6 text-muted">tCO₂e</small> }
+                </h3>
+                <small class="text-muted">@Data.YearsLeft year(s) left</small>
+            }
+            else
+            {
+                <h3 class="fw-bold text-muted mb-0">N/A</h3>
+            }
+        </RadzenCard>
+    </div>
+    <div class="col">
+        <RadzenCard Class="shadow-sm border-0 rounded-4 p-3 bg-white h-100">
+            <span class="text-muted small fw-semibold text-uppercase d-block mb-1">Required Annual Reduction</span>
+            @if (Data.RequiredAnnualReductionPercent.HasValue)
+            {
+                <h3 class="fw-bold text-dark mb-0">@Data.RequiredAnnualReductionPercent.Value.ToString("F1")% <small class="fs-6 text-muted">/ year</small></h3>
+                <small class="text-muted">Compound rate from latest year to @Data.TargetYear</small>
+            }
+            else
+            {
+                <h3 class="fw-bold text-muted mb-0">N/A</h3>
+            }
+        </RadzenCard>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public NetZeroDashboardResult Data { get; set; } = new();
+}

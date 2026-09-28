@@ -1,0 +1,162 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Models.Library
+
+<RadzenFieldset Text="Emission Factors & Global Warming Potentials" Style="width: 100%; border-radius: 8px;">
+    <RadzenTabs RenderMode="TabRenderMode.Client" Class="shadow-sm rounded-3" @bind-SelectedIndex="@_activeTabIndex">
+        <Tabs>
+            <RadzenTabsItem Text="Greenhouse Gases (GHGs)">
+                <RadzenRow Class="g-3 pt-2">
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenStack Gap="0.5rem">
+                            <RadzenFormField Text="CO2 (kgCO2/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.CO2" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="CH4 (kgCH4/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.CH4" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="SF6 (kgSF6/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.SF6" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="HFCs (kgHFCs/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.HFCs" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                        </RadzenStack>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenStack Gap="0.5rem">
+                            <RadzenFormField Text="Fossil CH4 (kgCH4/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.FossilCH4" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="N2O (kgN2O/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.N2O" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="NF3 (kgNF3/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.NF3" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="PFCs (kgPFCs/unit)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.PFCs" Format="N6" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                        </RadzenStack>
+                    </RadzenColumn>
+                </RadzenRow>
+            </RadzenTabsItem>
+            <RadzenTabsItem Text="Global Warming Potentials (GWP 100a)">
+                <RadzenRow Class="g-3 pt-2">
+                    <RadzenColumn Size="12" Class="mb-1">
+                        <RadzenFormField Text="GWP Metric Version (IPCC Standard) *" Style="width: 100%;">
+                            <RadzenDropDown TValue="eGwpVersion" @bind-Value="@Model.GwpVersion"
+                                            Data="@_gwpVersions"
+                                            TextProperty="Text" ValueProperty="Value"
+                                            Change="@OnGwpVersionChanged"
+                                            Style="width: 100%;"
+                                            Disabled="@IsReadOnly" />
+                        </RadzenFormField>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenStack Gap="0.5rem">
+                            <RadzenFormField Text="GWP CO2 (Default: 1)" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpCO2" Min="0.001m" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="GWP CH4" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpCH4" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="GWP SF6" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpSF6" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="GWP HFCs" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpHFCs" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                        </RadzenStack>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12" SizeMD="6">
+                        <RadzenStack Gap="0.5rem">
+                            <RadzenFormField Text="GWP Fossil CH4" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpFossilCH4" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="GWP N2O" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpN2O" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="GWP NF3" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpNF3" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                            <RadzenFormField Text="GWP PFCs" Style="width: 100%;">
+                                <RadzenNumeric TValue="decimal" @bind-Value="@Model.gwpPFCs" Format="N3" Change="@NotifyChange" Style="width: 100%;" Disabled="@IsReadOnly" />
+                            </RadzenFormField>
+                        </RadzenStack>
+                    </RadzenColumn>
+                </RadzenRow>
+            </RadzenTabsItem>
+        </Tabs>
+    </RadzenTabs>
+</RadzenFieldset>
+
+@code {
+    #region class field
+    private int _activeTabIndex = 0;
+    public bool IsReadOnly => Model.IsReadOnly;
+
+    private class GwpDropdownItem
+    {
+        public eGwpVersion Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+
+    private readonly List<GwpDropdownItem> _gwpVersions = new()
+    {
+        new() { Value = eGwpVersion.AR5, Text = "IPCC AR5 (Fifth Assessment Report - TGO Standard)" },
+        new() { Value = eGwpVersion.AR6, Text = "IPCC AR6 (Sixth Assessment Report)" },
+        new() { Value = eGwpVersion.AR4, Text = "IPCC AR4 (Fourth Assessment Report)" }
+    };
+    #endregion
+
+    #region class properties
+    [Parameter] public TbEmissionSource Model { get; set; } = new();
+    [Parameter] public EventCallback OnModelChanged { get; set; }
+    #endregion
+
+    #region class method
+    private async Task OnGwpVersionChanged(object? value)
+    {
+        if (value is eGwpVersion version)
+        {
+            Model.GwpVersion = version;
+            if (version == eGwpVersion.AR5)
+            {
+                Model.gwpCO2 = 1m;
+                Model.gwpFossilCH4 = 30m;
+                Model.gwpCH4 = 28m;
+                Model.gwpN2O = 265m;
+                Model.gwpSF6 = 23500m;
+                Model.gwpNF3 = 16100m;
+            }
+            else if (version == eGwpVersion.AR6)
+            {
+                Model.gwpCO2 = 1m;
+                Model.gwpFossilCH4 = 29.8m;
+                Model.gwpCH4 = 27.2m;
+                Model.gwpN2O = 273m;
+                Model.gwpSF6 = 25200m;
+                Model.gwpNF3 = 17400m;
+            }
+            else if (version == eGwpVersion.AR4)
+            {
+                Model.gwpCO2 = 1m;
+                Model.gwpFossilCH4 = 25m;
+                Model.gwpCH4 = 25m;
+                Model.gwpN2O = 298m;
+                Model.gwpSF6 = 22800m;
+                Model.gwpNF3 = 17200m;
+            }
+            await NotifyChange();
+        }
+    }
+
+    private async Task NotifyChange()
+    {
+        #region hide [2026-08-17]
+        await OnModelChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+}
+

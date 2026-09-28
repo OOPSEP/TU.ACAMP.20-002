@@ -1,0 +1,152 @@
+@using TU.ACAMP.Domain.Models.Organization
+
+<div class="p-4">
+    <RadzenStack Gap="1.25rem">
+        <!-- Row 1: Corporate Group & Company Code & Equity Share -->
+        <RadzenRow Class="g-3">
+            @if (CorporatesList.Count > 1 || Model.Id == 0)
+            {
+                <RadzenColumn Size="12" SizeMD="5">
+                    <RadzenFormField Text="Corporate Group *" Style="width: 100%;">
+                        <RadzenDropDown @bind-Value="@Model.CorporateId"
+                                        Data="@CorporatesList"
+                                        TextProperty="Title"
+                                        ValueProperty="Id"
+                                        Placeholder="Select Corporate Group"
+                                        Disabled="@(IsReadOnly || (Model.Id > 0 && !IsAdmin))"
+                                        Change="@OnCorporateSelectionChanged"
+                                        Style="width: 100%;">
+                            <Template Context="corp">
+                                @{
+                                    var c = (TbCorporate)corp;
+                                }
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge bg-light text-dark border px-1" style="font-size: 0.75rem;">@c.Code</span>
+                                    <span class="text-truncate">@c.Title</span>
+                                </div>
+                            </Template>
+                        </RadzenDropDown>
+                    </RadzenFormField>
+                    @if (Model.CorporateId <= 0)
+                    {
+                        <div class="text-danger small mt-1">Corporate group is required.</div>
+                    }
+                </RadzenColumn>
+            }
+
+            <RadzenColumn Size="12" SizeMD="@((CorporatesList.Count > 1 || Model.Id == 0) ? 3 : 6)">
+                <RadzenFormField Text="Company Code *" Style="width: 100%;">
+                    <RadzenTextBox Name="Code" @bind-Value="@Model.Code"
+                                   @oninput="@(args => OnCodeInput(args.Value?.ToString()))"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-family: monospace; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                    <RadzenRequiredValidator Component="Code" Text="Company code is required." />
+                </RadzenFormField>
+            </RadzenColumn>
+
+            <RadzenColumn Size="12" SizeMD="@((CorporatesList.Count > 1 || Model.Id == 0) ? 4 : 6)">
+                <RadzenFormField Text="Equity Share (%) [Operational Control 100%]" Style="width: 100%;">
+                    <RadzenNumeric Name="EquityShare" TValue="float" @bind-Value="@Model.EquityShare"
+                                   Min="0" Max="100" Step="1"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-weight: bold;"
+                                   Disabled="true" />
+                </RadzenFormField>
+                <div class="text-muted small mt-1" style="font-size: 0.75rem;">
+                    <em>* Consolidated based on Operational Control (100%) per ISO 14064-1 §5.1</em>
+                </div>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <!-- Row 2: Company Title / Legal Entity Name -->
+        <RadzenRow Class="g-3">
+            <RadzenColumn Size="12">
+                <RadzenFormField Text="Company Title / Legal Entity Name *" Style="width: 100%;">
+                    <RadzenTextBox Name="Title" @bind-Value="@Model.Title"
+                                   @oninput="@(args => OnTitleInput(args.Value?.ToString()))"
+                                   Change="@HandleModelChanged"
+                                   Style="width: 100%; font-weight: 600;"
+                                   Disabled="@IsReadOnly" />
+                    <RadzenRequiredValidator Component="Title" Text="Company title is required." />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <!-- Row 3: Remark / Description -->
+        <RadzenRow>
+            <RadzenColumn Size="12">
+                <RadzenFormField Text="Remark / Description" Style="width: 100%;">
+                    <RadzenTextArea Rows="3" Name="Remark" @bind-Value="@Model.Remark"
+                                    @oninput="@(args => OnRemarkInput(args.Value?.ToString()))"
+                                    Change="@HandleModelChanged"
+                                    Style="width: 100%;"
+                                    Disabled="@IsReadOnly" />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <!-- Row 4: Active Status -->
+        <RadzenRow>
+            <RadzenColumn Size="12" Class="d-flex align-items-center gap-2">
+                <RadzenSwitch @bind-Value="@Model.IsActive"
+                              Change="@HandleModelChanged"
+                              Disabled="@IsReadOnly" />
+                <RadzenLabel Text="Active Company (Operational entity for greenhouse gas inventory)" Style="font-weight: 500;" />
+            </RadzenColumn>
+        </RadzenRow>
+    </RadzenStack>
+</div>
+
+@code {
+    #region class properties
+    [Parameter, EditorRequired] public TbCompany Model { get; set; } = new();
+    [Parameter] public List<TbCorporate> CorporatesList { get; set; } = new();
+    [Parameter] public bool IsReadOnly { get; set; } = false;
+    [Parameter] public bool IsAdmin { get; set; } = false;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<int> OnCorporateChanged { get; set; }
+    #endregion
+
+    #region class methods
+    private async Task OnCodeInput(string? val)
+    {
+        Model.Code = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnTitleInput(string? val)
+    {
+        Model.Title = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnRemarkInput(string? val)
+    {
+        Model.Remark = val ?? string.Empty;
+        await HandleModelChanged();
+    }
+
+    private async Task OnCorporateSelectionChanged(object? value)
+    {
+        #region hide [2026-08-18]
+        if (value is int corpId && corpId > 0)
+        {
+            Model.CorporateId = corpId;
+            if (OnCorporateChanged.HasDelegate)
+            {
+                await OnCorporateChanged.InvokeAsync(corpId);
+            }
+        }
+        await HandleModelChanged();
+        #endregion
+    }
+
+    private async Task HandleModelChanged()
+    {
+        #region hide [2026-08-18]
+        await OnChanged.InvokeAsync();
+        #endregion
+    }
+    #endregion
+}

@@ -1,0 +1,162 @@
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.WebApp.Services.Organization
+
+@inject FacilityService FacilityService
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject ILogger<AddEditFacilityDialog> Logger
+
+<RadzenTemplateForm TItem="TbFacility" Data="@_model" Submit="@OnSubmit">
+    <RadzenStack Gap="1.25rem" Class="p-2">
+        <!-- Company Selection -->
+        <RadzenFormField Text="Company Entity *" Style="width: 100%;">
+            <RadzenDropDown @bind-Value="@_model.CompanyId"
+                            Data="@CompaniesList"
+                            TextProperty="Title"
+                            ValueProperty="Id"
+                            Placeholder="Select Company Entity"
+                            Disabled="@(PreselectedCompanyId.HasValue && PreselectedCompanyId.Value > 0)"
+                            Style="width: 100%;">
+                <Template Context="com">
+                    @{
+                        var comp = (TbCompany)com;
+                    }
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-light text-dark border px-1" style="font-size: 0.75rem;">@comp.Code</span>
+                        <span class="text-truncate">@comp.Title</span>
+                    </div>
+                </Template>
+            </RadzenDropDown>
+        </RadzenFormField>
+        @if (_model.CompanyId <= 0)
+        {
+            <div class="text-danger small" style="margin-top: -0.75rem;">Company is required.</div>
+        }
+
+        <!-- Facility Title -->
+        <RadzenFormField Text="Facility / Site Title *" Style="width: 100%;">
+            <ChildContent>
+                <RadzenTextBox @bind-Value="@_model.Title"
+                               MaxLength="200"
+                               Placeholder="e.g. Bangkadi Industrial Plant, Headquarter Site A"
+                               Style="width: 100%;" />
+            </ChildContent>
+            <Start>
+                <RadzenIcon Icon="factory" />
+            </Start>
+        </RadzenFormField>
+        <RadzenRequiredValidator Component="Title" Text="Facility title is required." Popup="false" />
+
+        <!-- Remark / Description -->
+        <RadzenFormField Text="Remark / Description" Style="width: 100%;">
+            <ChildContent>
+                <RadzenTextArea @bind-Value="@_model.Remark"
+                                MaxLength="250"
+                                Rows="3"
+                                Placeholder="Optional site notes, physical address or location details..."
+                                Style="width: 100%;" />
+            </ChildContent>
+            <Start>
+                <RadzenIcon Icon="notes" />
+            </Start>
+        </RadzenFormField>
+
+        <!-- Active Status -->
+        <div class="d-flex align-items-center gap-2">
+            <RadzenSwitch @bind-Value="@_model.IsActive" />
+            <RadzenLabel Text="Active Facility (Operational site for emissions accounting)" Style="font-weight: 500;" />
+        </div>
+
+        <!-- Buttons -->
+        <div class="d-flex justify-content-end gap-2 mt-3 pt-2 border-top">
+            <RadzenButton Text="Cancel"
+                          ButtonStyle="ButtonStyle.Light"
+                          Variant="Variant.Flat"
+                          Click="@(() => DialogService.Close(false))"
+                          Disabled="@_isSaving" />
+            <RadzenButton Text="@(_model.Id == 0 ? "Create Facility" : "Save Changes")"
+                          Icon="@(_model.Id == 0 ? "add" : "check")"
+                          ButtonType="ButtonType.Submit"
+                          ButtonStyle="ButtonStyle.Primary"
+                          IsBusy="@_isSaving"
+                          BusyText="Saving..." />
+        </div>
+    </RadzenStack>
+</RadzenTemplateForm>
+
+@code {
+    [Parameter] public TbFacility? FacilityItem { get; set; }
+    [Parameter] public int? PreselectedCompanyId { get; set; }
+    [Parameter] public List<TbCompany> CompaniesList { get; set; } = new();
+
+    private TbFacility _model = new() { IsActive = true };
+    private bool _isSaving = false;
+
+    protected override void OnInitialized()
+    {
+        #region hide [2026-08-18]
+        if (FacilityItem != null)
+        {
+            _model = new TbFacility
+            {
+                Id = FacilityItem.Id,
+                CompanyId = FacilityItem.CompanyId,
+                Title = FacilityItem.Title,
+                Remark = FacilityItem.Remark,
+                IsActive = FacilityItem.IsActive
+            };
+        }
+        else
+        {
+            _model = new TbFacility
+            {
+                IsActive = true,
+                CompanyId = PreselectedCompanyId ?? (CompaniesList.FirstOrDefault()?.Id ?? 0)
+            };
+        }
+        #endregion
+    }
+
+    private async Task OnSubmit()
+    {
+        #region hide [2026-08-18]
+        if (_model.CompanyId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Please select a company.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.Title))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "Facility title is required.");
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            if (_model.Id == 0)
+            {
+                await FacilityService.CreateAsync(_model);
+                NotificationService.Notify(NotificationSeverity.Success, "Created", $"Facility '{_model.Title}' created successfully.");
+            }
+            else
+            {
+                await FacilityService.UpdateAsync(_model);
+                NotificationService.Notify(NotificationSeverity.Success, "Updated", $"Facility '{_model.Title}' updated successfully.");
+            }
+
+            DialogService.Close(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving facility.");
+            NotificationService.Notify(NotificationSeverity.Error, "Save Failed", ex.Message);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+        #endregion
+    }
+}

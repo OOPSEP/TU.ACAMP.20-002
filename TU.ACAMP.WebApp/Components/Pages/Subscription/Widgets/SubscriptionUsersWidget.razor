@@ -1,0 +1,313 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@inject NotificationService NotificationService
+
+<div class="p-4">
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle1" class="fw-bold mb-0">Authorized Tenant Members</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="text-muted">Manage users who can access and collaborate within this tenant workspace.</RadzenText>
+        </div>
+        <RadzenBadge BadgeStyle="@(IsQuotaReached ? BadgeStyle.Danger : BadgeStyle.Info)"
+                     Text="@($"{UserList.Count} / {AllowUserCount} Users")"
+                     IsPill="true" />
+    </div>
+
+    @if (IsQuotaReached)
+    {
+        <div class="alert alert-warning py-2 px-3 mb-3 small d-flex align-items-center" role="alert">
+            <RadzenIcon Icon="lock" class="me-2 text-warning fs-5" />
+            <div>
+                User quota reached for this subscription (@AllowUserCount max allowed by current plan). Increase the plan or the quota to add more members.
+            </div>
+        </div>
+    }
+
+    <!-- [2026-09-28][Gemini] ปรับ UI เป็น RadzenDataGrid Inline Edit ตามคำสั่งผู้ใช้: ไม่มีฟอร์มกรอกด้านบน ย้ายปุ่ม Add/Delete ไปอยู่ในคอลัมน์ Action -->
+    <RadzenDataGrid @ref="_grid"
+                    Data="@UserList"
+                    TItem="TbSubscriptionUser"
+                    EditMode="DataGridEditMode.Single"
+                    RowCreate="@OnCreateRow"
+                    RowUpdate="@OnUpdateRow"
+                    AllowPaging="false"
+                    AllowSorting="false"
+                    AllowFiltering="false"
+                    Class="shadow-sm rounded-3 border">
+        <EmptyTemplate>
+            <div class="p-4 text-center text-muted">
+                <RadzenIcon Icon="people_outline" Style="font-size: 36px; opacity: 0.5;" class="mb-1" />
+                <div>No workspace members assigned to this subscription yet.</div>
+                @if (!IsFieldDisabled)
+                {
+                    <div class="mt-2">
+                        <RadzenButton Icon="person_add"
+                                      Text="Add First Member"
+                                      Size="ButtonSize.Small"
+                                      ButtonStyle="ButtonStyle.Primary"
+                                      Class="btn-add-member"
+                                      Click="@InsertRowAsync"
+                                      Disabled="@(IsQuotaReached || _userToInsert != null || _userToUpdate != null)"
+                                      Style="border-radius: 6px;" />
+                    </div>
+                }
+            </div>
+        </EmptyTemplate>
+        <Columns>
+            <RadzenDataGridColumn Title="#" Width="55px" TextAlign="TextAlign.Center">
+                <Template Context="u">
+                    @(UserList.IndexOf(u) + 1)
+                </Template>
+                <EditTemplate Context="u">
+                    @if (u == _userToInsert)
+                    {
+                        <span class="text-success fw-bold">+</span>
+                    }
+                    else
+                    {
+                        @(UserList.IndexOf(u) + 1)
+                    }
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Property="Email" Title="User Email" Width="280px">
+                <Template Context="u">
+                    <span class="fw-bold text-primary">@u.Email</span>
+                </Template>
+                <EditTemplate Context="u">
+                    <RadzenTextBox @bind-Value="u.Email"
+                                   Class="w-100 input-inline-email"
+                                   Placeholder="user@domain.com"
+                                   aria-label="User Email" />
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Property="Role" Title="Assigned Role" Width="170px">
+                <Template Context="u">
+                    <RadzenBadge Text="@u.Role.ToString()" BadgeStyle="@GetSubscriptionRoleBadgeStyle(u.Role)" IsPill="true" />
+                </Template>
+                <EditTemplate Context="u">
+                    <RadzenDropDown Data="@_roleOptions"
+                                    TextProperty="Text"
+                                    ValueProperty="Value"
+                                    @bind-Value="u.Role"
+                                    Class="w-100 dropdown-inline-role"
+                                    aria-label="Subscription Role" />
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Title="Role Description">
+                <Template Context="u">
+                    <span class="text-muted small">@GetRoleDescription(u.Role)</span>
+                </Template>
+                <EditTemplate Context="u">
+                    <span class="text-muted small">@GetRoleDescription(u.Role)</span>
+                </EditTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn Title="Action" Width="140px" TextAlign="TextAlign.Center">
+                <HeaderTemplate>
+                    @if (!IsFieldDisabled)
+                    {
+                        <RadzenButton Icon="person_add"
+                                      Text="Add Member"
+                                      Size="ButtonSize.Small"
+                                      ButtonStyle="ButtonStyle.Primary"
+                                      Class="btn-add-member"
+                                      Click="@InsertRowAsync"
+                                      Disabled="@(IsQuotaReached || _userToInsert != null || _userToUpdate != null)"
+                                      Style="border-radius: 6px; font-weight: 600;" />
+                    }
+                    else
+                    {
+                        <span>Action</span>
+                    }
+                </HeaderTemplate>
+                <Template Context="u">
+                    @if (!IsFieldDisabled)
+                    {
+                        <div class="d-inline-flex gap-1">
+                            <RadzenButton Icon="edit"
+                                          Size="ButtonSize.ExtraSmall"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          Variant="Variant.Flat"
+                                          Class="btn-edit-member"
+                                          Click="@(() => EditRowAsync(u))"
+                                          Disabled="@(_userToInsert != null || _userToUpdate != null)"
+                                          title="Edit member" />
+                            <RadzenButton Icon="delete"
+                                          Size="ButtonSize.ExtraSmall"
+                                          ButtonStyle="ButtonStyle.Danger"
+                                          Variant="Variant.Outlined"
+                                          Class="btn-delete-member"
+                                          Click="@(() => DeleteRowAsync(u))"
+                                          Disabled="@(_userToInsert != null || _userToUpdate != null)"
+                                          title="Remove member" />
+                        </div>
+                    }
+                </Template>
+                <EditTemplate Context="u">
+                    <div class="d-inline-flex gap-1">
+                        <RadzenButton Icon="check"
+                                      Size="ButtonSize.ExtraSmall"
+                                      ButtonStyle="ButtonStyle.Success"
+                                      Class="btn-save-member"
+                                      Click="@(() => SaveRowAsync(u))"
+                                      title="Save member" />
+                        <RadzenButton Icon="close"
+                                      Size="ButtonSize.ExtraSmall"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Class="btn-cancel-member"
+                                      Click="@(() => CancelEditAsync(u))"
+                                      title="Cancel" />
+                    </div>
+                </EditTemplate>
+            </RadzenDataGridColumn>
+        </Columns>
+    </RadzenDataGrid>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<TbSubscriptionUser> UserList { get; set; } = new();
+    [Parameter] public int AllowUserCount { get; set; }
+    [Parameter] public bool IsFieldDisabled { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool IsQuotaReached => UserList.Count >= AllowUserCount;
+
+    private RadzenDataGrid<TbSubscriptionUser>? _grid;
+    private TbSubscriptionUser? _userToInsert;
+    private TbSubscriptionUser? _userToUpdate;
+
+    private record DropdownOption<T>(T Value, string Text);
+
+    private readonly List<DropdownOption<eSubscriptionRole>> _roleOptions = new()
+    {
+        new(eSubscriptionRole.Owner, "Owner"),
+        new(eSubscriptionRole.Admin, "Admin"),
+        new(eSubscriptionRole.Editor, "Editor"),
+        new(eSubscriptionRole.Consultant, "Consultant"),
+        new(eSubscriptionRole.Viewer, "Viewer")
+    };
+
+    private async Task InsertRowAsync()
+    {
+        if (IsQuotaReached)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Quota Exceeded", $"Maximum allowed users for this subscription is {AllowUserCount}.");
+            return;
+        }
+
+        _userToInsert = new TbSubscriptionUser
+        {
+            Email = string.Empty,
+            Role = eSubscriptionRole.Editor,
+            IsActive = true
+        };
+
+        if (_grid != null)
+        {
+            await _grid.InsertRow(_userToInsert);
+        }
+    }
+
+    private async Task EditRowAsync(TbSubscriptionUser user)
+    {
+        _userToUpdate = user;
+        if (_grid != null)
+        {
+            await _grid.EditRow(user);
+        }
+    }
+
+    private async Task SaveRowAsync(TbSubscriptionUser user)
+    {
+        if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Validation", "User Email is required.");
+            return;
+        }
+
+        var trimmed = user.Email.Trim();
+        if (UserList.Any(u => u != user && u.Email.Trim().Equals(trimmed, StringComparison.OrdinalIgnoreCase)))
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Duplicate", "This user is already added to the subscription.");
+            return;
+        }
+
+        user.Email = trimmed;
+
+        if (_grid != null)
+        {
+            await _grid.UpdateRow(user);
+        }
+    }
+
+    private void OnCreateRow(TbSubscriptionUser user)
+    {
+        UserList.Add(user);
+        _userToInsert = null;
+        NotificationService.Notify(NotificationSeverity.Success, "User Added", $"Added {user.Email} as {user.Role}.");
+        OnChanged.InvokeAsync();
+    }
+
+    private void OnUpdateRow(TbSubscriptionUser user)
+    {
+        _userToUpdate = null;
+        NotificationService.Notify(NotificationSeverity.Success, "User Updated", $"Updated {user.Email} to {user.Role}.");
+        OnChanged.InvokeAsync();
+    }
+
+    private void CancelEditAsync(TbSubscriptionUser user)
+    {
+        if (_grid != null)
+        {
+            _grid.CancelEditRow(user);
+        }
+
+        if (user == _userToInsert)
+        {
+            _userToInsert = null;
+        }
+        _userToUpdate = null;
+    }
+
+    private async Task DeleteRowAsync(TbSubscriptionUser user)
+    {
+        if (UserList.Contains(user))
+        {
+            UserList.Remove(user);
+            if (_grid != null)
+            {
+                await _grid.Reload();
+            }
+            NotificationService.Notify(NotificationSeverity.Info, "User Removed", $"Removed {user.Email}.");
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private BadgeStyle GetSubscriptionRoleBadgeStyle(eSubscriptionRole role)
+    {
+        return role switch
+        {
+            eSubscriptionRole.Owner => BadgeStyle.Danger,
+            eSubscriptionRole.Admin => BadgeStyle.Warning,
+            eSubscriptionRole.Editor => BadgeStyle.Primary,
+            eSubscriptionRole.Consultant => BadgeStyle.Info,
+            _ => BadgeStyle.Secondary
+        };
+    }
+
+    private string GetRoleDescription(eSubscriptionRole role)
+    {
+        return role switch
+        {
+            eSubscriptionRole.Owner => "Full control over subscription, billing, and organizational assets.",
+            eSubscriptionRole.Admin => "Manage tenant members, facilities, and configuration.",
+            eSubscriptionRole.Editor => "Add and edit activity data and emission inputs.",
+            eSubscriptionRole.Consultant => "Audit calculations, verify emission factors, and view reports.",
+            _ => "Read-only access to view dashboards and summary reports."
+        };
+    }
+}

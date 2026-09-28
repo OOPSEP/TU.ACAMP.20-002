@@ -1,0 +1,525 @@
+@page "/activities/topics/api-spec"
+@page "/library/activity-topics/api-spec"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.DataProtection
+@using Microsoft.JSInterop
+@using Radzen
+@using Radzen.Blazor
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Library
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Services.Activity
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+
+@attribute [Authorize]
+@inject ActivityTopicService ActivityTopicService
+@inject ApiKeyService ApiKeyService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>API Integration Spec - ACAMP</PageTitle>
+
+<div class="container-fluid py-3 px-4">
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+        <div class="d-flex align-items-center">
+            <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@GoBack" Class="me-3" Style="border-radius: 8px;" Title="Back to previous page" />
+            <div>
+                <RadzenText Text="Topic API Ingestion Specification" TextStyle="TextStyle.H5" TagName="TagName.H1" class="fw-bold mb-0" />
+                <RadzenText Text="Integration guide, cURL code examples, and API v2 payload spec for this topic." TextStyle="TextStyle.Body2" class="text-muted mb-0" />
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <RadzenButton Text="@(_isDetailsExpanded ? "Hide Details" : "Show Details")"
+                          Icon="@(_isDetailsExpanded ? "view_sidebar" : "vertical_split")"
+                          ButtonStyle="ButtonStyle.Light"
+                          Variant="Variant.Flat"
+                          Size="ButtonSize.Small"
+                          Click="@ToggleDetailsPanelAsync"
+                          Style="border-radius: 8px;"
+                          ToolTip="Toggle Topic Details panel" />
+            <RadzenButton Text="Generate Fresh Ref ID" Icon="refresh" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@RefreshSamplesAsync" Style="border-radius: 8px;" ToolTip="Generate new unique externalRefId" />
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="py-5 text-center">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading Topic API Spec..." TextStyle="TextStyle.Body2" class="text-muted mt-2" />
+        </div>
+    }
+    else if (_topic == null)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false">
+            Topic not found or accessible. Please check your request parameters.
+        </RadzenAlert>
+    }
+    else
+    {
+        <div class="row g-4">
+            @if (_isDetailsExpanded)
+            {
+                <!-- Topic Information Card -->
+                <div class="col-12 col-lg-4">
+                    <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <div class="d-flex align-items-center">
+                                <RadzenIcon Icon="info" Class="text-primary me-2" Style="font-size: 1.25rem;" />
+                                <h6 class="fw-bold text-muted text-uppercase mb-0" style="font-size: 0.8rem; letter-spacing: 0.5px;">Topic Details</h6>
+                            </div>
+                            <RadzenButton Icon="keyboard_double_arrow_left" Text="Collapse" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.ExtraSmall" Click="@ToggleDetailsPanelAsync" Style="border-radius: 6px;" ToolTip="Collapse details panel" />
+                        </div>
+                        <div class="mb-3">
+                            <span class="text-muted small d-block">Title / Name</span>
+                            <span class="fw-bold fs-5 text-dark">@_topic.Title</span>
+                        </div>
+
+                        <div class="mb-3">
+                            <span class="text-muted small d-block">Public Topic Key</span>
+                            <div class="d-flex align-items-center gap-2 mt-1">
+                                <code class="p-2 bg-light rounded border fw-bold text-primary flex-grow-1" style="font-size: 0.95rem;">@_topicKey</code>
+                                <RadzenButton Icon="content_copy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@(() => CopyToClipboardAsync(_topicKey))" ToolTip="Copy Topic Key" />
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <span class="text-muted small d-block">Scope Level</span>
+                            <span class="badge bg-primary-subtle text-primary border px-2 py-1">@_topic.Level</span>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(_topic.Remark))
+                        {
+                            <div class="mb-3">
+                                <span class="text-muted small d-block">Remark</span>
+                                <span class="text-dark small">@_topic.Remark</span>
+                            </div>
+                        }
+
+                        <hr />
+
+                        <div class="d-flex align-items-center mb-3">
+                            <RadzenIcon Icon="key" Class="text-success me-2" Style="font-size: 1.25rem;" />
+                            <h6 class="fw-bold text-muted text-uppercase mb-0" style="font-size: 0.8rem; letter-spacing: 0.5px;">Auto-Assigned Workspace API Key</h6>
+                        </div>
+                        <div class="mb-2">
+                            <span class="text-muted small d-block">Header Name</span>
+                            <code>X-API-Key</code>
+                        </div>
+                        <div>
+                            <span class="text-muted small d-block">Active Workspace Key</span>
+                            <div class="d-flex align-items-center gap-2 mt-1">
+                                <code class="p-2 bg-light rounded border fw-bold text-success flex-grow-1 text-break" style="font-size: 0.85rem;">@_subscriptionApiKey</code>
+                                <RadzenButton Icon="content_copy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@(() => CopyToClipboardAsync(_subscriptionApiKey))" ToolTip="Copy API Key" />
+                            </div>
+                        </div>
+                    </RadzenCard>
+                </div>
+            }
+
+            <!-- API Request Examples -->
+            <div class="@(_isDetailsExpanded ? "col-12 col-lg-8" : "col-12")">
+                @if (!_isDetailsExpanded)
+                {
+                    <div class="d-flex align-items-center justify-content-between bg-white border rounded-3 p-3 mb-4 shadow-sm flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-3 flex-wrap">
+                            <span class="badge bg-primary-subtle text-primary border px-2 py-1">@_topic.Level</span>
+                            <div>
+                                <span class="text-muted small d-block">Topic</span>
+                                <span class="fw-bold text-dark">@_topic.Title</span>
+                            </div>
+                            <div class="vr mx-2 d-none d-md-block"></div>
+                            <div>
+                                <span class="text-muted small d-block">Topic Key</span>
+                                <div class="d-flex align-items-center gap-1">
+                                    <code class="text-primary fw-bold" style="font-size: 0.9rem;">@_topicKey</code>
+                                    <RadzenButton Icon="content_copy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Text" Size="ButtonSize.ExtraSmall" Click="@(() => CopyToClipboardAsync(_topicKey))" ToolTip="Copy Topic Key" />
+                                </div>
+                            </div>
+                            <div class="vr mx-2 d-none d-md-block"></div>
+                            <div>
+                                <span class="text-muted small d-block">Workspace Key</span>
+                                <div class="d-flex align-items-center gap-1">
+                                    <code class="text-success fw-bold text-truncate d-inline-block" style="font-size: 0.85rem; max-width: 220px;">@_subscriptionApiKey</code>
+                                    <RadzenButton Icon="content_copy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Text" Size="ButtonSize.ExtraSmall" Click="@(() => CopyToClipboardAsync(_subscriptionApiKey))" ToolTip="Copy API Key" />
+                                </div>
+                            </div>
+                        </div>
+                        <RadzenButton Text="Show Full Details" Icon="keyboard_double_arrow_right" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat" Size="ButtonSize.Small" Click="@ToggleDetailsPanelAsync" Style="border-radius: 8px;" />
+                    </div>
+                }
+
+                <!-- API Parameter Field Definitions Card -->
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+                    <div class="d-flex align-items-center mb-3">
+                        <RadzenIcon Icon="menu_book" Class="text-info me-2" Style="font-size: 1.3rem;" />
+                        <span class="fw-bold text-dark fs-6">API Request Parameters & Field Definitions</span>
+                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle px-2 py-1 ms-2">DICTIONARY</span>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 150px;">Parameter Name</th>
+                                    <th style="width: 130px;">Location / Type</th>
+                                    <th style="width: 90px;" class="text-center">Required</th>
+                                    <th>Description & Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>X-API-Key</code></td>
+                                    <td><span class="badge bg-secondary">Header / String</span></td>
+                                    <td class="text-center"><span class="badge bg-danger">Yes</span></td>
+                                    <td>API Key for Workspace / Subscription authentication</td>
+                                </tr>
+                                <tr>
+                                    <td><code>topicKey</code></td>
+                                    <td><span class="badge bg-secondary">Path / String</span></td>
+                                    <td class="text-center"><span class="badge bg-danger">Yes</span></td>
+                                    <td>Public GUID Key of the Topic (starts with <code>tpc_...</code>)</td>
+                                </tr>
+                                <tr>
+                                    <td><code>quantity</code></td>
+                                    <td><span class="badge bg-secondary">Form/Body / Decimal</span></td>
+                                    <td class="text-center"><span class="badge bg-danger">Yes</span></td>
+                                    <td>Numerical quantity of activity data (must be greater than or equal to 0)</td>
+                                </tr>
+                                <tr>
+                                    <td><code>occurredAt</code></td>
+                                    <td><span class="badge bg-secondary">Form/Body / DateTime</span></td>
+                                    <td class="text-center"><span class="badge bg-danger">Yes</span></td>
+                                    <td>Timestamp and timezone offset per ISO 8601 (e.g. <code>2026-08-01T00:00:00+07:00</code>) for GHG reporting year categorization</td>
+                                </tr>
+                                <tr>
+                                    <td><code>externalRefId</code></td>
+                                    <td><span class="badge bg-secondary">Form/Body / String</span></td>
+                                    <td class="text-center"><span class="badge bg-light text-dark border">Optional</span></td>
+                                    <td>External document reference ID (e.g. invoice/receipt number) for idempotency validation</td>
+                                </tr>
+                                <tr>
+                                    <td><code>remark</code></td>
+                                    <td><span class="badge bg-secondary">Form/Body / String</span></td>
+                                    <td class="text-center"><span class="badge bg-light text-dark border">Optional</span></td>
+                                    <td>Remarks, additional details, or description of the activity event</td>
+                                </tr>
+                                <tr>
+                                    <td><code>file</code></td>
+                                    <td><span class="badge bg-secondary">Form / Multipart File</span></td>
+                                    <td class="text-center"><span class="badge bg-light text-dark border">Optional</span></td>
+                                    <td>Supporting document attachment (PDF / Excel up to 25 MB)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </RadzenCard>
+
+                <!-- Option 1: Direct Topic Ingest -->
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <RadzenIcon Icon="send" Class="text-primary me-2" Style="font-size: 1.3rem;" />
+                            <span class="fw-bold text-dark fs-6">Direct Topic POST (Single Request + Optional File)</span>
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 ms-2">OPTION 1</span>
+                        </div>
+                        <RadzenButton Text="Copy cURL" Icon="content_copy" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@(() => CopyToClipboardAsync(_curlDirectSample))" />
+                    </div>
+                    <p class="text-muted small mb-3">
+                        Send activity quantity and date directly to this topic. Supports optional file attachment (PDF/Excel) in the same single <code>multipart/form-data</code> HTTP request.
+                    </p>
+
+                    <div class="position-relative">
+                        <pre class="p-3 bg-dark text-light rounded-3 small mb-0" style="white-space: pre-wrap; font-family: monospace;">@_curlDirectSample</pre>
+                    </div>
+                </RadzenCard>
+
+                <!-- Option 2: JSON Batch Ingest -->
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <RadzenIcon Icon="dynamic_feed" Class="text-success me-2" Style="font-size: 1.3rem;" />
+                            <span class="fw-bold text-dark fs-6">Batch Ingest JSON (POST /api/v2/events/ingest)</span>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 ms-2">OPTION 2</span>
+                        </div>
+                        <RadzenButton Text="Copy JSON" Icon="content_copy" ButtonStyle="ButtonStyle.Success" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@(() => CopyToClipboardAsync(_jsonBatchSample))" />
+                    </div>
+                    <p class="text-muted small mb-3">
+                        Ideal for ERP and IoT Gateways sending multiple activity events in a single batch JSON request.
+                    </p>
+
+                    <div class="position-relative">
+                        <pre class="p-3 bg-dark text-light rounded-3 small mb-0" style="white-space: pre-wrap; font-family: monospace;">@_jsonBatchSample</pre>
+                    </div>
+                </RadzenCard>
+
+                <!-- File Attachment Endpoint -->
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <RadzenIcon Icon="attach_file" Class="text-secondary me-2" Style="font-size: 1.3rem;" />
+                            <span class="fw-bold text-dark fs-6">Attach File by Event Key (POST /api/v2/events/{eventKey}/attachments)</span>
+                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle px-2 py-1 ms-2">ATTACHMENT</span>
+                        </div>
+                        <RadzenButton Text="Copy cURL" Icon="content_copy" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@(() => CopyToClipboardAsync(_curlAttachmentSample))" />
+                    </div>
+                    <p class="text-muted small mb-3">
+                        Attach a supporting document (Max 25 MB) to a created event using its <code>eventKey</code>.
+                    </p>
+
+                    <div class="position-relative">
+                        <pre class="p-3 bg-dark text-light rounded-3 small mb-0" style="white-space: pre-wrap; font-family: monospace;">@_curlAttachmentSample</pre>
+                    </div>
+                </RadzenCard>
+
+                <!-- Postman Collection Section -->
+                <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center">
+                            <RadzenIcon Icon="cloud_download" Class="text-warning me-2" Style="font-size: 1.3rem;" />
+                            <span class="fw-bold text-dark fs-6">Postman Collection v2.1 (Import via Paste Raw Text)</span>
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle px-2 py-1 ms-2">POSTMAN</span>
+                        </div>
+                        <RadzenButton Text="Copy Postman JSON" Icon="content_copy" ButtonStyle="ButtonStyle.Warning" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@(() => CopyToClipboardAsync(_postmanCollectionSample))" />
+                    </div>
+                    <p class="text-muted small mb-2">
+                        To test in <strong>Postman</strong>: Open Postman &rarr; Click <strong>Import</strong> &rarr; Select <strong>Raw text</strong> &rarr; Paste the JSON below &rarr; Click <strong>Import</strong>.
+                    </p>
+
+                    <div class="position-relative">
+                        <pre class="p-3 bg-dark text-light rounded-3 small mb-0" style="white-space: pre-wrap; font-family: monospace; max-height: 250px; overflow-y: auto;">@_postmanCollectionSample</pre>
+                    </div>
+                </RadzenCard>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    #region class field
+    private bool _isLoading = true;
+    private bool _isDetailsExpanded = true;
+    private TbActivityTopic? _topic;
+    private string _topicKey = string.Empty;
+    private string _subscriptionApiKey = string.Empty;
+    private string _curlDirectSample = string.Empty;
+    private string _jsonBatchSample = string.Empty;
+    private string _curlAttachmentSample = string.Empty;
+    private string _postmanCollectionSample = string.Empty;
+    #endregion
+
+    #region class properties
+    [SupplyParameterFromQuery(Name = "id")] public string? SecureId { get; set; }
+    [SupplyParameterFromQuery(Name = "tkey")] public string? RawTopicKey { get; set; }
+    [SupplyParameterFromQuery(Name = "ptype")] public string? RawParentType { get; set; }
+    [SupplyParameterFromQuery(Name = "pid")] public string? SecurePid { get; set; }
+    [SupplyParameterFromQuery(Name = "sid")] public string? SecureSid { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? SecureTab { get; set; }
+    [SupplyParameterFromQuery(Name = "ret")] public string? SecureRet { get; set; }
+    [SupplyParameterFromQuery(Name = "panel")] public string? PanelQuery { get; set; }
+
+    public int TopicId { get; set; }
+    public string? ReturnUrl { get; set; }
+    #endregion
+
+    #region class methods
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-08-24]
+        _isLoading = true;
+        try
+        {
+            if (string.Equals(PanelQuery, "collapsed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(PanelQuery, "0", StringComparison.OrdinalIgnoreCase))
+            {
+                _isDetailsExpanded = false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(SecureId))
+            {
+                var unprotected = DataProtection.UnprotectInt(SecureId);
+                if (unprotected.HasValue) TopicId = unprotected.Value;
+            }
+
+            if (!string.IsNullOrWhiteSpace(SecureRet))
+            {
+                ReturnUrl = DataProtection.Unprotect(SecureRet);
+            }
+
+            if (TopicId <= 0 && !string.IsNullOrWhiteSpace(RawTopicKey) && PublicKeyCodec.TryDecode(PublicKeyCodec.TopicPrefix, RawTopicKey, out var decodedId))
+            {
+                TopicId = decodedId;
+            }
+
+            if (TopicId > 0)
+            {
+                _topic = await ActivityTopicService.GetByIdAsync(TopicId);
+                if (_topic != null)
+                {
+                    _topicKey = PublicKeyCodec.Encode(PublicKeyCodec.TopicPrefix, _topic.Id);
+                    await BuildSamplesAsync();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load topic specification.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+
+    private async Task RefreshSamplesAsync()
+    {
+        #region hide [2026-08-24]
+        await BuildSamplesAsync();
+        NotificationService.Notify(NotificationSeverity.Info, "Refreshed", "Generated new unique externalRefId for sample requests.");
+        #endregion
+    }
+
+    private async Task BuildSamplesAsync()
+    {
+        #region hide [2026-08-24]
+        var baseUri = NavigationManager.BaseUri.TrimEnd('/');
+
+        if (_topic != null)
+        {
+            var (_, rawKey) = await ApiKeyService.GetOrCreateDefaultApiKeyForSubscriptionAsync(_topic.SubscriptionId);
+            _subscriptionApiKey = rawKey;
+        }
+        else
+        {
+            _subscriptionApiKey = "acamp_default1_1234567890abcdef1234567890abcdef";
+        }
+
+        var randomNum = System.Security.Cryptography.RandomNumberGenerator.GetInt32(1000, 9999);
+        var uniqueRefId = $"INV-{AppTimeZone.UtcNow:yyyyMMddHHmmss}-{randomNum}";
+
+        _curlDirectSample = $"curl -X POST \"{baseUri}/api/v2/topics/{_topicKey}/events\" \\\n" +
+                            $"  -H \"X-API-Key: {_subscriptionApiKey}\" \\\n" +
+                            $"  -F \"quantity=1520.5\" \\\n" +
+                            $"  -F \"occurredAt=2026-08-01T00:00:00+07:00\" \\\n" +
+                            $"  -F \"externalRefId={uniqueRefId}\" \\\n" +
+                            $"  -F \"remark=Business travel hotel stay\" \\\n" +
+                            $"  -F \"file=@invoice.pdf\"";
+
+        _jsonBatchSample = $"POST {baseUri}/api/v2/events/ingest\n" +
+                           $"Header: X-API-Key: {_subscriptionApiKey}\n" +
+                           $"Content-Type: application/json\n\n" +
+                           $"{{\n  \"events\": [\n    {{\n      \"topicKey\": \"{_topicKey}\",\n      \"quantity\": 1520.5,\n      \"occurredAt\": \"2026-08-01T00:00:00+07:00\",\n      \"externalRefId\": \"{uniqueRefId}\",\n      \"remark\": \"Business travel hotel stay\"\n    }}\n  ]\n}}";
+
+        _curlAttachmentSample = $"curl -X POST \"{baseUri}/api/v2/events/evt_1a2b3c4d5e6f708192a3b4c5d6e7f809/attachments\" \\\n" +
+                                $"  -H \"X-API-Key: {_subscriptionApiKey}\" \\\n" +
+                                $"  -F \"file=@invoice.pdf\" \\\n" +
+                                $"  -F \"tag=invoice\"";
+
+        var topicTitle = _topic?.Title ?? "Topic Event";
+        _postmanCollectionSample = $"{{\n" +
+                                   $"  \"info\": {{\n" +
+                                   $"    \"name\": \"ACAMP v2 - {topicTitle}\",\n" +
+                                   $"    \"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n" +
+                                   $"  }},\n" +
+                                   $"  \"item\": [\n" +
+                                   $"    {{\n" +
+                                   $"      \"name\": \"1. Direct Topic Event Ingest (+ Optional File)\",\n" +
+                                   $"      \"request\": {{\n" +
+                                   $"        \"method\": \"POST\",\n" +
+                                   $"        \"header\": [\n" +
+                                   $"          {{ \"key\": \"X-API-Key\", \"value\": \"{_subscriptionApiKey}\", \"type\": \"text\" }}\n" +
+                                   $"        ],\n" +
+                                   $"        \"body\": {{\n" +
+                                   $"          \"mode\": \"formdata\",\n" +
+                                   $"          \"formdata\": [\n" +
+                                   $"            {{ \"key\": \"quantity\", \"value\": \"1520.5\", \"type\": \"text\" }},\n" +
+                                   $"            {{ \"key\": \"occurredAt\", \"value\": \"2026-08-01T00:00:00+07:00\", \"type\": \"text\" }},\n" +
+                                   $"            {{ \"key\": \"externalRefId\", \"value\": \"{uniqueRefId}\", \"type\": \"text\" }},\n" +
+                                   $"            {{ \"key\": \"remark\", \"value\": \"Business travel hotel stay\", \"type\": \"text\" }},\n" +
+                                   $"            {{ \"key\": \"file\", \"type\": \"file\", \"src\": [] }}\n" +
+                                   $"          ]\n" +
+                                   $"        }},\n" +
+                                   $"        \"url\": \"{baseUri}/api/v2/topics/{_topicKey}/events\"\n" +
+                                   $"      }}\n" +
+                                   $"    }},\n" +
+                                   $"    {{\n" +
+                                   $"      \"name\": \"2. Batch Events Ingest (JSON)\",\n" +
+                                   $"      \"request\": {{\n" +
+                                   $"        \"method\": \"POST\",\n" +
+                                   $"        \"header\": [\n" +
+                                   $"          {{ \"key\": \"X-API-Key\", \"value\": \"{_subscriptionApiKey}\", \"type\": \"text\" }},\n" +
+                                   $"          {{ \"key\": \"Content-Type\", \"value\": \"application/json\", \"type\": \"text\" }}\n" +
+                                   $"        ],\n" +
+                                   $"        \"body\": {{\n" +
+                                   $"          \"mode\": \"raw\",\n" +
+                                   $"          \"raw\": \"{{\\n  \\\"events\\\": [\\n    {{\\n      \\\"topicKey\\\": \\\"{_topicKey}\\\",\\n      \\\"quantity\\\": 1520.5,\\n      \\\"occurredAt\\\": \\\"2026-08-01T00:00:00+07:00\\\",\\n      \\\"externalRefId\\\": \\\"{uniqueRefId}\\\",\\n      \\\"remark\\\": \\\"Business travel hotel stay\\\"\\n    }}\\n  ]\\n}}\"\n" +
+                                   $"        }},\n" +
+                                   $"        \"url\": \"{baseUri}/api/v2/events/ingest\"\n" +
+                                   $"      }}\n" +
+                                   $"    }}\n" +
+                                   $"  ]\n" +
+                                   $"}}";
+        #endregion
+    }
+
+    private async Task CopyToClipboardAsync(string text)
+    {
+        #region hide [2026-08-24]
+        if (!string.IsNullOrEmpty(text))
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            NotificationService.Notify(NotificationSeverity.Info, "Copied", "Code snippet copied to clipboard.");
+        }
+        #endregion
+    }
+
+    private async Task ToggleDetailsPanelAsync()
+    {
+        _isDetailsExpanded = !_isDetailsExpanded;
+        await SyncBrowserUrlAsync();
+    }
+
+    private async Task SyncBrowserUrlAsync()
+    {
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["id"] = !string.IsNullOrWhiteSpace(SecureId) ? SecureId : (TopicId > 0 ? DataProtection.Protect(TopicId) : null),
+                ["tkey"] = !string.IsNullOrWhiteSpace(RawTopicKey) ? RawTopicKey : null,
+                ["ptype"] = !string.IsNullOrWhiteSpace(RawParentType) ? RawParentType : null,
+                ["pid"] = !string.IsNullOrWhiteSpace(SecurePid) ? SecurePid : null,
+                ["sid"] = !string.IsNullOrWhiteSpace(SecureSid) ? SecureSid : null,
+                ["tab"] = !string.IsNullOrWhiteSpace(SecureTab) ? SecureTab : null,
+                ["ret"] = !string.IsNullOrWhiteSpace(SecureRet) ? SecureRet : null,
+                ["panel"] = !_isDetailsExpanded ? "collapsed" : null
+            };
+
+            var uri = NavigationManager.GetUriWithQueryParameters(NavigationManager.Uri.Split('?')[0], queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", uri);
+        }
+        catch
+        {
+            // Ignore if JS history replacement fails
+        }
+    }
+
+    private void GoBack()
+    {
+        #region hide [2026-08-24]
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+            return;
+        }
+        NavigationManager.NavigateTo("/library/activity-topics");
+        #endregion
+    }
+    #endregion
+}

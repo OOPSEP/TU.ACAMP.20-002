@@ -1,0 +1,1504 @@
+@page "/reports/cfo-report/add"
+@page "/reports/cfo-report/view/{SecureId}"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.DataProtection
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.Domain.Identity
+@using TU.ACAMP.Domain.Models.Organization
+@using TU.ACAMP.Domain.Tools
+@using TU.ACAMP.WebApp.Components.Pages.Reports.Widgets
+@using TU.ACAMP.WebApp.Services.Common
+@using TU.ACAMP.WebApp.Services.Identity
+@using TU.ACAMP.WebApp.Services.Organization
+@using TU.ACAMP.WebApp.Services.Reports
+
+@attribute [Authorize]
+@implements IDisposable
+
+@inject CfoReportService CfoReportService
+@inject CfoReportStorageService ReportStorageService
+@inject CorporateService CorporateService
+@inject CompanyService CompanyService
+@inject FacilityService FacilityService
+@inject SubscriptionService SubscriptionService
+@inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtection
+@inject NotificationService NotificationService
+@inject IJSRuntime JSRuntime
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<AddEditCfoReport3> Logger
+
+<PageTitle>@(_isViewMode ? "View CFO Report" : "New CFO Report") - ACAMP</PageTitle>
+<style>
+    /* [2026-09-15][Antigravity] Disable pointer clicks on step header items so navigation occurs strictly via Next/Back */
+    .cfo-wizard-steps .rz-steps-items {
+        pointer-events: none !important;
+    }
+
+    /* [2026-09-17][Claude] Overlay ของ Progress Bar — ลอยเหนือทุกอย่าง เห็นได้ไม่ว่าจะ scroll อยู่ตรงไหน */
+    .cfo-progress-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        background: rgba(15, 23, 42, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+
+    /* [2026-09-18][Claude] ให้แถบเลื่อนแบบมีทรานซิชัน ไม่กระโดดเป็นช่วง ๆ */
+    .cfo-progress-panel .rz-progressbar-value,
+    .cfo-progress-panel .rz-progressbar .rz-progressbar-value {
+        transition: width 0.28s ease-out;
+    }
+
+    .cfo-progress-panel {
+        width: 100%;
+        max-width: 480px;
+        background: #fff;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        padding: 1.25rem 1.5rem;
+    }
+</style>
+<RadzenStack Orientation="Orientation.Vertical"
+             Style="width: 100%;"
+             Class="rz-p-3 rz-px-4">
+    <!-- Child content -->
+    <!-- ===================== TOP HEADER ===================== -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <div class="d-flex align-items-center mb-1">
+                <RadzenButton Icon="arrow_back" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                              Size="ButtonSize.Small" Click="@NavigateToBack" Class="me-2" Style="border-radius: 6px;"
+                              Title="Back to Report Ledger" />
+                <RadzenText TextStyle="TextStyle.H5" TagName="TagName.H1" Class="m-0 fw-bold" Style="color: var(--rz-text-title-color);">
+                    @(_isViewMode ? "View Verification Report" : "New Verification Report")
+                </RadzenText>
+            </div>
+            <div class="d-flex align-items-center gap-2 ms-5 flex-wrap">
+                <RadzenText TextStyle="TextStyle.Body2" Class="text-muted m-0">
+                    TGO CFO (AR5) verification wizard — sequential step-by-step audit inspection.
+                </RadzenText>
+                <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="TCFO_R_01 v07 (AR5)" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                @if (_isViewMode && _loadedDoc != null)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="Locked Snapshot" IsPill="true" Class="px-2" Style="font-size: 0.72rem; font-weight: 600;" />
+                }
+            </div>
+        </div>
+
+        @if (_isViewMode && _loadedDoc != null)
+        {
+            @* [2026-09-24][Claude] ตัดปุ่ม Create Revision (BOSS สั่ง) — แก้รายงานไม่ได้ ต้องสร้างรายงานใหม่จากหน้า Ledger เท่านั้น *@
+            <div class="d-flex gap-2">
+                <RadzenButton Text="Back to Ledger" Icon="list" ButtonStyle="ButtonStyle.Light" Variant="Variant.Outlined"
+                              Click="@NavigateToBack" Style="border-radius: 6px;" />
+            </div>
+        }
+    </div>
+    @if (_isLoading)
+    {
+        <div class="d-flex flex-column justify-content-center align-items-center w-100" style="min-height: 60vh;">
+            <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" Size="ProgressBarCircularSize.Medium" />
+            <RadzenText Text="Loading report form..." TextStyle="TextStyle.Body2" Class="text-muted mt-3" />
+        </div>
+    }
+    else if (_isViewMode)
+    {
+        <!-- ===================== VIEW MODE (LOCKED SNAPSHOT) ===================== -->
+        @* [2026-09-18][Claude] เดิมบล็อกนี้ว่าง ทำให้ route view/{SecureId} เรนเดอร์หน้าเปล่า *@
+        <CfoSnapshotViewWidget Doc="@_loadedDoc" OnBack="@NavigateToBack" />
+    }
+    else
+    {
+        <!-- ===================== WIZARD (ADD / EDIT MODE) ===================== -->
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" Size="AlertSize.Small" Class="mb-3">
+                @_errorMessage
+            </RadzenAlert>
+        }
+        @* [2026-09-17][Claude] Progress bar ระหว่างคำนวณ/สร้างไฟล์รายงาน (overlay กลางจอ ไม่หายไปตามการ scroll) *@
+        @if (_showProgress)
+        {
+            <div class="cfo-progress-overlay">
+                <div class="cfo-progress-panel">
+                    <div class="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
+                        <RadzenText TextStyle="TextStyle.Subtitle2" Class="fw-bold mb-0">
+                            <RadzenIcon Icon="hourglass_top" Class="me-1" />@_progressLabel
+                        </RadzenText>
+                        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">@_progressPercent%</RadzenText>
+                    </div>
+                    <RadzenProgressBar Value="@_progressPercent" Max="100" Mode="ProgressBarMode.Determinate" ShowValue="false"
+                                       Unit="%" Style="width: 100%;" />
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0 mt-2 d-block">
+                        Please keep this page open until the report is ready.
+                    </RadzenText>
+                </div>
+            </div>
+        }
+        <RadzenCard Class="shadow-sm border rounded-3 bg-white p-4 mb-3">
+            <RadzenSteps @bind-SelectedIndex="@_activeStep" Change="@OnStepChangedAsync" ShowStepsButtons="false" Class="cfo-wizard-steps">
+                <Steps>
+                    <!-- STEP 1 (Index 0): SETUP WIDGET -->
+                    <RadzenStepsItem Text="1. Setup">
+                        <CfoSetupWidget Level="@_level" LevelChanged="@OnLevelChangedAsync"
+                                        TargetId="@_targetId" TargetIdChanged="@OnTargetChanged"
+                                        Title="@_title" TitleChanged="@((string val) => _title = val)"
+                                        CreatedBy="@_createdBy" CreatedByChanged="@((string val) => _createdBy = val)"
+                                        SelectedCalculateYear="@_selectedCalculateYear"
+                                        SelectedCalculateYearChanged="@OnCalculateYearChanged"
+                                        SelectedBaseYear="@_selectedBaseYear"
+                                        SelectedBaseYearChanged="@OnBaseYearChanged"
+                                        ConsolidationApproach="@_consolidationApproach"
+                                        ConsolidationApproachChanged="@((string val) => _consolidationApproach = val)"
+                                        MaterialityThreshold="@_materialityThreshold"
+                                        MaterialityThresholdChanged="@((decimal val) => _materialityThreshold = val)"
+                                        LevelOptions="@_levelOptions"
+                                        TargetOptions="@_targetOptions"
+                                        InScopeChildOptions="@_inScopeChildOptions"
+                                        SelectedInScopeChildIds="@_selectedInScopeChildIds"
+                                        SelectedInScopeChildIdsChanged="@OnInScopeChildIdsChanged"
+                                        CalculateYearOptions="@_calculateYearOptions"
+                                        BaseYearOptions="@_baseYearOptions"
+                                        ConsolidationOptions="@_consolidationOptions" />
+                    </RadzenStepsItem>
+                    <!-- STEP 2 (Index 1): FR-01 DETAILS WIDGET -->
+                    <RadzenStepsItem Text="2. Fr-01 Organization">
+                        <CfoFr01DetailsWidget OrgTitle="@_fr01OrgTitle" OrgTitleChanged="@((string val) => _fr01OrgTitle = val)"
+                                              GhgTeam="@_fr01GhgTeam" GhgTeamChanged="@((string val) => _fr01GhgTeam = val)"
+                                              PreparationDate="@_fr01PreparationDate" PreparationDateChanged="@((DateTime? val) => _fr01PreparationDate = val)"
+                                              OrgImageBase64="@_fr01ImageBase64" OrgImageBase64Changed="@((string? val) => _fr01ImageBase64 = val)"
+                                              CalculatePeriodText="@GetCalculatePeriodText()" CalculatePeriodTextChanged="@((string val) => _fr01CalculatePeriodText = val)"
+                                              CalcProductItems="@_fr01CalcProductItems" CalcProductItemsChanged="@((List<CfoReportService.CfoProductItemDto> val) => _fr01CalcProductItems = val)"
+                                              BasePeriodText="@GetBasePeriodText()" BasePeriodTextChanged="@((string val) => _fr01BasePeriodText = val)"
+                                              BaseProductItems="@_fr01BaseProductItems" BaseProductItemsChanged="@((List<CfoReportService.CfoProductItemDto> val) => _fr01BaseProductItems = val)"
+                                              OrgInfoMultiLine="@_fr01OrgInfoMultiLine" OrgInfoMultiLineChanged="@((string val) => _fr01OrgInfoMultiLine = val)"
+                                              ContactAddress="@_fr01ContactAddress" ContactAddressChanged="@((string val) => _fr01ContactAddress = val)"
+                                              RegistrationDate="@_fr01RegistrationDate" RegistrationDateChanged="@((DateTime? val) => _fr01RegistrationDate = val)"
+                                              Scope1Summary="@_fr01Scope1Summary"
+                                              Scope2Summary="@_fr01Scope2Summary"
+                                              Scope3Summary="@_fr01Scope3Summary" />
+                    </RadzenStepsItem>
+                    <!-- STEP 3 (Index 2): FR-02 ORGANIZATION DIAGRAM WIDGET -->
+                    <RadzenStepsItem Text="3. Fr-02 Diagram">
+                        <CfoFr02ChartWidget DiagramImageBase64="@_fr02ImageBase64" DiagramImageBase64Changed="@((string? val) => _fr02ImageBase64 = val)"
+                                            DiagramDate="@_fr02DiagramDate" DiagramDateChanged="@((DateTime? val) => _fr02DiagramDate = val)" />
+                    </RadzenStepsItem>
+                    <!-- STEP 4 (Index 3): FR-03.1 ORGANIZATIONAL STRUCTURE WIDGET -->
+                    <RadzenStepsItem Text="4. Fr-03.1 Structure">
+                        <CfoFr031StructureWidget StructureImageBase64="@_fr031ImageBase64" StructureImageBase64Changed="@((string? val) => _fr031ImageBase64 = val)"
+                                                 DiagramDate="@_fr031DiagramDate" DiagramDateChanged="@((DateTime? val) => _fr031DiagramDate = val)"
+                                                 CompletionDate="@_fr031CompletionDate" CompletionDateChanged="@((DateTime? val) => _fr031CompletionDate = val)" />
+                    </RadzenStepsItem>
+                    <!-- STEP 5 (Index 4): FR-03.2 SCOPE 3 SIGNIFICANCE WIDGET -->
+                    <RadzenStepsItem Text="5. Fr-03.2 Significance">
+                        <CfoFr032SignificanceWidget Categories="@_fr032Categories" MaterialityThreshold="@_materialityThreshold" OrganizationTitle="@_fr01OrgTitle" />
+                    </RadzenStepsItem>
+                    <!-- STEP 6 (Index 5): FR-04.1 GHG INVENTORY (CALCULATE YEAR) WIDGET -->
+                    <RadzenStepsItem Text="6. Fr-04.1 Inventory">
+                        @* [2026-09-18][Claude] Pre-flight + ช่องกรอก Audit Acknowledgment Reason
+                           ต้องอยู่ในสเต็ปนี้ เพราะ ValidateCurrentStep case 5 บังคับค่านี้เมื่อพบ EF หมดอายุ *@
+                        <CfoPreflightWidget IsPreflighting="@_isPreflighting"
+                                            CalcReport="@_calcReport"
+                                            ExpiredEfList="@_expiredEfList"
+                                            OverflowWarnings="@_calcOverflowWarnings"
+                                            HasEfSourceMismatch="@_hasEfSourceMismatch"
+                                            SelectedCalculateYear="@_selectedCalculateYear"
+                                            SelectedBaseYear="@EffectiveBaseYear"
+                                            AcknowledgmentReason="@_acknowledgmentReason"
+                                            AcknowledgmentReasonChanged="@OnAcknowledgmentReasonChanged"
+                                            OnRerunPreflight="@(EventCallback.Factory.Create(this, RunPreflightAsync))" />
+                        <hr class="my-3" />
+                        <CfoFr041InventoryWidget SelectedCalculateYear="@_selectedCalculateYear"
+                                                 CalcReport="@_calcReport"
+                                                 OnNavigateToTopics="@(EventCallback.Factory.Create(this, NavigateToTopics))" />
+                    </RadzenStepsItem>
+                    <!-- STEP 7 (Index 6): FR-04.2 GHG INVENTORY (BASE YEAR) WIDGET -->
+                    <RadzenStepsItem Text="7. Fr-04.2 Base Year">
+                        <CfoFr042InventoryWidget SelectedBaseYear="@EffectiveBaseYear"
+                                                 IsAutoBaseYear="@(_selectedBaseYear <= 0)"
+                                                 BaseReport="@_baseReport"
+                                                 Scope1Count="@_baseScope1Count"
+                                                 SepCount="@_baseSepCount"
+                                                 Scope2Count="@_baseScope2Count"
+                                                 Scope3Count="@_baseScope3Count" />
+                    </RadzenStepsItem>
+                </Steps>
+            </RadzenSteps>
+        </RadzenCard>
+
+        <!-- ===================== WIZARD NAVIGATION BAR ===================== -->
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Variant="Variant.Flat"
+                          Click="@NavigateToBack" Disabled="@(_isSaving || _isPreflighting)" Style="border-radius: 6px;" />
+
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <RadzenButton Text="Back" Icon="chevron_left" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined"
+                              Click="@GoPreviousStep" Disabled="@(_activeStep == 0 || _isSaving || _isPreflighting)" Style="border-radius: 6px;" />
+
+                @if (_activeStep < LastStepIndex)
+                {
+                    <RadzenButton Text="Next" Icon="chevron_right" ButtonStyle="ButtonStyle.Primary" Variant="Variant.Flat"
+                                  Click="@GoNextStepAsync" Disabled="@(_isSaving || _isPreflighting)" IsBusy="@_isPreflighting" Style="border-radius: 6px; font-weight: 600;" />
+                }
+
+                @* [2026-09-18][Claude] ทุกสเต็ปเติมค่าอัตโนมัติได้หมดแล้ว (Fr-01 defaults, Fr-03.2 auto source + auto score,
+                   ปีฐาน auto fallback) จึงเปิดปุ่มสร้างรายงานตั้งแต่สเต็ปแรก ผู้ใช้ที่รับค่าอัตโนมัติทั้งหมดไม่ต้องเดินครบ 7 สเต็ป
+                   ปุ่มนี้ยังตรวจทุกสเต็ปก่อนสร้าง และรัน Pre-flight ให้เองถ้ายังไม่เคยรัน *@
+                <RadzenButton Text="@(_isSaving ? "Generating Report..." : "Generate Report")"
+                              Icon="@(_isSaving ? "" : "task_alt")"
+                              ButtonStyle="ButtonStyle.Success" Variant="Variant.Flat"
+                              Click="@GenerateSnapshotAsync" Disabled="@(_isSaving || _isPreflighting)" IsBusy="@_isSaving"
+                              Title="สร้างรายงานด้วยค่าอัตโนมัติทั้งหมด โดยไม่ต้องเดินครบทุกสเต็ป"
+                              Style="border-radius: 6px; font-weight: 600;" />
+            </div>
+        </div>
+    }
+</RadzenStack>
+
+@code {
+    #region class field
+    // [2026-09-17][Claude] จำนวนสเต็ปที่เรนเดอร์จริงตอนนี้คือ 6 สเต็ป (Setup, Fr-01, Fr-02, Fr-03.1, Fr-03.2, Fr-04.1)
+    private const int LastStepIndex = 6;
+
+    private const int Fr04Scope1Capacity = 14;   // rows 10..23
+    private const int Fr04SeparateCapacity = 5;  // rows 25..29
+    private const int Fr04Scope2Capacity = 4;    // rows 31..34
+    private const int Fr04Scope3Capacity = 7;    // rows 36..42
+
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _isPreflighting = false;
+    private bool _isViewMode = false;
+    private int _activeStep = 0;
+    private string? _errorMessage;
+    private string? _returnUrl;
+
+    private eTopicLevel _level = eTopicLevel.Corporate;
+    private int _targetId = 0;
+    private int? _selectedSubscriptionId;
+    private HashSet<int> _allowedSubscriptionIds = new();
+
+    // Step 1: Setup fields
+    private string _title = string.Empty;
+    private string _createdBy = "Corporate GHG Team";
+    private int _selectedCalculateYear = 0;
+    private int _selectedBaseYear = 0;
+
+    // [2026-09-17][Claude] ไม่บังคับให้เลือกปีฐาน: ถ้าผู้ใช้ไม่เลือก (0) ให้ใช้ปีคำนวณเป็นปีฐานอัตโนมัติ
+    private int EffectiveBaseYear => _selectedBaseYear > 0 ? _selectedBaseYear : _selectedCalculateYear;
+    private string _consolidationApproach = "Operational Control";
+    private decimal _materialityThreshold = 5.0m;
+    private string _acknowledgmentReason = string.Empty;
+
+    // Step 2: Fr-01 Overrides
+    private string _fr01OrgTitle = string.Empty;
+    private string _fr01GhgTeam = string.Empty;
+    // [2026-09-25][Gemini] กำหนดวันที่ปัจจุบัน (AppTimeZone.LocalNow.Date) เป็นค่า default อัตโนมัติ
+    private DateTime? _fr01PreparationDate = AppTimeZone.LocalNow.Date;
+    private string? _fr01ImageBase64;
+    private string _fr01CalculatePeriodText = string.Empty;
+    // [2026-09-16][Antigravity] Product amount items for Calculate Year and Base Year with ProductName
+    private List<CfoReportService.CfoProductItemDto> _fr01CalcProductItems = new()
+    {
+        new() { Index = 1, ProductName = "Primary Product", Amount = 0m, Unit = "Tonnes" }
+    };
+    private string _fr01BasePeriodText = string.Empty;
+    private List<CfoReportService.CfoProductItemDto> _fr01BaseProductItems = new()
+    {
+        new() { Index = 1, ProductName = "Primary Product", Amount = 0m, Unit = "Tonnes" }
+    };
+    // [2026-09-24][Claude] เดิมตั้งค่าเริ่มต้นเป็นข้อความตัวอย่าง (เช่น "ISO 14064-1:2018 verified", "2 shifts per day") ซึ่งไม่ใช่ข้อมูลจากระบบ
+    // แต่หลุดลง Fr-01 G31-G35 ของรายงานจริง — ตามข้อตกลง ช่องที่ระบบไม่มีข้อมูลให้เว้นว่างตามฟอร์มเดิม
+    private string _fr01OrgInfoMultiLine = string.Empty;
+    private string _fr01ContactAddress = string.Empty;
+    private DateTime? _fr01RegistrationDate = AppTimeZone.LocalNow.Date;
+    private string _fr01CertifierOrg = string.Empty;
+    // [2026-09-17][Claude] สถานะ Progress Bar ของการคำนวณ/ส่งออกรายงาน
+    private bool _showProgress = false;
+    private int _progressPercent = 0;
+    private int _progressTarget = 0;
+    private string _progressLabel = string.Empty;
+    private CancellationTokenSource? _progressCreepCts;
+
+    // [2026-09-17][Claude] Step 3: Fr-02 Organization Diagram Overrides
+    private string? _fr02ImageBase64;
+    private DateTime? _fr02DiagramDate = AppTimeZone.LocalNow.Date;
+
+    // [2026-09-17][Claude] Step 4: Fr-03.1 Organizational Structure Overrides
+    private string? _fr031ImageBase64;
+    private DateTime? _fr031DiagramDate = AppTimeZone.LocalNow.Date;
+    private DateTime? _fr031CompletionDate = AppTimeZone.LocalNow.Date;
+
+    // [2026-09-17][Claude] Step 5: Fr-03.2 Scope 3 Significance (15 หมวดตามเทมเพลต แถว 19..33)
+    private List<CfoReportService.CfoFr032CategoryDto> _fr032Categories = BuildDefaultFr032Categories();
+
+    /// <summary>
+    /// [2026-09-17][Claude] เติมค่า Magnitude (คอลัมน์ D ของ Fr-03.2) จากผลคำนวณจริง
+    /// ใช้เมธอดเดียวกับตอน export เพื่อให้ตัวเลขบนหน้าจอกับในไฟล์ Excel ตรงกัน
+    /// </summary>
+    private void SyncFr032Magnitudes()
+    {
+        var magnitudes = _calcReport != null
+            ? CfoReportService.GetFr032MagnitudePercents(_calcReport)
+            : new Dictionary<int, decimal>();
+
+        // [2026-09-18][Claude] เติม Magnitude แล้วติ๊ก "มีแหล่งปล่อย" อัตโนมัติให้หมวดที่มีการปล่อยจริง
+        // (ตรรกะเดียวกับตอนเขียนไฟล์ Excel — Fr032Rubric.ApplyAutoSource)
+        CfoReportService.Fr032Rubric.ApplyAutoSource(_fr032Categories, magnitudes);
+
+        // [2026-09-18][Claude] เติมคะแนนเริ่มต้นให้เกณฑ์เชิงคุณภาพที่ยังไม่ได้เลือก (ค่าที่ผู้ใช้กรอกเองมาก่อนเสมอ)
+        CfoReportService.Fr032Rubric.ApplyAutoScores(_fr032Categories, _materialityThreshold);
+    }
+
+    // [2026-09-25][Antigravity] ใช้ CreateDefaultCategories จาก Fr032Rubric เป็นจุดเดียว
+    private static List<CfoReportService.CfoFr032CategoryDto> BuildDefaultFr032Categories()
+        => CfoReportService.Fr032Rubric.CreateDefaultCategories();
+
+
+    private string _fr01Scope1Summary = "-";
+    private string _fr01Scope2Summary = "-";
+    private string _fr01Scope3Summary = "-";
+
+    // Pre-flight & Verification Data
+    private CfoReportService.CfoAuditReportDto? _calcReport;
+    private CfoReportService.CfoAuditReportDto? _baseReport;
+    private MultiYearComparisonDto? _comparisonDto;
+    private List<CfoReportService.ActivityAuditLineDto> _expiredEfList = new();
+    private List<CfoPreflightWidget.QuotaOverflow> _calcOverflowWarnings = new();
+    private bool _hasEfSourceMismatch = false;
+
+    // Quota counts
+    private int _calcScope1Count = 0;
+    private int _calcSepCount = 0;
+    private int _calcScope2Count = 0;
+    private int _calcScope3Count = 0;
+
+    private int _baseScope1Count = 0;
+    private int _baseSepCount = 0;
+    private int _baseScope2Count = 0;
+    private int _baseScope3Count = 0;
+
+    private CfoReportDocument? _loadedDoc;
+
+    private List<CfoSetupWidget.OptionItemDto> _levelOptions = new();
+    private List<CfoSetupWidget.OptionItemDto> _targetOptions = new();
+    // [2026-09-16][Antigravity] In-Scope Organizational Boundary (Option 1)
+    private List<CfoSetupWidget.OptionItemDto> _inScopeChildOptions = new();
+    private IEnumerable<int> _selectedInScopeChildIds = Enumerable.Empty<int>();
+
+    private List<int> _calculateYearOptions = new();
+    private List<CfoSetupWidget.OptionItemDto> _baseYearOptions = new();
+    private List<string> _consolidationOptions = new() { "Operational Control", "Financial Control", "Equity Share" };
+    #endregion
+    #region class properties
+    [Parameter] public string? SecureId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? SecureTargetId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "level")]
+    public int LevelValue { get; set; } = 1;
+
+    [SupplyParameterFromQuery(Name = "sid")]
+    public string? SecureSubscriptionId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? SecureTab { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cy")]
+    public string? SecureCalculateYear { get; set; }
+
+    [SupplyParameterFromQuery(Name = "by")]
+    public string? SecureBaseYear { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ret")]
+    public string? SecureRet { get; set; }
+    #endregion
+    #region class method
+    #region Lifecycle
+    protected override async Task OnInitializedAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var isAdmin = user.IsInRole(SystemRoles.Administrator);
+            var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                     ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                     ?? user.Identity?.Name;
+
+            if (!string.IsNullOrEmpty(email))
+            {
+                var userSubs = await SubscriptionService.GetSubscriptionsForUserAsync(email, isAdmin);
+                _allowedSubscriptionIds = userSubs.Select(s => s.Id).ToHashSet();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing user subscriptions for AddEditCfoReport.");
+        }
+
+        BuildStaticOptions();
+        #endregion
+    }
+    protected override async Task OnParametersSetAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            _isLoading = true;
+            ResolveParameters();
+
+            _isViewMode = !string.IsNullOrWhiteSpace(SecureId);
+            if (_isViewMode)
+            {
+                await LoadSnapshotAsync();
+            }
+            else
+            {
+                await LoadTargetOptionsAsync();
+                if (string.IsNullOrWhiteSpace(_title))
+                {
+                    _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+                }
+
+                // [2026-09-16][Antigravity] Auto-run calculation if starting at Step >= 1 so Fr-01 activities are ready
+                if (_activeStep >= 1 && _calcReport == null && _targetId > 0)
+                {
+                    await RunPreflightAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error preparing AddEditCfoReport page.");
+            _errorMessage = "Failed to load report parameters.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        #endregion
+    }
+    private void ResolveParameters()
+    {
+        #region hide [2026-09-15]
+        _level = LevelValue switch
+        {
+            2 => eTopicLevel.Company,
+            3 => eTopicLevel.Facility,
+            _ => eTopicLevel.Corporate
+        };
+
+        var decryptedTarget = DataProtection.UnprotectInt(SecureTargetId);
+        if (decryptedTarget.HasValue && decryptedTarget.Value > 0) _targetId = decryptedTarget.Value;
+
+        var decryptedSid = DataProtection.UnprotectInt(SecureSubscriptionId);
+        if (decryptedSid.HasValue && decryptedSid.Value > 0) _selectedSubscriptionId = decryptedSid.Value;
+
+        var decryptedTab = DataProtection.UnprotectInt(SecureTab);
+        if (decryptedTab.HasValue && decryptedTab.Value >= 0 && decryptedTab.Value <= LastStepIndex)
+        {
+            _activeStep = decryptedTab.Value;
+        }
+
+        var decryptedCy = DataProtection.UnprotectInt(SecureCalculateYear);
+        if (decryptedCy.HasValue && decryptedCy.Value > 0) _selectedCalculateYear = decryptedCy.Value;
+
+        var decryptedBy = DataProtection.UnprotectInt(SecureBaseYear);
+        if (decryptedBy.HasValue && decryptedBy.Value >= 0) _selectedBaseYear = decryptedBy.Value;
+
+        var decryptedRet = DataProtection.Unprotect(SecureRet);
+        if (!string.IsNullOrWhiteSpace(decryptedRet)) _returnUrl = decryptedRet;
+        #endregion
+    }
+    #endregion
+    #region Data Loading & Calculations
+    private void BuildStaticOptions()
+    {
+        #region hide [2026-09-15]
+        _levelOptions = new List<CfoSetupWidget.OptionItemDto>
+        {
+            new CfoSetupWidget.OptionItemDto { Value = 1, Text = "Corporate" },
+            new CfoSetupWidget.OptionItemDto { Value = 2, Text = "Company" },
+            new CfoSetupWidget.OptionItemDto { Value = 3, Text = "Facility" }
+        };
+
+        // [2026-09-16][Antigravity] CalculateYearOptions is populated dynamically from actual activity data
+        // [2026-09-18][Claude] ปีฐานก็ต้องมาจากปีที่มีข้อมูลจริงเช่นกัน (เดิมไล่ปีปฏิทินย้อนหลัง 10 ปี
+        // ทำให้เลือกปีที่ไม่มีข้อมูลได้ แล้วได้ Fr-04.2 ว่างทั้งชีต)
+        _calculateYearOptions = new List<int>();
+        RebuildBaseYearOptions();
+        #endregion
+    }
+
+    private async Task LoadTargetOptionsAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            _targetOptions = new List<CfoSetupWidget.OptionItemDto>();
+
+            if (_level == eTopicLevel.Corporate)
+            {
+                var corporates = await CorporateService.GetBySubscriptionIdAsync(_selectedSubscriptionId);
+                _targetOptions = corporates
+                    .Select(c => new CfoSetupWidget.OptionItemDto { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else if (_level == eTopicLevel.Company)
+            {
+                var companies = await CompanyService.GetByCorporateIdsAsync(null, _selectedSubscriptionId);
+                _targetOptions = companies
+                    .Select(c => new CfoSetupWidget.OptionItemDto { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else
+            {
+                var facilities = await FacilityService.GetByContextAsync(_selectedSubscriptionId);
+                _targetOptions = facilities
+                    .Select(f => new CfoSetupWidget.OptionItemDto { Value = f.Id, Text = string.IsNullOrWhiteSpace(f.Code) ? f.Title : $"{f.Code} — {f.Title}" })
+                    .ToList();
+            }
+
+            if (_targetId == 0 || !_targetOptions.Any(o => o.Value == _targetId))
+            {
+                _targetId = _targetOptions.FirstOrDefault()?.Value ?? 0;
+            }
+
+            // [2026-09-16][Antigravity] Load in-scope subsidiary/facility child entities
+            await LoadInScopeChildOptionsAsync();
+
+            // [2026-09-16][Antigravity] Load calculate year options from actual activity data
+            await LoadCalculateYearOptionsAsync();
+
+            // Sync Fr-01 title default
+            if (string.IsNullOrWhiteSpace(_fr01OrgTitle))
+            {
+                _fr01OrgTitle = GetSelectedTargetTitle();
+            }
+            if (string.IsNullOrWhiteSpace(_fr01GhgTeam))
+            {
+                _fr01GhgTeam = $"{_level} GHG Team";
+            }
+            if (string.IsNullOrWhiteSpace(_fr01CertifierOrg))
+            {
+                _fr01CertifierOrg = _fr01OrgTitle;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading target organization options.");
+            _errorMessage = "Failed to load target organization list.";
+        }
+        #endregion
+    }
+
+    private async Task LoadInScopeChildOptionsAsync()
+    {
+        #region hide [2026-09-16]
+        try
+        {
+            _inScopeChildOptions = new List<CfoSetupWidget.OptionItemDto>();
+
+            if (_level == eTopicLevel.Corporate && _targetId > 0)
+            {
+                var companies = await CompanyService.GetByCorporateIdAsync(_targetId, _selectedSubscriptionId);
+                _inScopeChildOptions = companies
+                    .Select(c => new CfoSetupWidget.OptionItemDto { Value = c.Id, Text = string.IsNullOrWhiteSpace(c.Code) ? c.Title : $"{c.Code} — {c.Title}" })
+                    .ToList();
+            }
+            else if (_level == eTopicLevel.Company && _targetId > 0)
+            {
+                var facilities = await FacilityService.GetByContextAsync(_selectedSubscriptionId, companyId: _targetId);
+                _inScopeChildOptions = facilities
+                    .Select(f => new CfoSetupWidget.OptionItemDto { Value = f.Id, Text = string.IsNullOrWhiteSpace(f.Code) ? f.Title : $"{f.Code} — {f.Title}" })
+                    .ToList();
+            }
+
+            // Default to all child entities included in scope
+            _selectedInScopeChildIds = _inScopeChildOptions.Select(o => o.Value).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading in-scope child organization options.");
+        }
+        #endregion
+    }
+
+    private async Task OnInScopeChildIdsChanged(IEnumerable<int> selectedIds)
+    {
+        #region hide [2026-09-16]
+        _selectedInScopeChildIds = selectedIds?.ToList() ?? new List<int>();
+        ResetDownstreamData();
+        // [2026-09-16][Antigravity] Reload calculate year options for updated in-scope entities
+        await LoadCalculateYearOptionsAsync();
+        #endregion
+    }
+
+    private async Task LoadCalculateYearOptionsAsync()
+    {
+        #region hide [2026-09-16]
+        try
+        {
+            if (_targetId > 0)
+            {
+                var inScopeList = _selectedInScopeChildIds?.ToList();
+                _calculateYearOptions = await CfoReportService.GetAvailableCalculateYearsAsync(
+                    _level,
+                    _targetId,
+                    _allowedSubscriptionIds,
+                    inScopeList);
+            }
+            else
+            {
+                _calculateYearOptions = new List<int>();
+            }
+
+            if (_calculateYearOptions.Any())
+            {
+                if (!_calculateYearOptions.Contains(_selectedCalculateYear))
+                {
+                    _selectedCalculateYear = _calculateYearOptions.First();
+                }
+            }
+            else
+            {
+                _selectedCalculateYear = 0;
+            }
+
+            RebuildBaseYearOptions();
+
+            if (_title.StartsWith("GHG Emissions Report Year", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(_title))
+            {
+                _title = _selectedCalculateYear > 0
+                    ? $"GHG Emissions Report Year {_selectedCalculateYear}"
+                    : "GHG Emissions Report";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading calculate year options from activity data.");
+            _calculateYearOptions = new List<int>();
+        }
+        #endregion
+    }
+
+    private async Task LoadSnapshotAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var reportKey = DataProtection.Unprotect(SecureId);
+            if (string.IsNullOrWhiteSpace(reportKey)) return;
+
+            _loadedDoc = await ReportStorageService.GetReportAsync(reportKey, _level, _targetId);
+            if (_loadedDoc != null)
+            {
+                _title = _loadedDoc.Title;
+                _createdBy = _loadedDoc.CreatedBy;
+                _selectedCalculateYear = _loadedDoc.CalculateYear;
+                _selectedBaseYear = _loadedDoc.BaseYear;
+                _calcReport = _loadedDoc.CalculateYearReport;
+                _baseReport = _loadedDoc.BaseYearReport;
+                _comparisonDto = _loadedDoc.Comparison;
+
+                _fr01OrgTitle = _loadedDoc.OrganizationTitle;
+                _fr01GhgTeam = _loadedDoc.GhgTeamName;
+                _fr01CertifierOrg = _loadedDoc.CertifierOrgTitle;
+                _fr01PreparationDate = _loadedDoc.PreparationDate;
+                _fr01ImageBase64 = _loadedDoc.OrganizationImageBase64;
+                _fr01CalculatePeriodText = _loadedDoc.CalculatePeriodText ?? string.Empty;
+                // [2026-09-16][Antigravity] Fallback product items with default ProductName when loaded snapshot lacks items list
+                _fr01CalcProductItems = _loadedDoc.CalcProductItems ?? (_loadedDoc.CalculateProductionAmount.HasValue
+                    ? new List<CfoReportService.CfoProductItemDto> { new() { Index = 1, ProductName = "Primary Product", Amount = _loadedDoc.CalculateProductionAmount.Value, Unit = _loadedDoc.CalculateProductionUnit ?? "Tonnes" } }
+                    : new List<CfoReportService.CfoProductItemDto> { new() { Index = 1, ProductName = "Primary Product", Amount = 0m, Unit = "Tonnes" } });
+                _fr01BasePeriodText = _loadedDoc.BasePeriodText ?? string.Empty;
+                _fr01BaseProductItems = _loadedDoc.BaseProductItems ?? (_loadedDoc.BaseProductionAmount.HasValue
+                    ? new List<CfoReportService.CfoProductItemDto> { new() { Index = 1, ProductName = "Primary Product", Amount = _loadedDoc.BaseProductionAmount.Value, Unit = _loadedDoc.BaseProductionUnit ?? "Tonnes" } }
+                    : new List<CfoReportService.CfoProductItemDto> { new() { Index = 1, ProductName = "Primary Product", Amount = 0m, Unit = "Tonnes" } });
+                _fr01OrgInfoMultiLine = !string.IsNullOrWhiteSpace(_loadedDoc.OrgInfoMultiLine)
+                    ? _loadedDoc.OrgInfoMultiLine
+                    : string.Join("\n", new[] { _loadedDoc.OrgInfo1, _loadedDoc.OrgInfo2, _loadedDoc.OrgInfo3, _loadedDoc.OrgInfo4, _loadedDoc.OrgInfo5 }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                _fr01ContactAddress = _loadedDoc.ContactAddress ?? string.Empty;
+                _fr01RegistrationDate = _loadedDoc.RegistrationDate;
+
+                PopulateQuotaCounts();
+                RecalculateFr01Summaries();
+                CheckEfIntegrity();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading report snapshot for view mode.");
+            _errorMessage = "Failed to load locked report snapshot.";
+        }
+        #endregion
+    }
+
+    #region Progress Reporting
+    /// <summary>
+    /// [2026-09-18][Claude] ค่าที่ส่งเข้ามาคือ "เป้าหมาย" ไม่ใช่ค่าที่แสดงทันที
+    /// ตัวเลขที่แสดงจะไต่เข้าหาเป้าหมายด้วย StartProgressCreep() ทำให้แถบเลื่อนต่อเนื่อง
+    /// ไม่กระโดดทีละก้อนแล้วค้างนิ่งระหว่างงานหนัก
+    /// </summary>
+    private void SetProgressTarget(int percent, string label)
+    {
+        _progressTarget = Math.Clamp(percent, 0, 100);
+        if (_progressPercent > _progressTarget) _progressPercent = _progressTarget;
+        if (!string.IsNullOrWhiteSpace(label)) _progressLabel = label;
+        _showProgress = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetProgressAsync(int percent, string label)
+    {
+        SetProgressTarget(percent, label);
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(60);
+    }
+
+    /// <summary>
+    /// ไต่ตัวเลขเข้าหา _progressTarget ทุก 120 ms แบบ ease-out (ก้าวละ 1/4 ของระยะที่เหลือ)
+    /// หยุดที่ target-1 เสมอ เพื่อให้ตัวเลขเต็มจริงเฉพาะตอนขั้นตอนนั้นเสร็จ
+    /// </summary>
+    private void StartProgressCreep()
+    {
+        StopProgressCreep();
+        var cts = new CancellationTokenSource();
+        _progressCreepCts = cts;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    await Task.Delay(120, cts.Token);
+                    if (!_showProgress) continue;
+
+                    var ceiling = _progressTarget >= 100 ? 100 : _progressTarget - 1;
+                    if (_progressPercent >= ceiling) continue;
+
+                    var step = Math.Max(1, (ceiling - _progressPercent) / 4);
+                    _progressPercent = Math.Min(ceiling, _progressPercent + step);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (OperationCanceledException) { /* ปิดตามปกติ */ }
+            catch (ObjectDisposedException) { /* circuit ปิดไปแล้ว */ }
+        }, cts.Token);
+    }
+
+    private void StopProgressCreep()
+    {
+        var cts = _progressCreepCts;
+        _progressCreepCts = null;
+        if (cts == null) return;
+        try { cts.Cancel(); } catch { }
+        cts.Dispose();
+    }
+
+    private async Task ClearProgressAsync()
+    {
+        StopProgressCreep();
+        _showProgress = false;
+        _progressPercent = 0;
+        _progressTarget = 0;
+        _progressLabel = string.Empty;
+        await InvokeAsync(StateHasChanged);
+    }
+    #endregion
+
+    private async Task RunPreflightAsync()
+    {
+        #region hide [2026-09-15]
+        if (_targetId <= 0) return;
+
+        try
+        {
+            _isPreflighting = true;
+            _errorMessage = null;
+
+            var inScopeIds = _selectedInScopeChildIds?.ToList();
+
+            StartProgressCreep();
+            await SetProgressAsync(15, $"Calculating emissions for year {_selectedCalculateYear}...");
+            _calcReport = await CfoReportService.GenerateReportAsync(
+                _level, _targetId, _selectedCalculateYear, _allowedSubscriptionIds, _materialityThreshold, _acknowledgmentReason, inScopeIds);
+
+            // [2026-09-17][Claude] ปีฐานเป็นตัวเลือก — ถ้าไม่ได้เลือก จะใช้ปีคำนวณเป็นปีฐาน (EffectiveBaseYear)
+            if (EffectiveBaseYear > 0)
+            {
+                if (_selectedBaseYear > 0) await SetProgressAsync(45, $"Calculating base year {EffectiveBaseYear}...");
+                _baseReport = _selectedBaseYear > 0
+                    ? await CfoReportService.GenerateReportAsync(
+                        _level, _targetId, EffectiveBaseYear, _allowedSubscriptionIds, _materialityThreshold, null, inScopeIds)
+                    : _calcReport;
+            }
+            else
+            {
+                _baseReport = null;
+            }
+
+            await SetProgressAsync(75, "Verifying emission factors and data quality...");
+
+            SyncFr032Magnitudes();
+
+            if (string.IsNullOrWhiteSpace(_fr01OrgTitle)) _fr01OrgTitle = _calcReport.OrganizationTitle;
+            if (string.IsNullOrWhiteSpace(_fr01GhgTeam)) _fr01GhgTeam = $"{_level} GHG Team";
+            if (string.IsNullOrWhiteSpace(_fr01CertifierOrg)) _fr01CertifierOrg = _fr01OrgTitle;
+            if (string.IsNullOrWhiteSpace(_fr01ContactAddress)) _fr01ContactAddress = _fr01OrgTitle;
+
+            PopulateQuotaCounts();
+            RecalculateFr01Summaries();
+            BuildMultiYearComparison();
+            CheckEfIntegrity();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error running CFO report pre-flight.");
+            _errorMessage = $"Pre-flight failed: {ex.Message}";
+        }
+        finally
+        {
+            _isPreflighting = false;
+            await ClearProgressAsync();
+        }
+        #endregion
+    }
+
+    private void PopulateQuotaCounts()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport != null)
+        {
+            _calcScope1Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope1);
+            _calcSepCount = _calcReport.AuditLines.Count(l => (int)l.ScopeNo == 4);
+            _calcScope2Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope2);
+            _calcScope3Count = _calcReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope3);
+
+            // [2026-09-24][Claude] ส่งข้อมูลแบบมีโครงสร้าง (เลขแถวจริงของชีต Fr-04.1) ให้ CfoPreflightWidget จัดข้อความเอง
+            _calcOverflowWarnings = new List<CfoPreflightWidget.QuotaOverflow>();
+            void Check(string label, int count, int startRow, int cap)
+            {
+                if (count > cap)
+                {
+                    _calcOverflowWarnings.Add(new CfoPreflightWidget.QuotaOverflow(label, count, startRow, startRow + cap - 1));
+                }
+            }
+            Check("Scope 1", _calcScope1Count, 10, Fr04Scope1Capacity);
+            Check("Separate (Biogenic)", _calcSepCount, 25, Fr04SeparateCapacity);
+            Check("Scope 2", _calcScope2Count, 31, Fr04Scope2Capacity);
+            Check("Scope 3", _calcScope3Count, 36, Fr04Scope3Capacity);
+        }
+
+        if (_baseReport != null)
+        {
+            _baseScope1Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope1);
+            _baseSepCount = _baseReport.AuditLines.Count(l => (int)l.ScopeNo == 4);
+            _baseScope2Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope2);
+            _baseScope3Count = _baseReport.AuditLines.Count(l => l.ScopeNo == eTgoScopeNo.Scope3);
+        }
+        #endregion
+    }
+
+    private void RecalculateFr01Summaries()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport == null) return;
+
+        // [2026-09-16][Antigravity] Format Scope summaries with TGO Category (Option A) sorted ascending by code
+        string BuildSummary(eTgoScopeNo scope)
+        {
+            var grp = _calcReport.Scopes.FirstOrDefault(s => s.ScopeNo == scope);
+            if (grp == null || !grp.ActivityGroups.Any()) return "-";
+            var titles = grp.ActivityGroups
+                .OrderBy(ag => CfoReportService.GetSortableCodeKey(ag.Code))
+                .Select(ag => CfoReportService.FormatTgoCategory(ag.Code, ag.Title, scope))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+            return titles.Any() ? string.Join(Environment.NewLine, titles) : "-";
+        }
+
+        _fr01Scope1Summary = BuildSummary(eTgoScopeNo.Scope1);
+        _fr01Scope2Summary = BuildSummary(eTgoScopeNo.Scope2);
+        _fr01Scope3Summary = BuildSummary(eTgoScopeNo.Scope3);
+        #endregion
+    }
+
+    private void BuildMultiYearComparison()
+    {
+        #region hide [2026-09-15]
+        // [2026-09-17][Claude] เทียบปีต่อปีเฉพาะเมื่อผู้ใช้เลือกปีฐานจริง ๆ (ปีฐานอัตโนมัติ = ปีคำนวณ ผลต่างเป็น 0 เสมอ)
+        if (_selectedBaseYear > 0 && _calcReport != null && _baseReport != null && _baseReport.TotalGrossEmissions_tCO2e > 0)
+        {
+            var baseGross = _baseReport.TotalGrossEmissions_tCO2e;
+            var calcGross = _calcReport.TotalGrossEmissions_tCO2e;
+            var grossDelta = calcGross - baseGross;
+
+            var baseS1 = _baseReport.TotalScope1_tCO2e;
+            var calcS1 = _calcReport.TotalScope1_tCO2e;
+            var s1Delta = calcS1 - baseS1;
+
+            var baseS2 = _baseReport.TotalScope2_tCO2e;
+            var calcS2 = _calcReport.TotalScope2_tCO2e;
+            var s2Delta = calcS2 - baseS2;
+
+            var baseS3 = _baseReport.TotalScope3_tCO2e;
+            var calcS3 = _calcReport.TotalScope3_tCO2e;
+            var s3Delta = calcS3 - baseS3;
+
+            var baseSep = _baseReport.TotalSeparate_tCO2e;
+            var calcSep = _calcReport.TotalSeparate_tCO2e;
+            var sepDelta = calcSep - baseSep;
+
+            _comparisonDto = new MultiYearComparisonDto
+            {
+                Scope1Delta_tCO2e = s1Delta,
+                Scope1PercentChange = baseS1 > 0 ? (s1Delta * 100m / baseS1) : 0m,
+                Scope2Delta_tCO2e = s2Delta,
+                Scope2PercentChange = baseS2 > 0 ? (s2Delta * 100m / baseS2) : 0m,
+                Scope3Delta_tCO2e = s3Delta,
+                Scope3PercentChange = baseS3 > 0 ? (s3Delta * 100m / baseS3) : 0m,
+                GrossDelta_tCO2e = grossDelta,
+                GrossPercentChange = baseGross > 0 ? (grossDelta * 100m / baseGross) : 0m,
+                SeparateDelta_tCO2e = sepDelta,
+                SeparatePercentChange = baseSep > 0 ? (sepDelta * 100m / baseSep) : 0m
+            };
+        }
+        else
+        {
+            _comparisonDto = null;
+        }
+        #endregion
+    }
+
+    private void CheckEfIntegrity()
+    {
+        #region hide [2026-09-15]
+        if (_calcReport == null) return;
+
+        // [2026-09-15][Antigravity] Evaluate EF expiration using current active status (EfValidityStatus == "Expired")
+        _expiredEfList = _calcReport.AuditLines
+            .Where(l => l.EfValidityStatus == "Expired")
+            .ToList();
+
+        // Check if base year and calculate year share the same EF sources
+        if (_baseReport != null && _baseReport.AuditLines.Any())
+        {
+            var calcSources = _calcReport.AuditLines.Select(l => l.SourceId).Where(id => id > 0).ToHashSet();
+            var baseSources = _baseReport.AuditLines.Select(l => l.SourceId).Where(id => id > 0).ToHashSet();
+            _hasEfSourceMismatch = !calcSources.SetEquals(baseSources);
+        }
+        else
+        {
+            _hasEfSourceMismatch = false;
+        }
+        #endregion
+    }
+
+    private void ResetDownstreamData()
+    {
+        #region hide [2026-09-15]
+        _calcReport = null;
+        _baseReport = null;
+        _comparisonDto = null;
+        _expiredEfList = new();
+        _calcOverflowWarnings = new();
+        _hasEfSourceMismatch = false;
+        #endregion
+    }
+    #endregion
+    #region Wizard Navigation & Step Validation
+    private async Task GoNextStepAsync()
+    {
+        #region hide [2026-09-15]
+        if (!ValidateCurrentStep()) return;
+
+        _errorMessage = null;
+        _activeStep = Math.Min(_activeStep + 1, LastStepIndex);
+
+        // [2026-09-16][Antigravity] Auto-run calculation when entering Step 2 (Fr-01 Organization, index 1) or higher
+        if (_activeStep >= 1 && _calcReport == null && _targetId > 0)
+        {
+            await RunPreflightAsync();
+        }
+
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private async Task OnStepChangedAsync(int newIndex)
+    {
+        #region hide [2026-09-16]
+        _activeStep = newIndex;
+        if (_activeStep >= 1 && _calcReport == null && _targetId > 0)
+        {
+            await RunPreflightAsync();
+        }
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private async Task GoPreviousStep()
+    {
+        #region hide [2026-09-15]
+        _errorMessage = null;
+        _activeStep = Math.Max(_activeStep - 1, 0);
+        await SyncStepToUrlAsync();
+        #endregion
+    }
+
+    private bool ValidateCurrentStep()
+    {
+        #region hide [2026-09-15]
+        switch (_activeStep)
+        {
+            case 0: // Step 1: Setup
+                if (_targetId <= 0)
+                {
+                    _errorMessage = "Please select a target organization.";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_title))
+                {
+                    _errorMessage = "Please specify a report title.";
+                    return false;
+                }
+                if (!_calculateYearOptions.Any())
+                {
+                    _errorMessage = "No activity data found for the selected organization. Please log activity events first.";
+                    return false;
+                }
+                if (_selectedCalculateYear <= 0)
+                {
+                    _errorMessage = "Please select a calculate / reporting year.";
+                    return false;
+                }
+                if (_selectedBaseYear > 0 && _selectedBaseYear >= _selectedCalculateYear)
+                {
+                    _errorMessage = "The base year must be earlier than the calculate year.";
+                    return false;
+                }
+                return true;
+
+            case 1: // Step 2: Fr-01 Organization Details
+                if (string.IsNullOrWhiteSpace(_fr01OrgTitle))
+                {
+                    _errorMessage = "Please specify the organization name (Cell B6).";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_fr01GhgTeam))
+                {
+                    _errorMessage = "Please specify the GHG working team name (Cell G4).";
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(_fr01CertifierOrg))
+                {
+                    _errorMessage = "Please specify the organization for certification (Cell I32).";
+                    return false;
+                }
+                return true;
+
+            case 2: // Step 3: Fr-02 Organization Diagram (รูปเป็นตัวเลือก ไม่บังคับ)
+                return true;
+
+            case 3: // Step 4: Fr-03.1 Organizational Structure (รูปเป็นตัวเลือก ไม่บังคับ)
+                return true;
+
+            case 4: // Step 5: Fr-03.2 Scope 3 Significance (เกณฑ์เชิงคุณภาพ ไม่บังคับกรอก)
+                return true;
+
+            case 5: // Step 6: Fr-04.1 Inventory (ต้องมีผลคำนวณของปีคำนวณแล้ว)
+                if (_calcReport == null)
+                {
+                    _errorMessage = "Please run the data pre-flight analysis before proceeding.";
+                    return false;
+                }
+                if (_expiredEfList.Any() && string.IsNullOrWhiteSpace(_acknowledgmentReason))
+                {
+                    _errorMessage = "Please provide an audit acknowledgment reason for the expired emission factors.";
+                    return false;
+                }
+                return true;
+
+            case 6: // Step 7: Fr-04.2 Base Year Inventory (ไม่บังคับเลือกปีฐาน)
+                return true;
+
+            default:
+                return true;
+        }
+        #endregion
+    }
+
+    private async Task SyncStepToUrlAsync()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["tab"] = DataProtection.Protect(_activeStep)
+            };
+            var url = NavigationManager.GetUriWithQueryParameters(queryParams);
+            await JSRuntime.InvokeVoidAsync("history.replaceState", null, "", url);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to sync wizard step to URL address bar.");
+        }
+        #endregion
+    }
+
+    private async Task OnLevelChangedAsync(eTopicLevel newLevel)
+    {
+        #region hide [2026-09-16]
+        _level = newLevel;
+        _targetId = 0;
+        _fr01OrgTitle = string.Empty;
+        _fr01CertifierOrg = string.Empty;
+        _fr01GhgTeam = $"{_level} GHG Team";
+        ResetDownstreamData();
+        await LoadTargetOptionsAsync();
+        #endregion
+    }
+
+    private async Task OnTargetChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _targetId = value;
+        _fr01OrgTitle = GetSelectedTargetTitle();
+        _fr01CertifierOrg = _fr01OrgTitle;
+        ResetDownstreamData();
+        await LoadInScopeChildOptionsAsync();
+        // [2026-09-16][Antigravity] Reload calculate year options for newly selected target
+        await LoadCalculateYearOptionsAsync();
+        #endregion
+    }
+
+    /// <summary>
+    /// [2026-09-18][Claude] ตัวเลือกปีฐาน = ปีที่มีข้อมูลกิจกรรมจริงเท่านั้น และต้องน้อยกว่าปีคำนวณ
+    /// (ใช้รายการเดียวกับ _calculateYearOptions ที่ดึงจาก GetAvailableCalculateYearsAsync)
+    /// ถ้าปีฐานที่เลือกไว้เดิมหลุดจากรายการ จะถูกรีเซ็ตเป็น 0 = ใช้ปีคำนวณเป็นปีฐาน
+    /// </summary>
+    private void RebuildBaseYearOptions()
+    {
+        var options = new List<CfoSetupWidget.OptionItemDto>
+        {
+            new CfoSetupWidget.OptionItemDto { Value = 0, Text = "(Auto — same as calculate year)" }
+        };
+
+        var selectableYears = _calculateYearOptions
+            .Where(y => _selectedCalculateYear <= 0 || y < _selectedCalculateYear)
+            .OrderByDescending(y => y)
+            .ToList();
+
+        options.AddRange(selectableYears.Select(y => new CfoSetupWidget.OptionItemDto
+        {
+            Value = y,
+            Text = $"Base Year {y}"
+        }));
+
+        _baseYearOptions = options;
+
+        if (_selectedBaseYear > 0 && !selectableYears.Contains(_selectedBaseYear))
+        {
+            _selectedBaseYear = 0;
+        }
+    }
+
+    private void OnCalculateYearChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _selectedCalculateYear = value;
+        if (_title.StartsWith("GHG Emissions Report Year", StringComparison.OrdinalIgnoreCase))
+        {
+            _title = $"GHG Emissions Report Year {_selectedCalculateYear}";
+        }
+        // [2026-09-18][Claude] ปีฐานต้องน้อยกว่าปีคำนวณ จึงต้องสร้างตัวเลือกใหม่ทุกครั้งที่เปลี่ยนปีคำนวณ
+        RebuildBaseYearOptions();
+        ResetDownstreamData();
+        #endregion
+    }
+
+    // [2026-09-18][Claude] ผูกค่าเหตุผลรับทราบ EF หมดอายุจาก CfoPreflightWidget
+    private void OnAcknowledgmentReasonChanged(string value)
+    {
+        _acknowledgmentReason = value ?? string.Empty;
+        _errorMessage = null;
+    }
+
+    private void OnBaseYearChanged(int value)
+    {
+        #region hide [2026-09-15]
+        _selectedBaseYear = value;
+        ResetDownstreamData();
+        #endregion
+    }
+    #endregion
+
+    #region Snapshot Generation
+    // [2026-09-18][Claude] เดิม (16 ก.ย.) เมธอดนี้ลัดขั้นตอน: เรียก ExportToExcel แล้วดาวน์โหลดไฟล์ตรง ๆ
+    // ไม่ผ่าน storage pipeline จึงไม่มี report item ในทะเบียน และไม่มี snapshot.json
+    // ตอนนี้กลับมาใช้ CreateReportSnapshotAsync เหมือนเดิม: สร้างรายการรายงาน + เก็บไฟล์ แล้วกลับไปหน้า Ledger
+    private async Task GenerateSnapshotAsync()
+    {
+        if (_targetId <= 0)
+        {
+            _errorMessage = "Please select a target organization before generating the report.";
+            _activeStep = 0;
+            StateHasChanged();
+            await SyncStepToUrlAsync();
+            return;
+        }
+        if (_selectedCalculateYear <= 0)
+        {
+            _errorMessage = "Please select a calculate / reporting year before generating the report.";
+            _activeStep = 0;
+            StateHasChanged();
+            await SyncStepToUrlAsync();
+            return;
+        }
+        if (_selectedBaseYear > 0 && _selectedBaseYear >= _selectedCalculateYear)
+        {
+            _errorMessage = "The base year must be earlier than the calculate year.";
+            _activeStep = 0;
+            StateHasChanged();
+            await SyncStepToUrlAsync();
+            return;
+        }
+
+        // [2026-09-18][Claude] กดจากสเต็ปแรกได้ — ถ้ายังไม่เคยรัน Pre-flight ให้รันให้ก่อน
+        // เพื่อให้ได้ผลเหมือนเดินครบทุกสเต็ป (เติมค่า Fr-01, Magnitude/คะแนน Fr-03.2, ตรวจ EF หมดอายุ)
+        if (_calcReport == null)
+        {
+            await RunPreflightAsync();
+            if (!string.IsNullOrWhiteSpace(_errorMessage)) return;
+        }
+
+        // ตรวจทุกสเต็ปอีกครั้งก่อนปิดงาน (พฤติกรรมเดิมของ AddEditCfoReport.razor)
+        var originalStep = _activeStep;
+        for (int i = 0; i <= LastStepIndex; i++)
+        {
+            _activeStep = i;
+            if (!ValidateCurrentStep())
+            {
+                StateHasChanged();
+                await SyncStepToUrlAsync();
+                return;
+            }
+        }
+        _activeStep = originalStep;
+
+        try
+        {
+            _isSaving = true;
+            _errorMessage = null;
+
+            // [2026-09-18][Claude] เปิดตัวไต่ตัวเลขก่อน เพื่อให้แถบขยับต่อเนื่องระหว่างงานหนักแต่ละขั้น
+            StartProgressCreep();
+            await SetProgressAsync(5, "Preparing report settings...");
+
+            var targetTitle = GetSelectedTargetTitle();
+            var finalOrgTitle = string.IsNullOrWhiteSpace(_fr01OrgTitle) ? targetTitle : _fr01OrgTitle;
+            var overrides = new CfoReportService.CfoReportOverridesDto
+            {
+                OrganizationTitle = finalOrgTitle,
+                GhgTeamName = string.IsNullOrWhiteSpace(_fr01GhgTeam) ? $"{_level} GHG Team" : _fr01GhgTeam,
+                CertifierOrgTitle = string.IsNullOrWhiteSpace(_fr01CertifierOrg) ? finalOrgTitle : _fr01CertifierOrg,
+                PreparationDate = _fr01PreparationDate ?? AppTimeZone.LocalNow.Date,
+                OrganizationImageBase64 = _fr01ImageBase64,
+                CalculatePeriodText = GetCalculatePeriodText(),
+                CalculateProductionAmount = _fr01CalcProductItems.Sum(x => x.Amount),
+                CalculateProductionUnit = _fr01CalcProductItems.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Unit))?.Unit ?? "Tonnes",
+                CalcProductItems = _fr01CalcProductItems,
+                BasePeriodText = GetBasePeriodText(),
+                BaseProductionAmount = _fr01BaseProductItems.Sum(x => x.Amount),
+                BaseProductionUnit = _fr01BaseProductItems.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Unit))?.Unit ?? "Tonnes",
+                BaseProductItems = _fr01BaseProductItems,
+                OrgInfoMultiLine = _fr01OrgInfoMultiLine,
+                ContactAddress = string.IsNullOrWhiteSpace(_fr01ContactAddress) ? finalOrgTitle : _fr01ContactAddress,
+                RegistrationDate = _fr01RegistrationDate ?? AppTimeZone.LocalNow.Date,
+                Fr02ImageBase64 = _fr02ImageBase64,
+                Fr02DiagramDate = _fr02DiagramDate ?? _fr01PreparationDate ?? AppTimeZone.LocalNow.Date,
+                Fr031ImageBase64 = _fr031ImageBase64,
+                Fr031DiagramDate = _fr031DiagramDate ?? _fr01PreparationDate ?? AppTimeZone.LocalNow.Date,
+                Fr031CompletionDate = _fr031CompletionDate ?? AppTimeZone.LocalNow.Date,
+                Fr032Categories = _fr032Categories,
+                FocusSheetName = "Fr-01",
+                OnlyFr01Sheet = false
+            };
+
+            var inScopeIds = _selectedInScopeChildIds?.ToList();
+            var inScopeTitles = inScopeIds == null
+                ? null
+                : _inScopeChildOptions.Where(o => inScopeIds.Contains(o.Value)).Select(o => o.Text).ToList();
+
+            // ใช้ผลคำนวณที่ pre-flight ทำไว้แล้ว ถ้ายังไม่มี ปล่อยให้ storage service คำนวณเองพร้อมรายงานความคืบหน้า
+            // ไม่เลือกปีฐาน = ใช้ผลปีคำนวณเป็นปีฐาน (auto fallback เดิม)
+            if (_baseReport == null && _selectedBaseYear <= 0) _baseReport = _calcReport;
+
+            await SetProgressAsync(8, "Verifying report data...");
+
+            var reportTitle = string.IsNullOrWhiteSpace(_title)
+                ? $"GHG Emissions Report Year {_selectedCalculateYear}"
+                : _title;
+
+            var doc = await ReportStorageService.CreateReportSnapshotAsync(
+                _level,
+                _targetId,
+                reportTitle,
+                EffectiveBaseYear,
+                _selectedCalculateYear,
+                _createdBy,
+                _allowedSubscriptionIds,
+                _acknowledgmentReason,
+                overrides,
+                inScopeIds,
+                inScopeTitles,
+                _materialityThreshold,
+                _calcReport,
+                _baseReport,
+                // แต่ละขั้นในไปป์ไลน์ (คำนวณ → สร้าง workbook → เขียนไฟล์ → อัปเดตทะเบียน) รายงานกลับมาที่แถบนี้
+                new Progress<(int Percent, string Label)>(p => SetProgressTarget(p.Percent, p.Label)));
+
+            await SetProgressAsync(100, "Report generated.");
+            await Task.Delay(500);
+
+            NotificationService.Notify(NotificationSeverity.Success, "Snapshot Verified & Locked",
+                $"Successfully generated and locked audit report snapshot '{doc.Title}'.");
+
+
+            NavigateToBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating CFO report snapshot.");
+            _errorMessage = $"Failed to create report snapshot: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+            await ClearProgressAsync();
+        }
+    }
+    #endregion
+
+    #region Helper Formatting
+    private string GetSelectedTargetTitle()
+    {
+        return _targetOptions.FirstOrDefault(o => o.Value == _targetId)?.Text ?? "-";
+    }
+
+    private string GetCalculatePeriodText()
+    {
+        if (!string.IsNullOrWhiteSpace(_fr01CalculatePeriodText)) return _fr01CalculatePeriodText;
+        return _selectedCalculateYear > 0 ? $"1 Jan {_selectedCalculateYear} - 31 Dec {_selectedCalculateYear}" : "Historical";
+    }
+
+    private string GetBasePeriodText()
+    {
+        if (!string.IsNullOrWhiteSpace(_fr01BasePeriodText)) return _fr01BasePeriodText;
+        return EffectiveBaseYear > 0 ? $"1 Jan {EffectiveBaseYear} - 31 Dec {EffectiveBaseYear}" : "-";
+    }
+
+    private string GetQuotaCardClass(int count, int quota)
+    {
+        bool isOverflow = count > quota;
+        return isOverflow
+            ? "shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-warning bg-warning-subtle"
+            : "shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-success bg-white";
+    }
+
+    private string GetScopeBadgeClass(eTgoScopeNo scope)
+    {
+        return scope switch
+        {
+            eTgoScopeNo.Scope1 => "bg-danger-subtle text-danger border",
+            eTgoScopeNo.Scope2 => "bg-primary-subtle text-primary border",
+            eTgoScopeNo.Scope3 => "bg-info-subtle text-info border",
+            _ => "bg-secondary-subtle text-secondary border"
+        };
+    }
+
+    private bool IsLineOverflow(CfoReportService.ActivityAuditLineDto item, List<CfoReportService.ActivityAuditLineDto> allLines)
+    {
+        var scopeLines = allLines.Where(l => l.ScopeNo == item.ScopeNo).ToList();
+        int capacity = item.ScopeNo switch
+        {
+            eTgoScopeNo.Scope1 => Fr04Scope1Capacity,
+            eTgoScopeNo.Scope2 => Fr04Scope2Capacity,
+            eTgoScopeNo.Scope3 => Fr04Scope3Capacity,
+            _ => Fr04SeparateCapacity
+        };
+        int indexInScope = scopeLines.IndexOf(item);
+        return scopeLines.Count > capacity && indexInScope >= (capacity - 1);
+    }
+
+    private string GetDeltaColorClass(decimal value)
+    {
+        if (value > 0) return "text-danger fw-bold";
+        if (value < 0) return "text-success fw-bold";
+        return "text-secondary";
+    }
+    #endregion
+    #region Navigation
+    private void NavigateToBack()
+    {
+        #region hide [2026-09-15]
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_returnUrl))
+            {
+                NavigationManager.NavigateTo(_returnUrl, replace: true);
+                return;
+            }
+
+            var queryParams = new Dictionary<string, object?>
+            {
+                ["level"] = (int)_level
+            };
+
+            if (_targetId > 0)
+                queryParams["id"] = DataProtection.Protect(_targetId);
+
+            // [2026-09-25][Gemini] นำทางกลับไปยังหน้าจอ Digital Verification Workbench (V2)
+            var url = NavigationManager.GetUriWithQueryParameters("/reports/cfo-reports2", queryParams);
+            NavigationManager.NavigateTo(url, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error navigating back from AddEditCfoReport.");
+            NavigationManager.NavigateTo("/reports/cfo-reports2");
+        }
+        #endregion
+    }
+
+    // [2026-09-18][Claude] หยุด loop ไต่ตัวเลขเมื่อผู้ใช้ออกจากหน้า กัน task ค้างหลัง circuit ปิด
+    public void Dispose()
+    {
+        StopProgressCreep();
+    }
+
+    private void NavigateToTopics()
+    {
+        #region hide [2026-09-15]
+        var queryParams = new Dictionary<string, object?>
+        {
+            ["level"] = (int)_level
+        };
+        if (_targetId > 0) queryParams["id"] = DataProtection.Protect(_targetId);
+        var url = NavigationManager.GetUriWithQueryParameters("/library/activity-topics", queryParams);
+        NavigationManager.NavigateTo(url);
+        #endregion
+    }
+    #endregion
+    #endregion
+}

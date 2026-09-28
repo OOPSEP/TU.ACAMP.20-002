@@ -1,0 +1,44 @@
+[
+  {
+    "Id": "10000000-0000-0000-0000-000000000001",
+    "UserName": "admin@acamp.com",
+    "Email": "admin@acamp.com",
+    "Password": "1234"
+  },
+  {
+    "Id": "10000000-0000-0000-0000-000000000002",
+    "UserName": "demo-001@acamp.com",
+    "Email": "demo-001@acamp.com",
+    "Password": "1234"
+  },
+  {
+    "Id": "10000000-0000-0000-0000-000000000003",
+    "UserName": "demo-002@acamp.com",
+    "Email": "demo-002@acamp.com",
+    "Password": "1234"
+  },
+  {
+    "Id": "10000000-0000-0000-0000-000000000004",
+    "UserName": "demo-003@acamp.com",
+    "Email": "demo-003@acamp.com",
+    "Password": "1234"
+  },
+  {
+    "Id": "10000000-0000-0000-0000-000000000005",
+    "UserName": "demo-004@acamp.com",
+    "Email": "demo-004@acamp.com",
+    "Password": "1234"
+  },
+  {
+    "Id": "10000000-0000-0000-0000-000000000006",
+    "UserName": "demo-005@acamp.com",
+    "Email": "demo-005@acamp.com",
+    "Password": "1234"
+  },
+  {
+    "Id": "10000000-0000-0000-0000-000000000007",
+    "UserName": "patipath.eia@nectec.or.th",
+    "Email": "patipath.eia@nectec.or.th",
+    "Password": "1234"
+  }
+]

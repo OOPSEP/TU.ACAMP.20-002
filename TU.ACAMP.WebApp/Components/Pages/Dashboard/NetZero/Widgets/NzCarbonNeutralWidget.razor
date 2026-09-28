@@ -1,0 +1,34 @@
+@* [2026-09-26][Claude] Carbon Neutral — เครดิตที่ต้องใช้ต่อปี (= ยอด Gross ปีนั้น) แยกค่าจริง / ค่าคาดการณ์
+   แยกจากกราฟ Net-Zero เพราะ Carbon Neutral ชดเชยยอดคงเหลือทั้งหมดด้วยเครดิตได้ ส่วน Net-Zero (SBTi) ต้องลดจริงก่อน *@
+@using System.Globalization
+@using TU.ACAMP.WebApp.Services.Dashboard
+
+<RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100">
+    <h6 class="fw-bold text-dark mb-1">Carbon Neutral: Credits Required per Year</h6>
+    <span class="small text-muted d-block mb-2">
+        To claim carbon neutrality, retire credits equal to the year's remaining emissions (Scope 1+2+3). Projected years are estimates.
+    </span>
+    @if (!Data.CreditYearItems.Any())
+    {
+        <div class="text-center text-muted py-5 small">Not enough complete-year data.</div>
+    }
+    else
+    {
+        <RadzenChart Style="width: 100%; height: 300px;">
+            <RadzenStackedColumnSeries Data="@Data.CreditYearItems" CategoryProperty="YearLabel" ValueProperty="ActualTon" Title="Required (actual)" Fill="@Dashboard2Colors.Total" />
+            <RadzenStackedColumnSeries Data="@Data.CreditYearItems" CategoryProperty="YearLabel" ValueProperty="ProjectedTon" Title="Required (projected)" Fill="#94a3b8" />
+            <RadzenValueAxis Min="0" Formatter="@FormatTon">
+                <RadzenGridLines Visible="true" />
+                <RadzenAxisTitle Text="tCO₂e" />
+            </RadzenValueAxis>
+            <RadzenLegend Position="LegendPosition.Bottom" />
+        </RadzenChart>
+        <small class="text-muted d-block mt-1">Retired credit tracking is not available yet — coverage vs. retired credits will be shown once credits are recorded.</small>
+    }
+</RadzenCard>
+
+@code {
+    [Parameter, EditorRequired] public NetZeroDashboardResult Data { get; set; } = new();
+
+    private static string FormatTon(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture).ToString("N2");
+}

@@ -1,0 +1,303 @@
+@using TU.ACAMP.Domain.Enums
+@using TU.ACAMP.WebApp.Constants
+@using TU.ACAMP.WebApp.Services.Reports
+
+@* [2026-09-15][Antigravity] Step 6 Fr-04.1 Inventory Widget: บัญชีรายการข้อมูลกิจกรรมและปริมาณการปล่อย GHG *@
+@* [2026-09-17][Claude] แสดง "แถวที่จะถูกเขียนลงชีตจริง" ตามอัลกอริทึมเดียวกับ PopulateFr04Sheet/PopulateScopeBlock
+   (แถวเริ่มของแต่ละบล็อก, ปริมาณที่ปรับแล้ว = Quantity x Ratio x Share%, แถวรวมส่วนเกินเมื่อเกินโควตา)
+   เพื่อให้ตัวเลขบนจอกับในไฟล์ตรงกันเสมอ *@
+
+<RadzenStack Gap="1.25rem" Class="pt-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">
+                Sheet Fr-04.1: GHG Inventory — Calculate Year (@SelectedCalculateYear)
+            </RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                Line-by-line activity schedule exported to Sheet Fr-04.1. All activity items are preserved 100% with dynamic row insertion.
+            </RadzenText>
+        </div>
+        <RadzenButton Text="Manage Topics" Icon="open_in_new" ButtonStyle="ButtonStyle.Light"
+                      Variant="Variant.Outlined" Size="ButtonSize.Small"
+                      Click="@OnNavigateToTopics" Style="border-radius: 6px;" />
+    </div>
+
+    <!-- Scope Block Summary with Dynamic Row Status -->
+    <div class="row g-3">
+        @foreach (var block in DynamicBlocks)
+        {
+            var lines = GetBlockLines(block.Key);
+            <div class="col-6 col-md-3">
+                <RadzenCard Class="shadow-sm border rounded-3 p-3 h-100 border-start border-4 border-primary bg-white">
+                    <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+                        @block.Title (Rows @block.StartRow–@block.EndRow)
+                    </RadzenText>
+                    <div class="d-flex align-items-baseline gap-1">
+                        <RadzenText TextStyle="TextStyle.H6" Class="fw-bold mb-0">@lines.Count</RadzenText>
+                        <span class="text-muted small">items</span>
+                    </div>
+                    <div class="small mt-1">
+                        <span class="text-muted">Total </span>
+                        <span class="fw-semibold font-monospace">@lines.Sum(l => l.Total_tCO2e).ToString("N3")</span>
+                        <span class="text-muted"> tCO₂e</span>
+                    </div>
+                    @if (lines.Count > block.DefaultCapacity)
+                    {
+                        <div class="small text-primary fw-medium mt-1">
+                            <RadzenIcon Icon="add_circle" Style="font-size: 14px; vertical-align: -2px;" />
+                            +@(lines.Count - block.DefaultCapacity) auto-inserted rows
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="small text-muted mt-1">
+                            Within default template slots
+                        </div>
+                    }
+                </RadzenCard>
+            </div>
+        }
+    </div>
+
+    @if (PlannedRows.Any())
+    {
+        <RadzenDataGrid Data="@PlannedRows" TItem="PlannedRow" AllowPaging="true" PageSize="20"
+                        AllowSorting="false" GridLines="DataGridGridLines.Both" Density="Density.Compact"
+                        Style="@GridStyles.Default">
+            <Columns>
+                <RadzenDataGridColumn TItem="PlannedRow" Title="Row" Width="60px" TextAlign="TextAlign.Center">
+                    <Template Context="item">
+                        <span class="font-monospace">@item.SheetRow</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="Block" Width="105px" TextAlign="TextAlign.Center">
+                    <Template Context="item">
+                        <span class="badge @GetBlockBadgeClass(item.BlockKey)">@item.BlockTitle</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="B: Activity / Emission source" MinWidth="240px">
+                    <Template Context="item">
+                        <span class="fw-bold text-dark d-block">@item.Description</span>
+                        <small class="text-muted">Source: @item.SourceName</small>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="C: Unit" Width="90px" TextAlign="TextAlign.Center">
+                    <Template Context="item">@item.UnitName</Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="D: Adjusted qty" Width="135px" TextAlign="TextAlign.Right">
+                    <Template Context="item">
+                        <span class="font-monospace">@item.AdjustedQuantity.ToString("N2")</span>
+                        @if (item.HasAdjustment)
+                        {
+                            <small class="text-muted d-block">raw @item.RawQuantity.ToString("N2") x @item.Ratio.ToString("0.####") x @item.SharePercent.ToString("0.##")%</small>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="Q: EF (kgCO₂e/Unit)" Width="150px" TextAlign="TextAlign.Right">
+                    <Template Context="item">
+                        @if (item.IsScope1)
+                        {
+                            <small class="text-muted">Formula from E–N</small>
+                        }
+                        else
+                        {
+                            <span class="font-monospace">@item.EF.ToString("N4")</span>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="AO: Emissions (tCO₂e)" Width="150px" TextAlign="TextAlign.Right">
+                    <Template Context="item">
+                        <span class="fw-bold text-danger font-monospace">@item.Total_tCO2e.ToString("N3")</span>
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="PlannedRow" Title="R–Z: EF Source" MinWidth="160px">
+                    <Template Context="item">
+                        @foreach (var mark in item.SourceMarks)
+                        {
+                            <span class="badge bg-light text-secondary border me-1 mb-1">@mark</span>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+            Scope 1: Specific greenhouse gas factor columns E–N (CO₂, Fossil CH₄, CH₄, N₂O, SF₆, NF₃, HFCs, PFCs with GWP multipliers) dynamically compute Column Q. |
+            Scope 2/3: EF is recorded directly in Column Q. | All rows dynamically compute AO = D &times; Q / 1000.
+        </RadzenAlert>
+    }
+    else
+    {
+        <div class="py-4 text-center bg-light rounded-3 border border-dashed">
+            <p class="text-muted mb-0">No activity data recorded for Calculate Year @SelectedCalculateYear.</p>
+        </div>
+    }
+</RadzenStack>
+
+@code {
+    [Parameter] public int SelectedCalculateYear { get; set; }
+    [Parameter] public CfoReportService.CfoAuditReportDto? CalcReport { get; set; }
+    [Parameter] public EventCallback OnNavigateToTopics { get; set; }
+
+    /// <summary>[2026-09-25][Antigravity] Dynamic scope block definition reflecting bottom-up row insertion</summary>
+    public class DynamicBlockDef
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public int StartRow { get; set; }
+        public int EndRow { get; set; }
+        public int DefaultCapacity { get; set; }
+    }
+
+    /// <summary>Represents an activity row exported to sheet Fr-04.1</summary>
+    public class PlannedRow
+    {
+        public int SheetRow { get; set; }
+        public string BlockKey { get; set; } = string.Empty;
+        public string BlockTitle { get; set; } = string.Empty;
+        public bool IsScope1 { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string SourceName { get; set; } = string.Empty;
+        public string UnitName { get; set; } = string.Empty;
+        public decimal RawQuantity { get; set; }
+        public decimal Ratio { get; set; } = 1m;
+        public decimal SharePercent { get; set; } = 100m;
+        public decimal AdjustedQuantity { get; set; }
+        public decimal EF { get; set; }
+        public decimal Total_tCO2e { get; set; }
+        public List<string> SourceMarks { get; set; } = new();
+        public bool HasAdjustment => Ratio != 1m || SharePercent != 100m;
+    }
+
+    private List<CfoReportService.ActivityAuditLineDto> GetBlockLines(string blockKey)
+    {
+        var lines = CalcReport?.AuditLines;
+        if (lines == null) return new List<CfoReportService.ActivityAuditLineDto>();
+
+        return blockKey switch
+        {
+            "S1"  => lines.Where(l => l.ScopeNo == eTgoScopeNo.Scope1).ToList(),
+            "SEP" => lines.Where(l => (int)l.ScopeNo == 4).ToList(),
+            "S2"  => lines.Where(l => l.ScopeNo == eTgoScopeNo.Scope2).ToList(),
+            "S3"  => lines.Where(l => l.ScopeNo == eTgoScopeNo.Scope3).ToList(),
+            _     => new List<CfoReportService.ActivityAuditLineDto>()
+        };
+    }
+
+    private List<DynamicBlockDef> DynamicBlocks
+    {
+        get
+        {
+            var s1Lines = GetBlockLines("S1");
+            var sepLines = GetBlockLines("SEP");
+            var s2Lines = GetBlockLines("S2");
+            var s3Lines = GetBlockLines("S3");
+
+            int s1RowCount = Math.Max(14, s1Lines.Count);
+            int sepRowCount = Math.Max(5, sepLines.Count);
+            int s2RowCount = Math.Max(4, s2Lines.Count);
+            int s3RowCount = Math.Max(7, s3Lines.Count);
+
+            int s1Start = 10;
+            int s1End = s1Start + s1RowCount - 1;
+            int s1Total = s1End + 1;
+
+            int sepStart = s1Total + 1;
+            int sepEnd = sepStart + sepRowCount - 1;
+            int sepTotal = sepEnd + 1;
+
+            int s2Start = sepTotal + 1;
+            int s2End = s2Start + s2RowCount - 1;
+            int s2Total = s2End + 1;
+
+            int s3Start = s2Total + 1;
+            int s3End = s3Start + s3RowCount - 1;
+
+            return new List<DynamicBlockDef>
+            {
+                new() { Key = "S1",  Title = "Scope 1",   StartRow = s1Start,  EndRow = s1End,  DefaultCapacity = 14 },
+                new() { Key = "SEP", Title = "Separate",  StartRow = sepStart, EndRow = sepEnd, DefaultCapacity = 5 },
+                new() { Key = "S2",  Title = "Scope 2",   StartRow = s2Start,  EndRow = s2End,  DefaultCapacity = 4 },
+                new() { Key = "S3",  Title = "Scope 3",   StartRow = s3Start,  EndRow = s3End,  DefaultCapacity = 7 }
+            };
+        }
+    }
+
+    /// <summary>
+    /// [2026-09-25][Antigravity] List every activity line with 100% detail matching dynamic row layout in CfoReportService
+    /// </summary>
+    private List<PlannedRow> PlannedRows
+    {
+        get
+        {
+            var result = new List<PlannedRow>();
+            if (CalcReport?.AuditLines == null || !CalcReport.AuditLines.Any()) return result;
+
+            var blocks = DynamicBlocks;
+            foreach (var block in blocks)
+            {
+                var lines = GetBlockLines(block.Key);
+                bool isScope1 = block.Key == "S1";
+
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    var line = lines[i];
+                    result.Add(new PlannedRow
+                    {
+                        SheetRow = block.StartRow + i,
+                        BlockKey = block.Key,
+                        BlockTitle = block.Title,
+                        IsScope1 = isScope1,
+                        Description = $"{line.ActivityGroupCode} - {line.TopicTitle}",
+                        SourceName = $"{line.SourceName} ({line.ActivityGroupTitle})",
+                        UnitName = line.UnitName,
+                        RawQuantity = line.Quantity,
+                        Ratio = line.Ratio,
+                        SharePercent = line.SharePercent,
+                        AdjustedQuantity = line.ConvertedQuantity,
+                        EF = line.EF,
+                        Total_tCO2e = line.Total_tCO2e,
+                        SourceMarks = GetSourceMarks(line)
+                    });
+                }
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>EF Source columns (R..Z)</summary>
+    private static List<string> GetSourceMarks(CfoReportService.ActivityAuditLineDto line)
+    {
+        var marks = new List<string>();
+        if (line.SrcSelfCollect) marks.Add("R Self");
+        if (line.SrcSupplier)    marks.Add("S Supplier");
+        if (line.SrcThLciDb)     marks.Add("T TH LCI");
+        if (line.SrcTgoEf)       marks.Add("U TGO EF");
+        if (line.SrcThaiRes)     marks.Add("V Thai Res.");
+        if (line.SrcIntDb)       marks.Add("W Int. DB");
+        if (line.SrcOther)       marks.Add("X Other");
+
+        if (marks.Count == 0) marks.Add("X Other");
+        if (line.SrcSubstitute) marks.Add("Y Substitute");
+        return marks;
+    }
+
+    private static string GetBlockBadgeClass(string blockKey)
+    {
+        return blockKey switch
+        {
+            "S1"  => "bg-danger-subtle text-danger border",
+            "S2"  => "bg-primary-subtle text-primary border",
+            "S3"  => "bg-info-subtle text-info border",
+            _     => "bg-secondary-subtle text-secondary border"
+        };
+    }
+}

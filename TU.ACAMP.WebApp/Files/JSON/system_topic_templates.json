@@ -1,0 +1,9 @@
+[
+  {
+    "Title": "การใช้น้ำมันดีเซลสำหรับเครื่องกำเนิดไฟฟ้าสำรอง (Emergency Generator Diesel)",
+    "GroupCode": "0101",
+    "SourceKeywords": [ "Diesel B7", "Diesel" ],
+    "MonthlyBaseQty": 1200.0,
+    "MonthlyVariance": 300.0
+  } 
+]

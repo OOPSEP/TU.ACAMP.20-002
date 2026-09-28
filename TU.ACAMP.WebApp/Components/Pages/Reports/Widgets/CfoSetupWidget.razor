@@ -1,0 +1,168 @@
+@using TU.ACAMP.Domain.Enums
+
+@* [2026-09-15][Antigravity] Step 1 Setup Widget: Target organization level, periods, consolidation, and materiality *@
+
+<RadzenStack Gap="1.25rem" Class="pt-3">
+    <div>
+        <RadzenText TextStyle="TextStyle.Subtitle1" Class="fw-bold mb-0">Report Scope &amp; Target Organization</RadzenText>
+        <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mb-0">
+            Specify the target organization level, reporting periods, and consolidation approach.
+        </RadzenText>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-md-4">
+            <RadzenFormField Text="Organization Level *" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenDropDown Data="@LevelOptions" TextProperty="Text" ValueProperty="Value"
+                                Value="@((int)Level)"
+                                ValueChanged="@((int v) => OnLevelSelect(v))"
+                                TValue="int" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+        <div class="col-12 col-md-8">
+            <RadzenFormField Text="Target Organization *" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenDropDown Data="@TargetOptions" TextProperty="Text" ValueProperty="Value"
+                                Value="@TargetId"
+                                ValueChanged="@((int v) => OnTargetSelect(v))"
+                                AllowFiltering="true" TValue="int" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+    </div>
+
+    @if (InScopeChildOptions != null && InScopeChildOptions.Any())
+    {
+        <div class="row g-3">
+            <div class="col-12">
+                <RadzenFormField Text="@(Level == eTopicLevel.Corporate ? "In-Scope Subsidiaries (Companies)" : "In-Scope Facilities")"
+                                 Variant="Variant.Outlined" Style="width: 100%;">
+                    <RadzenDropDown Data="@InScopeChildOptions" TextProperty="Text" ValueProperty="Value"
+                                    Multiple="true" AllowClear="true" Chips="true" AllowFiltering="true"
+                                    FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                    Value="@SelectedInScopeChildIds"
+                                    ValueChanged="@((IEnumerable<int> vals) => SelectedInScopeChildIdsChanged.InvokeAsync(vals))"
+                                    Placeholder="All subsidiary entities included by default"
+                                    TValue="IEnumerable<int>" Style="width: 100%;" />
+                </RadzenFormField>
+                <div class="form-text text-muted mt-1" style="font-size: 0.8rem;">
+                    Select specific @(Level == eTopicLevel.Corporate ? "companies" : "facilities") to include within this audit boundary. Leave all selected or clear to include all.
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="row g-3">
+        <div class="col-12 col-md-7">
+            <RadzenFormField Text="Report Title *" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenTextBox Value="@Title" ValueChanged="@TitleChanged" Placeholder="e.g. GHG Emissions Report Year 2026" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+        <div class="col-12 col-md-5">
+            <RadzenFormField Text="Preparer / Lead Verifier" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenTextBox Value="@CreatedBy" ValueChanged="@CreatedByChanged" Placeholder="e.g. Lead GHG Auditor" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-md-6">
+            <RadzenFormField Text="Calculate Year *" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenDropDown Data="@CalculateYearOptions"
+                                Value="@SelectedCalculateYear"
+                                ValueChanged="@((int v) => SelectedCalculateYearChanged.InvokeAsync(v))"
+                                Placeholder="@(CalculateYearOptions.Any() ? "Select Calculate Year" : "No activity data found")"
+                                TValue="int" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+        <div class="col-12 col-md-6">
+            <RadzenFormField Text="Base Year" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenDropDown Data="@BaseYearOptions" TextProperty="Text" ValueProperty="Value"
+                                Value="@SelectedBaseYear"
+                                ValueChanged="@((int v) => SelectedBaseYearChanged.InvokeAsync(v))"
+                                TValue="int" Style="width: 100%;" />
+            </RadzenFormField>
+            @* [2026-09-18][Claude] รายการปีฐานมาจากปีที่มีข้อมูลกิจกรรมจริงและต้องน้อยกว่าปีคำนวณเท่านั้น *@
+            @if (BaseYearOptions.Count() <= 1)
+            {
+                <RadzenText TextStyle="TextStyle.Caption" Class="text-muted mt-1 d-block">
+                    ไม่มีปีก่อนหน้าที่มีข้อมูลกิจกรรม — ระบบจะใช้ปีคำนวณเป็นปีฐาน
+                </RadzenText>
+            }
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-md-6">
+            <RadzenFormField Text="Consolidation Approach" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenDropDown Data="@ConsolidationOptions" Value="@ConsolidationApproach"
+                                ValueChanged="@ConsolidationApproachChanged"
+                                TValue="string" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+        <div class="col-12 col-md-6">
+            <RadzenFormField Text="Materiality Threshold (%)" Variant="Variant.Outlined" Style="width: 100%;">
+                <RadzenNumeric Value="@MaterialityThreshold" ValueChanged="@MaterialityThresholdChanged"
+                               Min="0" Max="100" Step="0.5" TValue="decimal" Style="width: 100%;" />
+            </RadzenFormField>
+        </div>
+    </div>
+</RadzenStack>
+
+@code {
+    // [2026-09-15][Antigravity] Parameters for Step 1 Setup Widget
+    [Parameter] public eTopicLevel Level { get; set; } = eTopicLevel.Corporate;
+    [Parameter] public EventCallback<eTopicLevel> LevelChanged { get; set; }
+
+    [Parameter] public int TargetId { get; set; }
+    [Parameter] public EventCallback<int> TargetIdChanged { get; set; }
+
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> TitleChanged { get; set; }
+
+    [Parameter] public string CreatedBy { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> CreatedByChanged { get; set; }
+
+    [Parameter] public int SelectedCalculateYear { get; set; }
+    [Parameter] public EventCallback<int> SelectedCalculateYearChanged { get; set; }
+
+    [Parameter] public int SelectedBaseYear { get; set; }
+    [Parameter] public EventCallback<int> SelectedBaseYearChanged { get; set; }
+
+    [Parameter] public string ConsolidationApproach { get; set; } = "Operational Control";
+    [Parameter] public EventCallback<string> ConsolidationApproachChanged { get; set; }
+
+    [Parameter] public decimal MaterialityThreshold { get; set; } = 5.0m;
+    [Parameter] public EventCallback<decimal> MaterialityThresholdChanged { get; set; }
+
+    [Parameter] public IEnumerable<OptionItemDto> LevelOptions { get; set; } = Enumerable.Empty<OptionItemDto>();
+    [Parameter] public IEnumerable<OptionItemDto> TargetOptions { get; set; } = Enumerable.Empty<OptionItemDto>();
+    // [2026-09-16][Antigravity] In-Scope child entities options and selected IDs
+    [Parameter] public IEnumerable<OptionItemDto> InScopeChildOptions { get; set; } = Enumerable.Empty<OptionItemDto>();
+    [Parameter] public IEnumerable<int> SelectedInScopeChildIds { get; set; } = Enumerable.Empty<int>();
+    [Parameter] public EventCallback<IEnumerable<int>> SelectedInScopeChildIdsChanged { get; set; }
+
+    [Parameter] public IEnumerable<int> CalculateYearOptions { get; set; } = Enumerable.Empty<int>();
+    [Parameter] public IEnumerable<OptionItemDto> BaseYearOptions { get; set; } = Enumerable.Empty<OptionItemDto>();
+    [Parameter] public IEnumerable<string> ConsolidationOptions { get; set; } = new[] { "Operational Control", "Financial Control", "Equity Share" };
+
+    private async Task OnLevelSelect(int val)
+    {
+        var newLevel = val switch
+        {
+            2 => eTopicLevel.Company,
+            3 => eTopicLevel.Facility,
+            _ => eTopicLevel.Corporate
+        };
+        await LevelChanged.InvokeAsync(newLevel);
+    }
+
+    private async Task OnTargetSelect(int val)
+    {
+        await TargetIdChanged.InvokeAsync(val);
+    }
+
+    public class OptionItemDto
+    {
+        public int Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+}

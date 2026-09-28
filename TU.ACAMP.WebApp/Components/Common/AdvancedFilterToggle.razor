@@ -1,0 +1,40 @@
+@* [2026-09-26][Claude] ปุ่มมาตรฐานสำหรับเปิด/ปิด Advanced Filter ใช้ร่วมกันทุกหน้า
+   - ปิดอยู่: "Advanced" + icon tune | เปิดอยู่: "Less" + icon expand_less
+   - มีตัวกรองขั้นสูงค้างอยู่ขณะพับ: ปุ่มเป็นสี Info + badge "Active"
+   - Size: Medium สำหรับ toolbar สูง 40px (.acamp-filter-bar), Small สำหรับ toolbar แบบ compact *@
+
+<RadzenButton Text="@(IsExpanded ? "Less" : "Advanced")"
+              Icon="@(IsExpanded ? "expand_less" : "tune")"
+              ButtonStyle="@(HasActive && !IsExpanded ? ButtonStyle.Info : ButtonStyle.Light)"
+              Variant="Variant.Filled"
+              Size="@Size"
+              Click="@(() => OnToggle.InvokeAsync())"
+              Style="@($"border-radius: 6px; font-weight: 600; {Style}")"
+              title="@Title" />
+@if (HasActive && !IsExpanded)
+{
+    <span class="badge rounded-pill bg-warning text-dark border border-light shadow-sm ms-1"
+          style="font-size: 0.7rem;" title="@ActiveTooltip">
+        Active
+    </span>
+}
+
+@code {
+    /// <summary>สถานะแผง Advanced Filter กำลังเปิดอยู่หรือไม่</summary>
+    [Parameter] public bool IsExpanded { get; set; }
+
+    /// <summary>มีค่า Advanced Filter ที่ไม่ใช่ค่า default ค้างอยู่หรือไม่</summary>
+    [Parameter] public bool HasActive { get; set; }
+
+    /// <summary>callback เมื่อกดปุ่ม (ให้หน้าเรียก toggle state ของตัวเอง)</summary>
+    [Parameter] public EventCallback OnToggle { get; set; }
+
+    [Parameter] public ButtonSize Size { get; set; } = ButtonSize.Medium;
+
+    /// <summary>style เพิ่มเติม เช่น height ให้เท่ากับคอนโทรลอื่นใน toolbar</summary>
+    [Parameter] public string? Style { get; set; }
+
+    [Parameter] public string Title { get; set; } = "Toggle advanced filter criteria";
+
+    [Parameter] public string ActiveTooltip { get; set; } = "Advanced filters are active";
+}

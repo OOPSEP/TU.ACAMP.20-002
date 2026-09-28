@@ -1,0 +1,43 @@
+@* [2026-09-26][Claude] W2 — ยอดจริงรายปี vs เส้นเป้าหมาย (เส้นตรง) vs เส้นคาดการณ์ (least squares จากปีที่ครบปี) *@
+@using System.Globalization
+@using TU.ACAMP.WebApp.Services.Dashboard
+
+<RadzenCard Class="shadow-sm border rounded-3 bg-white p-3 h-100">
+    <h6 class="fw-bold text-dark mb-1">Net-Zero Pathway: Actual vs Target (@Data.BaseYear → @Data.TargetYear)</h6>
+    <span class="small text-muted d-block mb-2">Gross emissions (Scope 1+2+3). Projection is a linear estimate from complete years.</span>
+    @if (!Data.ActualSeries.Any())
+    {
+        <div class="text-center text-muted py-5 small">No activity data.</div>
+    }
+    else
+    {
+        @if (!Data.BaseYearHasData)
+        {
+            <div class="alert alert-warning py-2 small mb-2">Base year @Data.BaseYear has no activity data — target line is hidden.</div>
+        }
+        <RadzenChart Style="width: 100%; height: 340px;">
+            <RadzenColumnSeries Data="@Data.ActualSeries" CategoryProperty="YearLabel" ValueProperty="Value" Title="Actual" Fill="@Dashboard2Colors.Total" />
+            @if (Data.TargetSeries.Any())
+            {
+                <RadzenLineSeries Data="@Data.TargetSeries" CategoryProperty="YearLabel" ValueProperty="Value" Title="Target" Stroke="@Dashboard2Colors.Target" StrokeWidth="3">
+                    <RadzenMarkers MarkerType="MarkerType.Circle" />
+                </RadzenLineSeries>
+            }
+            @if (Data.ProjectionSeries.Any())
+            {
+                <RadzenLineSeries Data="@Data.ProjectionSeries" CategoryProperty="YearLabel" ValueProperty="Value" Title="Projection (estimate)" Stroke="#64748b" LineType="LineType.Dashed" StrokeWidth="2" />
+            }
+            <RadzenValueAxis Min="0" Formatter="@FormatTon">
+                <RadzenGridLines Visible="true" />
+                <RadzenAxisTitle Text="tCO₂e" />
+            </RadzenValueAxis>
+            <RadzenLegend Position="LegendPosition.Bottom" />
+        </RadzenChart>
+    }
+</RadzenCard>
+
+@code {
+    [Parameter, EditorRequired] public NetZeroDashboardResult Data { get; set; } = new();
+
+    private static string FormatTon(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture).ToString("N2");
+}
