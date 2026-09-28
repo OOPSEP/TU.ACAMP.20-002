@@ -34,13 +34,18 @@ public class SubscriptionService : BaseService
     public async Task<List<TbSubscription>> GetAllAsync(
         bool includeUsers = false,
         bool includeCorporates = false,
-        bool includeInactive = false)
+        bool includeInactive = false,
+        bool includeDeleted = false)
     {
         #region hide [2026-08-15]
         try
         {
             using var context = await CreateContextAsync();
-            var query = context.Subscriptions.Where(s => !s.IsDeleted);
+            // [2026-09-28][Claude] includeDeleted = true จะรวม Subscription ที่ถูก Soft Delete (ต้อง IgnoreQueryFilters เพราะมี global filter !IsDeleted)
+            //     Users / Corporates ที่ Include ยังกรอง !IsDeleted ตามเดิม
+            var query = includeDeleted
+                ? context.Subscriptions.IgnoreQueryFilters()
+                : context.Subscriptions.Where(s => !s.IsDeleted);
 
             if (includeUsers)
             {
@@ -81,7 +86,8 @@ public class SubscriptionService : BaseService
         bool isSubscriptionManager = false,
         bool includeUsers = false,
         bool includeCorporates = false,
-        bool includeInactive = false)
+        bool includeInactive = false,
+        bool includeDeleted = false)
     {
         #region hide [2026-08-15]
         if (string.IsNullOrWhiteSpace(email) && !isAdmin && !isSubscriptionManager) return new List<TbSubscription>();
@@ -91,9 +97,10 @@ public class SubscriptionService : BaseService
             using var context = await CreateContextAsync();
 
             // 1. ถ้าเป็น System Administrator หรือ Subscription Manager ให้ดึงทั้งหมด
+            // [2026-09-28][Claude] includeDeleted มีผลเฉพาะ Admin / Subscription Manager — User ทั่วไปไม่เห็น Subscription ที่ถูกลบ
             if (isAdmin || isSubscriptionManager)
             {
-                return await GetAllAsync(includeUsers, includeCorporates, includeInactive);
+                return await GetAllAsync(includeUsers, includeCorporates, includeInactive, includeDeleted);
             }
 
             var lowerEmail = email.Trim().ToLowerInvariant();

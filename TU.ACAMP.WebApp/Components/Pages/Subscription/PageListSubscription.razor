@@ -67,6 +67,14 @@
                                     @bind-Value="@_selectedPlanFilter"
                                     @bind-Value:after="@FilterSubscriptions" />
                 </RadzenFormField>
+                @* [2026-09-28][Claude] แสดง Subscription ที่ถูกลบ (Soft Delete) ร่วมด้วย — เฉพาะ Admin / Subscription Manager *@
+                @if (_isAdmin || _isSubscriptionManager)
+                {
+                    <div class="d-flex align-items-center gap-2 pb-2">
+                        <RadzenSwitch @bind-Value="@_showDeleted" @bind-Value:after="@OnShowDeletedChangedAsync" Name="showDeletedSwitch" />
+                        <RadzenLabel Text="Show Deleted" Component="showDeletedSwitch" class="text-muted small mb-0" />
+                    </div>
+                }
             </div>
         </div>
     </RadzenCard>
@@ -97,6 +105,7 @@
                                 AllowSorting="true" ColumnWidth="180px" PagerHorizontalAlign="HorizontalAlign.Right" ShowPagingSummary="true"
                                 Style="@GridStyles.Default"
                                 Page="@OnPageChanged"
+                                RowRender="@OnRowRender"
                                 RowDoubleClick="@((DataGridRowMouseEventArgs<TbSubscription> args) => OnRowDoubleClick(args.Data))">
                     <Columns>
                         @if (Env.IsDevelopment() || _isAdmin)
@@ -114,7 +123,14 @@
                         <RadzenDataGridColumn TItem="TbSubscription" Title="Subscription / Tenant" Property="Title" MinWidth="240px">
                             <Template Context="item">
                                 <div>
-                                    <RadzenText Text="@item.Title" TextStyle="TextStyle.Subtitle1" class="fw-bold text-primary mb-0 cursor-pointer" @onclick="@(() => NavigateToView(item))" />
+                                    @if (item.IsDeleted)
+                                    {
+                                        <RadzenText Text="@item.Title" TextStyle="TextStyle.Subtitle1" class="fw-bold text-muted mb-0 text-decoration-line-through" />
+                                    }
+                                    else
+                                    {
+                                        <RadzenText Text="@item.Title" TextStyle="TextStyle.Subtitle1" class="fw-bold text-primary mb-0 cursor-pointer" @onclick="@(() => NavigateToView(item))" />
+                                    }
                                     <div class="d-flex align-items-center gap-2 mt-1">
                                         <span class="text-muted small">Tax ID: <b>@(string.IsNullOrEmpty(item.TaxId) ? "-" : item.TaxId)</b></span>
                                         <RadzenBadge Text="@item.OwnerType.ToString()" BadgeStyle="BadgeStyle.Light" IsPill="true" Style="font-size: 0.7rem;" />
@@ -195,7 +211,17 @@
                         <RadzenDataGridColumn TItem="TbSubscription" Title="Status & Validity" Width="170px" TextAlign="TextAlign.Center">
                             <Template Context="item">
                                 <div>
-                                    @if (!item.IsActive)
+                                    @if (item.IsDeleted)
+                                    {
+                                        <RadzenBadge Text="Deleted" BadgeStyle="BadgeStyle.Dark" IsPill="true" class="mb-1" />
+                                        @if (item.DeletedAt.HasValue)
+                                        {
+                                            <div class="small text-muted mt-1">
+                                                Deleted: @item.DeletedAt.Value.ToString("dd/MM/yyyy")
+                                            </div>
+                                        }
+                                    }
+                                    else if (!item.IsActive)
                                     {
                                         <RadzenBadge Text="Inactive" BadgeStyle="BadgeStyle.Secondary" IsPill="true" class="mb-1" />
                                     }
@@ -208,10 +234,13 @@
                                         <RadzenBadge Text="Active" BadgeStyle="BadgeStyle.Success" IsPill="true" class="mb-1" />
                                     }
 
-                                    <div class="small text-muted mt-1">
-                                        Expires: @item.ExpiryDate.ToString("dd/MM/yyyy")
-                                    </div>
-                                    @if (item.IsActive && !item.IsExpired)
+                                    @if (!item.IsDeleted)
+                                    {
+                                        <div class="small text-muted mt-1">
+                                            Expires: @item.ExpiryDate.ToString("dd/MM/yyyy")
+                                        </div>
+                                    }
+                                    @if (!item.IsDeleted && item.IsActive && !item.IsExpired)
                                     {
                                         var daysLeft = (int)item.GetRemainingDays();
                                         <span class="badge bg-light text-primary border mt-1 small" style="font-size: 0.7rem;">
@@ -225,6 +254,13 @@
                         <!-- Action Buttons -->
                         <RadzenDataGridColumn TItem="TbSubscription" Title="Actions" Width="145px" TextAlign="TextAlign.Center" Sortable="false">
                             <Template Context="item">
+                                @* [2026-09-28][Claude] รายการที่ถูกลบแล้วไม่มีปุ่ม View / Edit / Delete (GetByIdAsync ไม่คืน Subscription ที่ถูกลบ) *@
+                                @if (item.IsDeleted)
+                                {
+                                    <span class="text-muted small">-</span>
+                                }
+                                else
+                                {
                                 <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Gap="0.25rem">
                                     <RadzenButton Icon="visibility"
                                                   ButtonStyle="ButtonStyle.Info"
@@ -254,6 +290,7 @@
                                                       Style="border-radius: 6px;" />
                                     }
                                 </RadzenStack>
+                                }
                             </Template>
                         </RadzenDataGridColumn>
                     </Columns>
@@ -273,6 +310,7 @@
     private string _selectedStatusFilter = "All Statuses";
     private string _selectedPlanFilter = "All Plans";
     private bool _isLoading = true;
+    private bool _showDeleted = false;
     private bool _isAdmin = false;
     private bool _isSubscriptionManager = false;
     private string _currentUserEmail = string.Empty;
@@ -296,6 +334,9 @@
     [SupplyParameterFromQuery(Name = "plan")]
     public string? SecureQueryPlan { get; set; }
 
+    [SupplyParameterFromQuery(Name = "deleted")]
+    public string? SecureQueryShowDeleted { get; set; }
+
     [SupplyParameterFromQuery(Name = "page")]
     public string? SecureQueryPageIndex { get; set; }
 
@@ -311,6 +352,8 @@
     {
         #region hide [2026-08-15]
         await CheckUserRoleAsync();
+        // [2026-09-28][Claude] อ่านสถานะ Show Deleted จาก query ก่อนโหลดข้อมูล เพื่อไม่ต้องโหลดซ้ำ
+        _showDeleted = DataProtection.UnprotectInt(SecureQueryShowDeleted) == 1;
         await LoadDataAsync();
         #endregion
     }
@@ -354,7 +397,14 @@
             _currentPageIndex = decryptedPageIndex.Value;
         }
 
-        if (stateChanged && _allItems.Any())
+        // [2026-09-28][Claude] Show Deleted เปลี่ยนต้องโหลดข้อมูลจาก DB ใหม่ (ไม่ใช่แค่กรองในหน่วยความจำ)
+        var decryptedShowDeleted = DataProtection.UnprotectInt(SecureQueryShowDeleted) == 1;
+        if (_showDeleted != decryptedShowDeleted)
+        {
+            _showDeleted = decryptedShowDeleted;
+            await LoadDataAsync();
+        }
+        else if (stateChanged && _allItems.Any())
         {
             FilterSubscriptions();
         }
@@ -392,7 +442,7 @@
     private void OnRowDoubleClick(TbSubscription item)
     {
         #region hide [2026-08-15]
-        if (item == null) return;
+        if (item == null || item.IsDeleted) return;
         if (_isAdmin || _editableSubscriptionIds.Contains(item.Id))
         {
             NavigateToEdit(item);
@@ -437,7 +487,8 @@
                 isSubscriptionManager: _isSubscriptionManager,
                 includeUsers: true,
                 includeCorporates: true,
-                includeInactive: true);
+                includeInactive: true,
+                includeDeleted: _showDeleted && (_isAdmin || _isSubscriptionManager));
 
             _editableSubscriptionIds = await SubscriptionService.GetEditableSubscriptionIdsAsync(_currentUserEmail, _isAdmin, _isSubscriptionManager);
 
@@ -490,6 +541,30 @@
         #endregion
     }
 
+    /// <summary>
+    /// [2026-09-28][Claude] เปิด/ปิดการแสดง Subscription ที่ถูกลบ — โหลดข้อมูลใหม่จาก DB และกลับไปหน้าแรกของ Grid
+    /// </summary>
+    private async Task OnShowDeletedChangedAsync()
+    {
+        #region hide [2026-09-28]
+        _currentPageIndex = 0;
+        await LoadDataAsync();
+        #endregion
+    }
+
+    /// <summary>
+    /// [2026-09-28][Claude] แถวที่ถูกลบแสดงแบบจางเพื่อแยกจากรายการปกติ
+    /// </summary>
+    private void OnRowRender(RowRenderEventArgs<TbSubscription> args)
+    {
+        #region hide [2026-09-28]
+        if (args.Data != null && args.Data.IsDeleted)
+        {
+            args.Attributes["style"] = "opacity: 0.6;";
+        }
+        #endregion
+    }
+
     private BadgeStyle GetPlanBadgeStyle(eSubscriptionPlan plan)
     {
         #region hide [2026-08-15]
@@ -517,6 +592,9 @@
 
         if (!string.IsNullOrWhiteSpace(_selectedPlanFilter) && _selectedPlanFilter != "All Plans")
             queryParams["plan"] = DataProtection.Protect(_selectedPlanFilter);
+
+        if (_showDeleted)
+            queryParams["deleted"] = DataProtection.Protect(1);
 
         if (_currentPageIndex > 0)
             queryParams["page"] = DataProtection.Protect(_currentPageIndex);
